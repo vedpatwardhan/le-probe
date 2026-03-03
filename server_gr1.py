@@ -1,4 +1,3 @@
-
 import zmq
 import msgpack
 import torch
@@ -28,6 +27,7 @@ def patched_check_attn(self, attn_implementation, is_init_check):
 
 
 PreTrainedModel._check_and_adjust_attn_implementation = patched_check_attn
+
 
 # -----------------------------------------------------------------------------
 # 2. UNIFIED MODEL SERVER (Simplified Inference Logic)
@@ -120,7 +120,6 @@ class GR00TInferenceServer:
         with open(log_file, "w") as f:
             json.dump(history, f, indent=2)
 
-
     def run(self, host="0.0.0.0"):
         context = zmq.Context()
         socket = context.socket(zmq.REP)
@@ -158,16 +157,21 @@ class GR00TInferenceServer:
                 all_images_t = torch.as_tensor(all_imgs_np, dtype=torch.uint8).permute(
                     0, 3, 1, 2
                 )
-                image_head_t, image_world_left_t, image_world_right_t, image_world_center_t = all_images_t
+                (
+                    image_head_t,
+                    image_world_left_t,
+                    image_world_right_t,
+                    image_world_center_t,
+                ) = all_images_t
 
                 # Create 64-dim state (Rosetta Protocol 🧪)
                 state_full = np.zeros(64, dtype=np.float32)
-                state_full[0:7] = state_np[0:7]         # Left Arm
-                state_full[7:13] = state_np[7:13]       # Left Hand
-                state_full[19:22] = state_np[13:16]     # Neck/Head
-                state_full[22:29] = state_np[16:23]     # Right Arm
-                state_full[29:35] = state_np[23:29]     # Right Hand
-                state_full[41:44] = state_np[29:32]     # Waist
+                state_full[0:7] = state_np[0:7]  # Left Arm
+                state_full[7:13] = state_np[7:13]  # Left Hand
+                state_full[19:22] = state_np[13:16]  # Neck/Head
+                state_full[22:29] = state_np[16:23]  # Right Arm
+                state_full[29:35] = state_np[23:29]  # Right Hand
+                state_full[41:44] = state_np[29:32]  # Waist
                 state_t = torch.tensor(state_full, dtype=torch.float32)
 
                 # Prepared batch for preprocessor

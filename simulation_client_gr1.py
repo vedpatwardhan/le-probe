@@ -1,4 +1,3 @@
-
 import numpy as np
 import genesis as gs
 import rerun as rr
@@ -169,7 +168,7 @@ class GR1Simulation:
         client = GR1Client()
         rr.init("gr1_sim", spawn=False)
         rr.connect_grpc(
-            "rerun+http://uwgcv-103-96-40-120.a.free.pinggy.link:46403/proxy"
+            "rerun+http://wtnwo-103-96-40-120.a.free.pinggy.link:41009/proxy"
         )
         logging.info(f"Starting Multi-Step Inference Task: {instruction}")
 

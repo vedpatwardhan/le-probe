@@ -1,4 +1,3 @@
-
 import numpy as np
 import xml.etree.ElementTree as ET
 import os
@@ -58,6 +57,14 @@ COMPACT_WIRE_JOINTS = (
     + R_HAND_NAMES  # 23-28
     + WAIST_NAMES  # 29-31
 )
+FROZEN_JOINTS = {
+    "head_pitch_joint": 0.0,
+    "head_roll_joint": 0.0,
+    "head_yaw_joint": 0.0,
+    "waist_yaw_joint": 0.0,
+    "waist_pitch_joint": 0.8,
+    "waist_roll_joint": 0.0,
+}
 
 CAMERA_ATTACH_LINK = "head_pitch_link"
 
@@ -65,6 +72,7 @@ CAMERA_ATTACH_LINK = "head_pitch_link"
 URDF_PATH = "/content/gr1_assets/urdf/gr1t2_fourier_hand_6dof.urdf"
 if not os.path.exists(URDF_PATH):
     URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/repos/Wiki-GRx-Models/GRX/GR1/gr1t2/urdf/gr1t2_fourier_hand_6dof.urdf"
+
 
 # -----------------------------------------------------------------------------
 # PHYSICAL BONES (Dynamic Sync 🔗)
@@ -87,8 +95,14 @@ def get_urdf_limits(urdf_path, joint_names):
         if j.find("limit") is not None
     }
 
-    mins = [joint_db.get(j, (0.0, 0.0))[0] for j in joint_names]
-    maxs = [joint_db.get(j, (0.0, 0.0))[1] for j in joint_names]
+    mins = [
+        joint_db.get(j, (0.0, 0.0))[0] if j not in FROZEN_JOINTS else FROZEN_JOINTS[j]
+        for j in joint_names
+    ]
+    maxs = [
+        joint_db.get(j, (0.0, 0.0))[1] if j not in FROZEN_JOINTS else FROZEN_JOINTS[j]
+        for j in joint_names
+    ]
     return np.array(mins, dtype=np.float32), np.array(maxs, dtype=np.float32)
 
 

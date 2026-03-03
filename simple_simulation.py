@@ -12,6 +12,7 @@ from gr1_config import (
     JOINT_LIMITS_MAX,
     CAMERA_ATTACH_LINK,
 )
+
 URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/repos/Wiki-GRx-Models/GRX/GR1/gr1t2/urdf/gr1t2_fourier_hand_6dof.urdf"
 
 # -----------------------------------------------------------------------------

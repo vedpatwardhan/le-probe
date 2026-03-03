@@ -82,7 +82,9 @@ def visualize_log(log_path="run_logs/15/inference_history.json"):
                 min_v, max_v, _ = JOINT_STATS[idx]
                 denom = max_v - min_v
                 if "left" not in name and denom > 0:
-                    final_actions.append(min_v + ((actions[:, idx] + 1.0) / 2.0) * denom)
+                    final_actions.append(
+                        min_v + ((actions[:, idx] + 1.0) / 2.0) * denom
+                    )
                     final_joints.append(name)
             final_actions = np.array(final_actions).T
             print(final_actions[0])
