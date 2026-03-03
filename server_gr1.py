@@ -155,10 +155,10 @@ class GR00TInferenceServer:
                         image_world_center_np,
                     ]
                 )
-                all_imgs_t = torch.as_tensor(all_imgs_np, dtype=torch.uint8).permute(
+                all_images_t = torch.as_tensor(all_imgs_np, dtype=torch.uint8).permute(
                     0, 3, 1, 2
                 )
-                img_head_t, img_left_t, img_right_t, img_center_t = all_imgs_t
+                image_head_t, image_left_t, image_right_t, image_center_t = all_images_t
 
                 # Create 64-dim state (Rosetta Protocol 🧪)
                 state_full = np.zeros(64, dtype=np.float32)

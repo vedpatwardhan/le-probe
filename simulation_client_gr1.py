@@ -169,7 +169,7 @@ class GR1Simulation:
         client = GR1Client()
         rr.init("gr1_sim", spawn=False)
         rr.connect_grpc(
-            "rerun+http://xyuvr-103-96-40-120.a.free.pinggy.link:43779/proxy"
+            "rerun+http://uwgcv-103-96-40-120.a.free.pinggy.link:46403/proxy"
         )
         logging.info(f"Starting Multi-Step Inference Task: {instruction}")
 
