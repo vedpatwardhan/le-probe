@@ -200,22 +200,22 @@ class GR1Simulation:
 
             # Execution: Inner Loop (16 actions, 10 physics steps each)
             for action_idx, action in enumerate(actions):
-                self.apply_action_32(action)
+                self.apply_action_32(np.array(action))
 
-                # Step physics for 0.1s (100 steps @ 1000Hz)
-                for _ in range(100):
+                # Step physics for 0.1s (10 steps @ 100Hz)
+                for _ in range(10):
                     self.scene.step()
 
-                # Render & Log ALL cameras to Rerun after every action step
-                self.cam.move_to_attach()
-                rgb_ego_step, _, _, _ = self.cam.render()
-                rgb_left_step, _, _, _ = self.world_cam_left.render()
-                rgb_right_step, _, _, _ = self.world_cam_right.render()
-                rgb_center_step, _, _, _ = self.world_cam_center.render()
-                rr.log("egocentric", rr.Image(rgb_ego_step[..., :3]))
-                rr.log("world_left", rr.Image(rgb_left_step[..., :3]))
-                rr.log("world_right", rr.Image(rgb_right_step[..., :3]))
-                rr.log("world_center", rr.Image(rgb_center_step[..., :3]))
+                    # Render & Log ALL cameras to Rerun after every action step
+                    self.cam.move_to_attach()
+                    rgb_ego_step, _, _, _ = self.cam.render()
+                    rgb_left_step, _, _, _ = self.world_cam_left.render()
+                    rgb_right_step, _, _, _ = self.world_cam_right.render()
+                    rgb_center_step, _, _, _ = self.world_cam_center.render()
+                    rr.log("egocentric", rr.Image(rgb_ego_step[..., :3]))
+                    rr.log("world_left", rr.Image(rgb_left_step[..., :3]))
+                    rr.log("world_right", rr.Image(rgb_right_step[..., :3]))
+                    rr.log("world_center", rr.Image(rgb_center_step[..., :3]))
 
                 # Log progress
                 if (cycle * 16 + action_idx) % 10 == 0:
