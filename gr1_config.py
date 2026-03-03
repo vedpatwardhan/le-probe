@@ -63,7 +63,8 @@ CAMERA_ATTACH_LINK = "head_pitch_link"
 
 # Central URDF Path
 URDF_PATH = "/content/gr1_assets/urdf/gr1t2_fourier_hand_6dof.urdf"
-# URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/repos/Wiki-GRx-Models/GRX/GR1/gr1t2/urdf/gr1t2_fourier_hand_6dof.urdf"
+if not os.path.exists(URDF_PATH):
+    URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/repos/Wiki-GRx-Models/GRX/GR1/gr1t2/urdf/gr1t2_fourier_hand_6dof.urdf"
 
 # -----------------------------------------------------------------------------
 # PHYSICAL BONES (Dynamic Sync 🔗)

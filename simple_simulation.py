@@ -4,12 +4,13 @@ import rerun as rr
 import zmq
 import msgpack
 import logging
-import os
+from scipy.spatial.transform import Rotation as R
 import torch
 from gr1_config import (
     COMPACT_WIRE_JOINTS,
-    JOINT_STATS,
-    # URDF_PATH,
+    JOINT_LIMITS_MIN,
+    JOINT_LIMITS_MAX,
+    CAMERA_ATTACH_LINK,
 )
 URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/repos/Wiki-GRx-Models/GRX/GR1/gr1t2/urdf/gr1t2_fourier_hand_6dof.urdf"
 
@@ -26,12 +27,10 @@ class GR1Simulation:
         # Initialize Genesis
         gs.init(backend=gs.gpu)
 
+        # Create Scene
         self.scene = gs.Scene(
             show_viewer=False,
-            sim_options=gs.options.SimOptions(dt=0.01, substeps=10),
-            viewer_options=gs.options.ViewerOptions(
-                res=(1280, 720), camera_pos=(2.0, 1.5, 1.5), camera_lookat=(0, 0, 0.8)
-            ),
+            sim_options=gs.options.SimOptions(dt=0.01, substeps=4),
             vis_options=gs.options.VisOptions(
                 lights=[
                     {
@@ -45,21 +44,45 @@ class GR1Simulation:
             renderer=gs.renderers.Rasterizer(),
         )
 
-        # Entities
+        # Add entities
         self.plane = self.scene.add_entity(gs.morphs.Plane())
         self.robot = self.scene.add_entity(
-            gs.morphs.URDF(file=urdf_path, fixed=True, pos=(0, 0, 0.95))
+            gs.morphs.URDF(file=urdf_path, pos=(-0.3, 0, 0.95), fixed=True)
+        )
+        self.table = self.scene.add_entity(
+            gs.morphs.Box(pos=(0.45, 0, 0.4), size=(0.4, 0.8, 0.8), fixed=True)
+        )
+        self.cube = self.scene.add_entity(
+            gs.morphs.Box(pos=(0.45, -0.1, 0.82), size=(0.04, 0.04, 0.04), fixed=False),
+            surface=gs.surfaces.Default(color=(1, 0, 0)),
         )
 
-        # World Cameras (Diagnostic)
+        # Add egocentric camera
+        head_link = self.robot.get_link(CAMERA_ATTACH_LINK)
+        self.cam = self.scene.add_camera(res=(224, 224), fov=90)
+
+        # Tilt the egocentric camera towards the cube
+        rot = (
+            np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]])
+            @ R.from_euler("x", -15, degrees=True).as_matrix()
+        )
+        offset_T = np.eye(4)
+        offset_T[:3, :3] = rot
+        offset_T[:3, 3] = [0.12, 0.0, 0.08]
+        self.cam.attach(head_link, offset_T=offset_T)
+
+        # Add cameras for left, right and center views
         self.world_cam_left = self.scene.add_camera(
-            res=(224, 224), fov=60, pos=(1.2, -1.2, 1.2), lookat=(0, 0, 0.8)
+            res=(224, 224), fov=60, pos=(1.0, -1.0, 1.2), lookat=(0, 0, 0.8)
         )
         self.world_cam_right = self.scene.add_camera(
-            res=(224, 224), fov=60, pos=(1.2, 1.2, 1.2), lookat=(0, 0, 0.8)
+            res=(224, 224), fov=60, pos=(1.0, 1.0, 1.2), lookat=(0, 0, 0.8)
+        )
+        self.world_cam_center = self.scene.add_camera(
+            res=(224, 224), fov=60, pos=(1.0, 0.0, 1.2), lookat=(0, 0, 0.8)
         )
 
-        # Build Scene
+        # Build the scene
         self.scene.build()
 
         # Gains & Control
@@ -84,8 +107,7 @@ class GR1Simulation:
                 continue
 
             # Unnormalize the target for this specific joint
-            print(idx)
-            limit_min, limit_max, _ = JOINT_STATS[idx]
+            limit_min, limit_max = JOINT_LIMITS_MIN[idx], JOINT_LIMITS_MAX[idx]
             val = np.clip(val, -1.0, 1.0)
             target_rad = (val + 1.0) / 2.0 * (limit_max - limit_min) + limit_min
 
@@ -124,10 +146,16 @@ class GR1Simulation:
 
                 # Render & Log periodically (every 10 steps) to show motion
                 if i % 10 == 0:
-                    rgb_left, _, _, _ = self.world_cam_left.render()
-                    rgb_right, _, _, _ = self.world_cam_right.render()
-                    rr.log("world_left", rr.Image(rgb_left[..., :3]))
-                    rr.log("world_right", rr.Image(rgb_right[..., :3]))
+                    # Render & Log ALL cameras to Rerun after every action step
+                    self.cam.move_to_attach()
+                    rgb_ego_step, _, _, _ = self.cam.render()
+                    rgb_left_step, _, _, _ = self.world_cam_left.render()
+                    rgb_right_step, _, _, _ = self.world_cam_right.render()
+                    rgb_center_step, _, _, _ = self.world_cam_center.render()
+                    rr.log("egocentric", rr.Image(rgb_ego_step[..., :3]))
+                    rr.log("world_left", rr.Image(rgb_left_step[..., :3]))
+                    rr.log("world_right", rr.Image(rgb_right_step[..., :3]))
+                    rr.log("world_center", rr.Image(rgb_center_step[..., :3]))
 
 
 if __name__ == "__main__":
