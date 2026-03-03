@@ -81,7 +81,7 @@ class GR1Simulation:
         # Add entities
         self.plane = self.scene.add_entity(gs.morphs.Plane())
         self.robot = self.scene.add_entity(
-            gs.morphs.URDF(file=urdf_path, pos=(-0.3, 0, 0.95), fixed=True)
+            gs.morphs.URDF(file=urdf_path, pos=(-0.2, 0, 0.95), fixed=True)
         )
         self.table = self.scene.add_entity(
             gs.morphs.Box(pos=(0.45, 0, 0.4), size=(0.4, 0.8, 0.8), fixed=True)
