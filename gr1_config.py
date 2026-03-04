@@ -61,9 +61,9 @@ FROZEN_JOINTS = {
     "head_pitch_joint": 0.0,
     "head_roll_joint": 0.0,
     "head_yaw_joint": 0.0,
-    "waist_yaw_joint": 0.0,
-    "waist_pitch_joint": 0.9,
-    "waist_roll_joint": 0.0,
+    # "waist_yaw_joint": 0.0,
+    # "waist_pitch_joint": 0.9,
+    # "waist_roll_joint": 0.0,
 }
 
 CAMERA_ATTACH_LINK = "head_pitch_link"

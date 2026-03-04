@@ -198,7 +198,7 @@ class GR00TInferenceServer:
                 print("   [DEBUG] Running Model Inference...")
                 with torch.inference_mode():
                     action_chunk = self.policy.predict_action_chunk(processed_batch)
-                actions_np = action_chunk[0].cpu().numpy()[:8]  # (16, 32) --> (8, 32)
+                actions_np = action_chunk[0].cpu().numpy()[:1]  # (16, 32) --> (1, 32)
                 inference_time = time.time() - start_time
                 print(f"   [DEBUG] Inference Time: {inference_time:.2f} seconds")
 
