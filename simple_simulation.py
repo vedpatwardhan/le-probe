@@ -58,21 +58,10 @@ class GR1Simulation:
             surface=gs.surfaces.Default(color=(1, 0, 0)),
         )
 
-        # Zoomed-in camera (closer to fingers)
-        wrist_link = self.robot.get_link(CAMERA_ATTACH_LINK)
-        self.cam = self.scene.add_camera(res=(224, 224), fov=90)
-
-        # Move camera further down the hand and tilt more steeply
-        # rot = (
-        #     np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]])
-        #     @ R.from_euler("x", -20, degrees=True).as_matrix()
-        # )
-        offset_T = np.eye(4)
-        # offset_T[:3, :3] = rot
-        # offset_T[:3, 3] = [0.15, 0.0, 0.04] # Deeper into the workspace
-        self.cam.attach(wrist_link, offset_T=offset_T)
-
-        # Add cameras for left, right and center views
+        # Add cameras for top, left, right and center views
+        self.world_cam_top = self.scene.add_camera(
+            res=(224, 224), fov=60, pos=(0.3, 0, 1.8), lookat=(0.3, 0, 0.8)
+        )
         self.world_cam_left = self.scene.add_camera(
             res=(224, 224), fov=60, pos=(1.0, -1.0, 1.2), lookat=(0, 0, 0.8)
         )
@@ -147,12 +136,11 @@ class GR1Simulation:
                 # Render & Log periodically (every 10 steps) to show motion
                 if i % 10 == 0:
                     # Render & Log ALL cameras to Rerun after every action step
-                    self.cam.move_to_attach()
-                    rgb_ego_step, _, _, _ = self.cam.render()
+                    rgb_top_step, _, _, _ = self.world_cam_top.render()
                     rgb_left_step, _, _, _ = self.world_cam_left.render()
                     rgb_right_step, _, _, _ = self.world_cam_right.render()
                     rgb_center_step, _, _, _ = self.world_cam_center.render()
-                    rr.log("egocentric", rr.Image(rgb_ego_step[..., :3]))
+                    rr.log("world_top", rr.Image(rgb_top_step[..., :3]))
                     rr.log("world_left", rr.Image(rgb_left_step[..., :3]))
                     rr.log("world_right", rr.Image(rgb_right_step[..., :3]))
                     rr.log("world_center", rr.Image(rgb_center_step[..., :3]))
