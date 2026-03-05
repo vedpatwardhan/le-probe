@@ -91,19 +91,19 @@ class GR1Simulation:
             surface=gs.surfaces.Default(color=(1, 0, 0)),
         )
 
-        # Add egocentric camera
-        head_link = self.robot.get_link(CAMERA_ATTACH_LINK)
+        # Zoomed-in camera (closer to fingers)
+        wrist_link = self.robot.get_link(CAMERA_ATTACH_LINK)
         self.cam = self.scene.add_camera(res=(224, 224), fov=90)
 
-        # Tilt the egocentric camera towards the cube
+        # Move camera further down the hand and tilt more steeply
         rot = (
             np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]])
-            @ R.from_euler("x", -15, degrees=True).as_matrix()
+            @ R.from_euler("x", -20, degrees=True).as_matrix()
         )
         offset_T = np.eye(4)
         offset_T[:3, :3] = rot
-        offset_T[:3, 3] = [0.12, 0.0, 0.08]
-        self.cam.attach(head_link, offset_T=offset_T)
+        offset_T[:3, 3] = [0.15, 0.0, 0.04]  # Deeper into the workspace
+        self.cam.attach(wrist_link, offset_T=offset_T)
 
         # Add cameras for left, right and center views
         self.world_cam_left = self.scene.add_camera(
@@ -168,7 +168,7 @@ class GR1Simulation:
         client = GR1Client()
         rr.init("gr1_sim", spawn=False)
         rr.connect_grpc(
-            "rerun+http://mxytx-103-96-40-121.a.free.pinggy.link:38665/proxy"
+            "rerun+http://ccici-103-96-40-121.a.free.pinggy.link:35035/proxy"
         )
         logging.info(f"Starting Multi-Step Inference Task: {instruction}")
 
@@ -206,7 +206,6 @@ class GR1Simulation:
                     self.scene.step()
 
                     # Render & Log ALL cameras to Rerun after every action step
-                    self.cam.move_to_attach()
                     rgb_ego_step, _, _, _ = self.cam.render()
                     rgb_left_step, _, _, _ = self.world_cam_left.render()
                     rgb_right_step, _, _, _ = self.world_cam_right.render()
@@ -215,6 +214,8 @@ class GR1Simulation:
                     rr.log("world_left", rr.Image(rgb_left_step[..., :3]))
                     rr.log("world_right", rr.Image(rgb_right_step[..., :3]))
                     rr.log("world_center", rr.Image(rgb_center_step[..., :3]))
+
+                self.cam.move_to_attach()
 
                 # Log progress
                 if (cycle * 16 + action_idx) % 10 == 0:

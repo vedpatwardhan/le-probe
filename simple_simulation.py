@@ -58,19 +58,19 @@ class GR1Simulation:
             surface=gs.surfaces.Default(color=(1, 0, 0)),
         )
 
-        # Add egocentric camera
-        head_link = self.robot.get_link(CAMERA_ATTACH_LINK)
+        # Zoomed-in camera (closer to fingers)
+        wrist_link = self.robot.get_link(CAMERA_ATTACH_LINK)
         self.cam = self.scene.add_camera(res=(224, 224), fov=90)
 
-        # Tilt the egocentric camera towards the cube
-        rot = (
-            np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]])
-            @ R.from_euler("x", -15, degrees=True).as_matrix()
-        )
+        # Move camera further down the hand and tilt more steeply
+        # rot = (
+        #     np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]])
+        #     @ R.from_euler("x", -20, degrees=True).as_matrix()
+        # )
         offset_T = np.eye(4)
-        offset_T[:3, :3] = rot
-        offset_T[:3, 3] = [0.12, 0.0, 0.08]
-        self.cam.attach(head_link, offset_T=offset_T)
+        # offset_T[:3, :3] = rot
+        # offset_T[:3, 3] = [0.15, 0.0, 0.04] # Deeper into the workspace
+        self.cam.attach(wrist_link, offset_T=offset_T)
 
         # Add cameras for left, right and center views
         self.world_cam_left = self.scene.add_camera(
@@ -115,7 +115,6 @@ class GR1Simulation:
             joint = self.robot.get_joint(joint_name)
             target_q[joint.dofs_idx_local[0]] = target_rad
 
-        print(target_q)
         self.robot.control_dofs_position(target_q)
 
     def run(self, port=5556):
