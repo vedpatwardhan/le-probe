@@ -51,10 +51,10 @@ class GR1Simulation:
             gs.morphs.URDF(file=urdf_path, pos=(-0.2, 0, 0.95), fixed=True)
         )
         self.table = self.scene.add_entity(
-            gs.morphs.Box(pos=(0.45, 0, 0.4), size=(0.4, 0.8, 0.8), fixed=True)
+            gs.morphs.Box(pos=(0.45, 0, 0.4), size=(0.4, 0.5, 0.8), fixed=True)
         )
         self.cube = self.scene.add_entity(
-            gs.morphs.Box(pos=(0.45, -0.1, 0.82), size=(0.04, 0.04, 0.04), fixed=False),
+            gs.morphs.Box(pos=(0.45, -0.2, 0.82), size=(0.04, 0.04, 0.04), fixed=False),
             surface=gs.surfaces.Default(color=(1, 0, 0)),
         )
 

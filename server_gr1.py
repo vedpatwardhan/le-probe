@@ -138,7 +138,7 @@ class GR00TInferenceServer:
                 unpack_np = lambda d: (
                     np.frombuffer(d["data"], dtype=d["dtype"]).reshape(d["shape"])
                 )
-                image_head_np = unpack_np(req.get("head"))
+                image_world_top_np = unpack_np(req.get("world_top"))
                 image_world_left_np = unpack_np(req.get("world_left"))
                 image_world_right_np = unpack_np(req.get("world_right"))
                 image_world_center_np = unpack_np(req.get("world_center"))
@@ -148,7 +148,7 @@ class GR00TInferenceServer:
                 # Transform images ((224, 224, 3) -> (3, 224, 224))
                 all_imgs_np = np.stack(
                     [
-                        image_head_np,
+                        image_world_top_np,
                         image_world_left_np,
                         image_world_right_np,
                         image_world_center_np,
@@ -158,7 +158,7 @@ class GR00TInferenceServer:
                     0, 3, 1, 2
                 )
                 (
-                    image_head_t,
+                    image_world_top_t,
                     image_world_left_t,
                     image_world_right_t,
                     image_world_center_t,
@@ -176,7 +176,7 @@ class GR00TInferenceServer:
 
                 # Prepared batch for preprocessor
                 batch = {
-                    f"{OBS_IMAGES}.head": image_head_t,
+                    f"{OBS_IMAGES}.world_top": image_world_top_t,
                     f"{OBS_IMAGES}.world_left": image_world_left_t,
                     f"{OBS_IMAGES}.world_right": image_world_right_t,
                     f"{OBS_IMAGES}.world_center": image_world_center_t,
@@ -198,7 +198,7 @@ class GR00TInferenceServer:
                 print("   [DEBUG] Running Model Inference...")
                 with torch.inference_mode():
                     action_chunk = self.policy.predict_action_chunk(processed_batch)
-                actions_np = action_chunk[0].cpu().numpy()[:1]  # (16, 32) --> (1, 32)
+                actions_np = action_chunk[0].cpu().numpy()  # (16, 32)
                 inference_time = time.time() - start_time
                 print(f"   [DEBUG] Inference Time: {inference_time:.2f} seconds")
 
