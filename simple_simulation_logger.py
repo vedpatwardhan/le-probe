@@ -64,7 +64,8 @@ class GR1SimulationLogger:
         return normalized_state
 
     def apply_action_32(self, action_32):
-        target_q = self.robot.get_dofs_position().cpu().numpy()
+        target_q = np.zeros(self.robot.n_dofs, dtype=np.float32)
+        # target_q = self.robot.get_dofs_position().cpu().numpy()
         for idx, joint_name in enumerate(COMPACT_WIRE_JOINTS):
             val = action_32[idx]
             if np.isnan(val):
