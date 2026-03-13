@@ -5,7 +5,6 @@ import zmq
 import msgpack
 import logging
 import torch
-import xml.etree.ElementTree as ET
 from gr1_config import COMPACT_WIRE_JOINTS, JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
 
 URDF_PATH = "./repos/Wiki-GRx-Models/GRX/GR1/gr1t2/urdf/gr1t2_fourier_hand_6dof.urdf"
@@ -86,38 +85,34 @@ class GR1Simulation:
         self.is_running = True
         self.active_joints_this_command = set()
 
-        # Pre-index mappings for speed
-        self._joint_dof_map = []
+        # Precomputed mapping from joint to dof
+        self.joint_dof_map = []
         for idx, joint_name in enumerate(COMPACT_WIRE_JOINTS):
-            try:
-                joint = self.robot.get_joint(joint_name)
-                dof_idx = joint.dofs_idx[0]
-                limit_min, limit_max = JOINT_LIMITS_MIN[idx], JOINT_LIMITS_MAX[idx]
+            joint = self.robot.get_joint(joint_name)
+            dof_idx = joint.dofs_idx[0]
+            limit_min, limit_max = JOINT_LIMITS_MIN[idx], JOINT_LIMITS_MAX[idx]
 
-                # Finger coupling
-                coupled_dofs = []
-                if "proximal" in joint_name.lower():
-                    finger_prefix = joint_name.split("_proximal")[0]
-                    for other_joint in self.robot.joints:
-                        if other_joint.name and finger_prefix in other_joint.name:
-                            if other_joint.name != joint_name and "proximal" not in other_joint.name.lower():
-                                coupled_dofs.append(other_joint.dofs_idx[0])
+            # Finger coupling
+            coupled_dofs = []
+            if "proximal" in joint_name.lower():
+                finger_prefix = joint_name.split("_proximal")[0]
+                for other_joint in self.robot.joints:
+                    if other_joint.name and finger_prefix in other_joint.name:
+                        if other_joint.name != joint_name and "proximal" not in other_joint.name.lower():
+                            coupled_dofs.append(other_joint.dofs_idx[0])
 
-                self._joint_dof_map.append({
-                    "dof_idx": dof_idx,
-                    "limits": (limit_min, limit_max),
-                    "name": joint_name,
-                    "coupled": coupled_dofs,
-                })
-            except:
-                self._joint_dof_map.append(None)
+            self.joint_dof_map.append({
+                "dof_idx": dof_idx,
+                "limits": (limit_min, limit_max),
+                "name": joint_name,
+                "coupled": coupled_dofs,
+            })
 
     def process_target_32(self, action_32):
         """Maps 32-DOF actions to targets and logs progress."""
         any_update = False
         print(f"\n[INPUT] Received ZMQ message (32 DOFs):")
-        for idx, mapping in enumerate(self._joint_dof_map):
-            if mapping is None: continue
+        for idx, mapping in enumerate(self.joint_dof_map):
             val = action_32[idx]
             if np.isnan(val): continue
 
@@ -168,9 +163,9 @@ class GR1Simulation:
                 target = np.array(data["target"], dtype=np.float32)
                 self.process_target_32(target)
 
-                # 2. Physics Burst (100 steps @ 0.01s = 1.0 second of sim-time)
-                print(f"[EXEC] Stepping physics (100Hz) for 1.0s sim-time...")
-                for i in range(100):
+                # 2. Physics Burst (200 steps @ 0.005s = 1.0 second of sim-time)
+                print(f"[EXEC] Stepping physics (200Hz) for 1.0s sim-time...")
+                for i in range(200):
                     self.robot.control_dofs_position(self.last_target_q)
                     self.scene.step()
 
@@ -190,14 +185,13 @@ class GR1Simulation:
                 print("\n[DEBUG] Command Finished. Active Joints Status:")
                 curr_q = self.robot.get_dofs_position().cpu().numpy()
                 for idx in sorted(list(self.active_joints_this_command)):
-                    mapping = self._joint_dof_map[idx]
-                    if mapping:
-                        joint_name = mapping["name"]
-                        dof_idx = mapping["dof_idx"]
-                        target = self.last_target_q[dof_idx]
-                        actual = curr_q[dof_idx]
-                        diff = actual - target
-                        print(f"  {joint_name:<30} | Tar: {target:6.3f} | Act: {actual:6.3f} | Err: {diff:6.3f}")
+                    mapping = self.joint_dof_map[idx]
+                    joint_name = mapping["name"]
+                    dof_idx = mapping["dof_idx"]
+                    target = self.last_target_q[dof_idx]
+                    actual = curr_q[dof_idx]
+                    diff = actual - target
+                    print(f"  {joint_name:<30} | Tar: {target:6.3f} | Act: {actual:6.3f} | Err: {diff:6.3f}")
                 print("------------------------------------------\n")
 
 if __name__ == "__main__":
