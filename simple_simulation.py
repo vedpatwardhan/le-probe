@@ -147,7 +147,7 @@ class GR1Simulation:
         print("  - Force: 500 Nm (MAX POWER)\n")
 
         while self.is_running:
-            # 1. Block and wait for at least one UI message
+            # Block and wait for at least one UI message
             msg = socket.recv() 
             
             # Drain buffer to get ONLY the latest message (prevents repeating old actions)
@@ -163,8 +163,8 @@ class GR1Simulation:
                 target = np.array(data["target"], dtype=np.float32)
                 self.process_target_32(target)
 
-                # 2. Physics Burst (200 steps @ 0.005s = 1.0 second of sim-time)
-                print(f"[EXEC] Stepping physics (200Hz) for 1.0s sim-time...")
+                # Physics Burst (200 steps @ 0.005s = 1.0 second of sim-time)
+                print(f"Stepping physics (200Hz) for 1.0s sim-time...")
                 for i in range(200):
                     self.robot.control_dofs_position(self.last_target_q)
                     self.scene.step()
@@ -181,8 +181,8 @@ class GR1Simulation:
                         rr.log("world_right", rr.Image(rgb_right[..., :3]))
                         rr.log("world_center", rr.Image(rgb_center[..., :3]))
 
-                # 3. Final check of positions for all joints that received input
-                print("\n[DEBUG] Command Finished. Active Joints Status:")
+                # Final check of positions for all joints that received input
+                print("\n[OUTPU] Command Finished. Active Joints Status:")
                 curr_q = self.robot.get_dofs_position().cpu().numpy()
                 for idx in sorted(list(self.active_joints_this_command)):
                     mapping = self.joint_dof_map[idx]
