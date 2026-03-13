@@ -5,6 +5,7 @@ import zmq
 import msgpack
 import logging
 import time
+import threading
 from scipy.spatial.transform import Rotation as R
 import torch
 import xml.etree.ElementTree as ET
@@ -20,7 +21,6 @@ URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/repos/Wiki-GRx-Models/GRX/GR
 # -----------------------------------------------------------------------------
 # CONFIG & LOGGING
 # -----------------------------------------------------------------------------
-# We mute logging because this script will run as a background subprocess
 logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(message)s")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -77,59 +77,21 @@ class GR1Simulation:
         # Build the scene
         self.scene.build()
 
-        # DEBUG: Print all joints found in the robot to verify naming
-        print("\n--- Genesis Robot Joint Discovery ---")
-        for i, joint in enumerate(self.robot.joints):
-            print(
-                f"[{i}] Name: {joint.name} | Type: {joint.type} | DOFs: {len(joint.dofs_idx_local)}"
-            )
-        print("--------------------------------------\n")
-
-        # Gains & Control
-        # Higher gains for major joints, lower for fingers to prevent simulation instability
-        # Arm/Body Gains
-        kp_array = np.full(self.robot.n_dofs, 450.0)
-        kv_array = np.full(self.robot.n_dofs, 45.0)
-
-        # Fingers: Extreme stiffness to overcome URDF friction/collisions
-        for joint in self.robot.joints:
-            name = joint.name
-            if name and any(
-                f in name.lower() for f in ["thumb", "index", "middle", "ring", "pinky"]
-            ):
-                for i in joint.dofs_idx:  # FIXED: Use global DOF index
-                    kp_array[i] = 5000.0
-                    kv_array[i] = 1.0
-                    print(
-                        f"[DEBUG] Finger Gain Assigned: {name} (Global DOF {i}) -> KP=5000"
-                    )
+        # Gains & Control (Stable Precision for "Ground Coverage")
+        kp_array = np.full(self.robot.n_dofs, 3500.0)
+        kv_array = np.full(self.robot.n_dofs, 150.0)
 
         self.robot.set_dofs_kp(kp_array)
         self.robot.set_dofs_kv(kv_array)
 
-        # Force Range (Effort Limits Override)
-        # The URDF has effort=0 for fingers, which blocks movement.
-        # We override this in software to give them 'muscle'.
-        force_max = np.full(self.robot.n_dofs, 100.0)  # High default for arms
+        # Force Range (Unlocking motor potential)
+        force_max = np.full(self.robot.n_dofs, 500.0) 
         force_min = -force_max
-
-        # Specific finger force range
-        for joint in self.robot.joints:
-            name = joint.name
-            if name and any(
-                f in name.lower() for f in ["thumb", "index", "middle", "ring", "pinky"]
-            ):
-                for i in joint.dofs_idx:
-                    force_max[i] = 10.0
-                    force_min[i] = -10.0
-
         self.robot.set_dofs_force_range(force_min, force_max)
 
         # Internal state
         self.target_buffer = np.full(32, np.nan, dtype=np.float32)
-        # Persistent target state (Initializes all joints to 0.0)
         self.last_target_q = np.zeros(self.robot.n_dofs, dtype=np.float32)
-
         self.is_running = True
         self.active_joints_this_command = set()
 
@@ -138,47 +100,35 @@ class GR1Simulation:
         for idx, joint_name in enumerate(COMPACT_WIRE_JOINTS):
             try:
                 joint = self.robot.get_joint(joint_name)
-                dof_idx = joint.dofs_idx[
-                    0
-                ]  # CRITICAL FIX: Use global DOF index, not local
+                dof_idx = joint.dofs_idx[0]
                 limit_min, limit_max = JOINT_LIMITS_MIN[idx], JOINT_LIMITS_MAX[idx]
 
-                # Finger coupling pre-indexing
+                # Finger coupling
                 coupled_dofs = []
                 if "proximal" in joint_name.lower():
                     finger_prefix = joint_name.split("_proximal")[0]
                     for other_joint in self.robot.joints:
                         if other_joint.name and finger_prefix in other_joint.name:
-                            if (
-                                other_joint.name != joint_name
-                                and "proximal" not in other_joint.name.lower()
-                            ):
-                                coupled_dofs.append(
-                                    other_joint.dofs_idx[0]
-                                )  # Global index here too
+                            if other_joint.name != joint_name and "proximal" not in other_joint.name.lower():
+                                coupled_dofs.append(other_joint.dofs_idx[0])
 
-                self._joint_dof_map.append(
-                    {
-                        "dof_idx": dof_idx,
-                        "limits": (limit_min, limit_max),
-                        "name": joint_name,
-                        "coupled": coupled_dofs,
-                    }
-                )
+                self._joint_dof_map.append({
+                    "dof_idx": dof_idx,
+                    "limits": (limit_min, limit_max),
+                    "name": joint_name,
+                    "coupled": coupled_dofs,
+                })
             except:
                 self._joint_dof_map.append(None)
 
     def process_target_32(self, action_32):
-        """Maps 32-DOF UI actions to the full robot target state (once per message)."""
+        """Maps 32-DOF actions to targets and logs progress."""
         any_update = False
         print(f"\n[INPUT] Received ZMQ message (32 DOFs):")
         for idx, mapping in enumerate(self._joint_dof_map):
-            if mapping is None:
-                continue
-
+            if mapping is None: continue
             val = action_32[idx]
-            if np.isnan(val):
-                continue
+            if np.isnan(val): continue
 
             self.active_joints_this_command.add(idx)
             val = np.clip(val, -1.0, 1.0)
@@ -186,25 +136,17 @@ class GR1Simulation:
             target_rad = (val + 1.0) / 2.0 * (limit_max - limit_min) + limit_min
 
             dof_idx = mapping["dof_idx"]
-            print(
-                f"  [{idx:02}] {mapping['name']:<30} | In: {val:6.3f} -> Tar: {target_rad:6.3f} rad"
-            )
+            print(f"  [{idx:02}] {mapping['name']:<30} | In: {val:6.3f} -> Tar: {target_rad:6.3f} rad")
 
             if abs(self.last_target_q[dof_idx] - target_rad) > 1e-4:
                 self.last_target_q[dof_idx] = target_rad
-                # Apply coupling
                 for c_idx in mapping["coupled"]:
                     self.last_target_q[c_idx] = target_rad
                 any_update = True
-
-        if any_update:
-            # We don't call control here; we call it inside the run loop for persistence
-            pass
-        print(f"[INPUT] Total Target State Updated: {any_update}\n")
         return any_update
 
     def run(self, port=5556):
-        """Runs the simulation as a blocking server (waits for UI input)."""
+        """Main Loop: Blocking ZMQ -> Physics Burst"""
         context = zmq.Context()
         socket = context.socket(zmq.SUB)
         socket.bind(f"tcp://127.0.0.1:{port}")
@@ -213,68 +155,49 @@ class GR1Simulation:
         rr.init("gr1_teleop", spawn=False)
         rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
 
-        print(f"Simulation Process Ready. Listening on port {port}")
-        print("Waiting for TUI command to step...")
+        print("\n🚀 BLOCKING SIMULATION RUNNING (Single-Threaded)")
+        print("  - Mode: Sequential (Draining -> Step 500 -> Wait)")
+        print("  - Gains: KP=3500, KV=150 (Stable Precision)")
+        print("  - Force: 500 Nm (MAX POWER)\n")
 
         while self.is_running:
-            # 1. Block until a new command is received
-            msg = socket.recv()
+            # 1. Block and wait for at least one UI message
+            msg = socket.recv() 
+            
+            # Drain buffer to get ONLY the latest message (prevents repeating old actions)
+            while True:
+                try:
+                    msg = socket.recv(zmq.NOBLOCK)
+                except zmq.Again:
+                    break
+            
             data = msgpack.unpackb(msg, raw=False)
             if "target" in data:
-                self.target_buffer = np.array(data["target"], dtype=np.float32)
+                self.active_joints_this_command.clear()
+                target = np.array(data["target"], dtype=np.float32)
+                self.process_target_32(target)
 
-            # 2. Process message ONCE to update the target state
-            self.active_joints_this_command.clear()
-            self.process_target_32(self.target_buffer)
+                # 2. Physics Burst (100 steps @ 0.01s = 1.0 second of sim-time)
+                print(f"[EXEC] Stepping physics (100Hz) for 1.0s sim-time...")
+                for i in range(100):
+                    self.robot.control_dofs_position(self.last_target_q)
+                    self.scene.step()
 
-            # 3. Physics Step (1000 steps @ 0.002s = 2 seconds of sim time)
-            # We call control_dofs_position EVERY step to ensure the motor stays active.
-            print(f"[EXEC] Stepping physics (500Hz) for 2.0s sim-time...")
-            for i in range(1000):
-                self.robot.control_dofs_position(self.last_target_q)
-                self.scene.step()
+                    # Render every 20 steps (~25 FPS feedback)
+                    if i % 20 == 0:
+                        rgb_top = self.world_cam_top.render()[0]
+                        rgb_left = self.world_cam_left.render()[0]
+                        rgb_right = self.world_cam_right.render()[0]
+                        rgb_center = self.world_cam_center.render()[0]
 
-                # Render & Log a few frames for visual feedback (throttled)
-                if i % 250 == 0:
-                    # Visual Render
-                    rgb_center, _, _, _ = self.world_cam_center.render()
-                    rr.log("world_center", rr.Image(rgb_center[..., :3]))
+                        rr.log("world_top", rr.Image(rgb_top[..., :3]))
+                        rr.log("world_left", rr.Image(rgb_left[..., :3]))
+                        rr.log("world_right", rr.Image(rgb_right[..., :3]))
+                        rr.log("world_center", rr.Image(rgb_center[..., :3]))
 
-                    # Progress Logging
-                    print(f"  [Step {i:04}] Progress Check:")
-                    curr_q_loop = self.robot.get_dofs_position().cpu().numpy()
-                    for idx in sorted(list(self.active_joints_this_command)):
-                        mapping = self._joint_dof_map[idx]
-                        if mapping:
-                            dof_idx = mapping["dof_idx"]
-                            act = curr_q_loop[dof_idx]
-                            tar = self.last_target_q[dof_idx]
-                            print(
-                                f"    {mapping['name']:<30} | Act: {act:6.3f} (Tar: {tar:6.3f})"
-                            )
-
-            # Final Render of ALL cameras at the end of the action
-            rgb_top, _, _, _ = self.world_cam_top.render()
-            rgb_left, _, _, _ = self.world_cam_left.render()
-            rgb_right, _, _, _ = self.world_cam_right.render()
-            rgb_center, _, _, _ = self.world_cam_center.render()
-
-            rr.log("world_top", rr.Image(rgb_top[..., :3]))
-            rr.log("world_left", rr.Image(rgb_left[..., :3]))
-            rr.log("world_right", rr.Image(rgb_right[..., :3]))
-            rr.log("world_center", rr.Image(rgb_center[..., :3]))
-
-            # Final check of positions for all joints that received input
-            print("\n[DEBUG] Command Finished. Active Joints Status:")
-            curr_q = self.robot.get_dofs_position().cpu().numpy()
-
-            if not self.active_joints_this_command:
-                print("  No joints were updated in this command.")
-            else:
-                # Get current physics state
-                curr_kp = self.robot.get_dofs_kp().cpu().numpy()
-                curr_kv = self.robot.get_dofs_kv().cpu().numpy()
-
+                # 3. Final check of positions for all joints that received input
+                print("\n[DEBUG] Command Finished. Active Joints Status:")
+                curr_q = self.robot.get_dofs_position().cpu().numpy()
                 for idx in sorted(list(self.active_joints_this_command)):
                     mapping = self._joint_dof_map[idx]
                     if mapping:
@@ -283,14 +206,8 @@ class GR1Simulation:
                         target = self.last_target_q[dof_idx]
                         actual = curr_q[dof_idx]
                         diff = actual - target
-                        kp = curr_kp[dof_idx]
-                        kv = curr_kv[dof_idx]
-                        l_min, l_max = mapping["limits"]
-                        print(
-                            f"  {joint_name:<30} | Tar: {target:6.3f} | Act: {actual:6.3f} | Err: {diff:6.3f} | KP: {kp:7.1f} | KV: {kv:5.1f}"
-                        )
-            print("------------------------------------------\n")
-
+                        print(f"  {joint_name:<30} | Tar: {target:6.3f} | Act: {actual:6.3f} | Err: {diff:6.3f}")
+                print("------------------------------------------\n")
 
 if __name__ == "__main__":
     sim = GR1Simulation()
