@@ -75,7 +75,7 @@ class GR1Simulation:
         self.robot.set_dofs_kv(kv_array)
 
         # Force Range (chosen after a lot of trial-and-error)
-        force_max = np.full(self.robot.n_dofs, 500.0) 
+        force_max = np.full(self.robot.n_dofs, 500.0)
         force_min = -force_max
         self.robot.set_dofs_force_range(force_min, force_max)
 
@@ -98,15 +98,20 @@ class GR1Simulation:
                 finger_prefix = joint_name.split("_proximal")[0]
                 for other_joint in self.robot.joints:
                     if other_joint.name and finger_prefix in other_joint.name:
-                        if other_joint.name != joint_name and "proximal" not in other_joint.name.lower():
+                        if (
+                            other_joint.name != joint_name
+                            and "proximal" not in other_joint.name.lower()
+                        ):
                             coupled_dofs.append(other_joint.dofs_idx[0])
 
-            self.joint_dof_map.append({
-                "dof_idx": dof_idx,
-                "limits": (limit_min, limit_max),
-                "name": joint_name,
-                "coupled": coupled_dofs,
-            })
+            self.joint_dof_map.append(
+                {
+                    "dof_idx": dof_idx,
+                    "limits": (limit_min, limit_max),
+                    "name": joint_name,
+                    "coupled": coupled_dofs,
+                }
+            )
 
     def process_target_32(self, action_32):
         """Maps 32-DOF actions to targets and logs progress."""
@@ -114,7 +119,8 @@ class GR1Simulation:
         print(f"\n[INPUT] Received ZMQ message (32 DOFs):")
         for idx, mapping in enumerate(self.joint_dof_map):
             val = action_32[idx]
-            if np.isnan(val): continue
+            if np.isnan(val):
+                continue
 
             self.active_joints_this_command.add(idx)
             val = np.clip(val, -1.0, 1.0)
@@ -122,7 +128,9 @@ class GR1Simulation:
             target_rad = (val + 1.0) / 2.0 * (limit_max - limit_min) + limit_min
 
             dof_idx = mapping["dof_idx"]
-            print(f"  [{idx:02}] {mapping['name']:<30} | In: {val:6.3f} -> Tar: {target_rad:6.3f} rad")
+            print(
+                f"  [{idx:02}] {mapping['name']:<30} | In: {val:6.3f} -> Tar: {target_rad:6.3f} rad"
+            )
 
             if abs(self.last_target_q[dof_idx] - target_rad) > 1e-4:
                 self.last_target_q[dof_idx] = target_rad
@@ -148,15 +156,15 @@ class GR1Simulation:
 
         while self.is_running:
             # Block and wait for at least one UI message
-            msg = socket.recv() 
-            
+            msg = socket.recv()
+
             # Drain buffer to get ONLY the latest message (prevents repeating old actions)
             while True:
                 try:
                     msg = socket.recv(zmq.NOBLOCK)
                 except zmq.Again:
                     break
-            
+
             data = msgpack.unpackb(msg, raw=False)
             if "target" in data:
                 self.active_joints_this_command.clear()
@@ -191,8 +199,11 @@ class GR1Simulation:
                     target = self.last_target_q[dof_idx]
                     actual = curr_q[dof_idx]
                     diff = actual - target
-                    print(f"  {joint_name:<30} | Tar: {target:6.3f} | Act: {actual:6.3f} | Err: {diff:6.3f}")
+                    print(
+                        f"  {joint_name:<30} | Tar: {target:6.3f} | Act: {actual:6.3f} | Err: {diff:6.3f}"
+                    )
                 print("------------------------------------------\n")
+
 
 if __name__ == "__main__":
     sim = GR1Simulation()

@@ -15,8 +15,9 @@ from textual.containers import Vertical, Horizontal, ScrollableContainer
 from gr1_config import COMPACT_WIRE_JOINTS
 
 import multiprocessing.resource_tracker
-# Hack: macOS Python 3.12 has a bug where `multiprocessing.spawn` crashes if there are 
-# complex file descriptors open (like Textual's UI pipes and zmq). Since huggingface `datasets` 
+
+# Hack: macOS Python 3.12 has a bug where `multiprocessing.spawn` crashes if there are
+# complex file descriptors open (like Textual's UI pipes and zmq). Since huggingface `datasets`
 # lazily triggers the resource_tracker when saving the episode later, we pre-warm it here
 # at script start when the file descriptors are still clean.
 multiprocessing.resource_tracker.ensure_running()
@@ -24,6 +25,7 @@ multiprocessing.resource_tracker.ensure_running()
 # Attempt to import LeRobot (Will fail if lerobot isn't installed in the env)
 try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
     LEROBOT_AVAILABLE = True
 except ImportError:
     LEROBOT_AVAILABLE = False
@@ -32,7 +34,9 @@ except ImportError:
 class JointControl(Static):
     """A widget for controlling a single robot joint using an Input field."""
 
-    def __init__(self, joint_name: str, index: int, initial_value: float, on_change_callback):
+    def __init__(
+        self, joint_name: str, index: int, initial_value: float, on_change_callback
+    ):
         super().__init__()
         self.joint_name = joint_name
         self.index = index
@@ -111,13 +115,13 @@ class GR1TeleopLoggerApp(App):
 
     def __init__(self):
         super().__init__()
-        m.patch() # Enable msgpack to serialize numpy arrays directly
+        m.patch()  # Enable msgpack to serialize numpy arrays directly
 
         # ZMQ Setup (Publishes Actions)
         self.context = zmq.Context()
         self.socket_pub = self.context.socket(zmq.PUB)
         self.socket_pub.connect("tcp://127.0.0.1:5556")
-        
+
         # ZMQ Setup (Subscribes to Observations)
         self.socket_sub = self.context.socket(zmq.SUB)
         self.socket_sub.connect("tcp://127.0.0.1:5557")
@@ -131,23 +135,29 @@ class GR1TeleopLoggerApp(App):
         self.recording = False
         self.dataset = None
         self.recording_thread = None
-        
+
         # Typically visual observations run at a fixed fps (e.g. 10 or 30Hz)
         self.fps = 10
 
     def on_mount(self) -> None:
         self.title = "GR1 Teleop & Data Logger (Real Images Edition)"
-        
+
         if not LEROBOT_AVAILABLE:
-            self.notify("LeRobot library not found! Recording will log dummy prints.", title="Missing Dependency", severity="warning")
+            self.notify(
+                "LeRobot library not found! Recording will log dummy prints.",
+                title="Missing Dependency",
+                severity="warning",
+            )
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="selection-pane"):
             with Horizontal(classes="selection-row"):
                 yield Label("Task Instruction:", classes="instruction-label")
-                yield Input(placeholder="e.g. Pick up the red cube", id="instruction-input")
-            
+                yield Input(
+                    placeholder="e.g. Pick up the red cube", id="instruction-input"
+                )
+
             with Horizontal(classes="selection-row"):
                 yield Label("Select Joint:", classes="selection-label")
                 yield Select(
@@ -155,15 +165,27 @@ class GR1TeleopLoggerApp(App):
                     id="joint-select",
                     prompt="Pick a joint...",
                 )
-                yield Button("Add", id="add_select_btn", variant="primary", classes="btn-add")
+                yield Button(
+                    "Add", id="add_select_btn", variant="primary", classes="btn-add"
+                )
 
         with ScrollableContainer(id="joint-list"):
             pass
 
         with Horizontal(id="footer-controls"):
-            yield Button("Submit Request", id="submit_btn", variant="success", classes="btn-submit")
+            yield Button(
+                "Submit Request",
+                id="submit_btn",
+                variant="success",
+                classes="btn-submit",
+            )
             yield Static(classes="footer-spacer")
-            yield Button("Start Recording", id="record_btn", variant="error", classes="btn-record")
+            yield Button(
+                "Start Recording",
+                id="record_btn",
+                variant="error",
+                classes="btn-record",
+            )
             yield Static(classes="footer-spacer")
             yield Button("Clear All", id="clear_all_btn", variant="warning")
             yield Static(expand=True)
@@ -209,8 +231,10 @@ class GR1TeleopLoggerApp(App):
             self.target_buffer = np.copy(self.staging_buffer)
             self.send_command()
             event.button.label = "Sent!"
+
             def reset_label():
                 event.button.label = "Submit Request"
+
             threading.Timer(1.0, reset_label).start()
 
         elif event.button.id == "clear_all_btn":
@@ -218,28 +242,30 @@ class GR1TeleopLoggerApp(App):
             await self.rebuild_joint_list()
             self.target_buffer.fill(0.0)
             self.staging_buffer.fill(0.0)
-            
+
         elif event.button.id == "record_btn":
             if not self.recording:
                 self.start_recording()
                 event.button.label = "Stop Recording"
-                event.button.styles.background = "#e0af68" # Orange
+                event.button.styles.background = "#e0af68"  # Orange
             else:
                 self.stop_recording()
                 event.button.label = "Start Recording"
-                event.button.styles.background = "#f7768e" # Red
+                event.button.styles.background = "#f7768e"  # Red
 
     # ------------------ LEROBOT DATASET INTEGRATION ------------------
     def start_recording(self):
         self.recording = True
-        
+
         # 1. Initialize LeRobot Dataset Structure
         if LEROBOT_AVAILABLE:
             repo_id = "gr1_teleop_demo"
-            dataset_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "datasets", repo_id))
+            dataset_dir = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "datasets", repo_id)
+            )
             # Check if dataset already exists to resume it
             resume = os.path.exists(dataset_dir)
-            
+
             features = {
                 "observation.images.world_left": {
                     "dtype": "video",
@@ -263,19 +289,21 @@ class GR1TeleopLoggerApp(App):
                 },
                 "observation.state": {
                     "dtype": "float32",
-                    "shape": (32,),         # The proprioception vector (current joint poses)
+                    "shape": (32,),  # The proprioception vector (current joint poses)
                     "names": ["joints"],
                 },
                 "action": {
                     "dtype": "float32",
-                    "shape": (32,),         # The desired actions to reach
+                    "shape": (32,),  # The desired actions to reach
                     "names": ["joints"],
-                }
+                },
             }
-            
+
             # Retrieve the instruction to save in tasks.jsonl manually
-            self.current_task_instruction = self.query_one("#instruction-input", Input).value or "Do the task"
-            
+            self.current_task_instruction = (
+                self.query_one("#instruction-input", Input).value or "Do the task"
+            )
+
             # Either create a new dataset or load the existing one to append to it
             if not resume:
                 self.dataset = LeRobotDataset.create(
@@ -285,29 +313,35 @@ class GR1TeleopLoggerApp(App):
                     features=features,
                     use_videos=True,
                     image_writer_processes=0,  # CRITICAL: Fixes macOS multiprocessing FD error
-                    image_writer_threads=4,    # Fall back to threading
-                    batch_encoding_size=1      # Encode frame synchronously
+                    image_writer_threads=4,  # Fall back to threading
+                    batch_encoding_size=1,  # Encode frame synchronously
                 )
             else:
                 self.dataset = LeRobotDataset(
                     repo_id=repo_id,
                     root=dataset_dir,
                 )
-            
+
         # 2. Start a background loop to sample data at target FPS
-        self.recording_thread = threading.Thread(target=self._recording_loop, daemon=True)
+        self.recording_thread = threading.Thread(
+            target=self._recording_loop, daemon=True
+        )
         self.recording_thread.start()
 
     def stop_recording(self):
         self.recording = False
         if self.recording_thread:
             self.recording_thread.join()
-            
+
         if self.dataset is not None:
             # Tell the dataset this episode is over and save the parquet buffers
             self.dataset.save_episode(parallel_encoding=False)
             self.dataset.finalize()
-            self.notify("Dataset episode saved locally!", title="LeRobot", severity="information")
+            self.notify(
+                "Dataset episode saved locally!",
+                title="LeRobot",
+                severity="information",
+            )
             self.dataset = None
 
     def _recording_loop(self):
@@ -320,7 +354,7 @@ class GR1TeleopLoggerApp(App):
 
         while self.recording:
             loop_start = time.time()
-            
+
             # --- GET CURRENT STATE (Proprioception + Vision from Simulation) ---
             # Try to pull the latest frame from ZMQ without blocking forever
             try:
@@ -329,7 +363,7 @@ class GR1TeleopLoggerApp(App):
                     msg = self.socket_sub.recv(flags=zmq.NOBLOCK)
                     latest_obs = msgpack.unpackb(msg, raw=False)
             except zmq.Again:
-                pass # No more messages in queue
+                pass  # No more messages in queue
 
             if latest_obs is None:
                 # No data yet, skip recording this tick or use dummy
@@ -341,11 +375,11 @@ class GR1TeleopLoggerApp(App):
             img_left = Image.fromarray(latest_obs["world_left"])
             img_right = Image.fromarray(latest_obs["world_right"])
             img_center = Image.fromarray(latest_obs["world_center"])
-            
+
             # --- GET CURRENT ACTION ---
             # The control being currently commanded by the TUI
             current_action = np.copy(self.target_buffer)
-            
+
             # --- STORE IN DATASET ---
             if LEROBOT_AVAILABLE and self.dataset is not None:
                 frame_data = {
@@ -355,11 +389,11 @@ class GR1TeleopLoggerApp(App):
                     "observation.images.world_top": img_top,
                     "observation.state": current_state,
                     "action": current_action,
-                    "task": getattr(self, "current_task_instruction", "Do the task")
+                    "task": getattr(self, "current_task_instruction", "Do the task"),
                 }
                 # This automatically stores to an episode buffer and writes standard RLDS/Parquet formatting
                 self.dataset.add_frame(frame_data)
-                
+
             # Sleep to maintain the FPS loop strictly
             elapsed = time.time() - loop_start
             sleep_time = max(0, (1.0 / self.fps) - elapsed)
