@@ -4,19 +4,11 @@ import rerun as rr
 import zmq
 import msgpack
 import logging
-import time
-import threading
-from scipy.spatial.transform import Rotation as R
 import torch
 import xml.etree.ElementTree as ET
-from gr1_config import (
-    COMPACT_WIRE_JOINTS,
-    JOINT_LIMITS_MIN,
-    JOINT_LIMITS_MAX,
-    CAMERA_ATTACH_LINK,
-)
+from gr1_config import COMPACT_WIRE_JOINTS, JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
 
-URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/repos/Wiki-GRx-Models/GRX/GR1/gr1t2/urdf/gr1t2_fourier_hand_6dof.urdf"
+URDF_PATH = "./repos/Wiki-GRx-Models/GRX/GR1/gr1t2/urdf/gr1t2_fourier_hand_6dof.urdf"
 
 # -----------------------------------------------------------------------------
 # CONFIG & LOGGING
@@ -77,14 +69,13 @@ class GR1Simulation:
         # Build the scene
         self.scene.build()
 
-        # Gains & Control (Stable Precision for "Ground Coverage")
+        # Gains & Control (chosen after a lot of trial-and-error)
         kp_array = np.full(self.robot.n_dofs, 3500.0)
         kv_array = np.full(self.robot.n_dofs, 150.0)
-
         self.robot.set_dofs_kp(kp_array)
         self.robot.set_dofs_kv(kv_array)
 
-        # Force Range (Unlocking motor potential)
+        # Force Range (chosen after a lot of trial-and-error)
         force_max = np.full(self.robot.n_dofs, 500.0) 
         force_min = -force_max
         self.robot.set_dofs_force_range(force_min, force_max)
