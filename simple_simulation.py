@@ -182,7 +182,7 @@ class GR1Simulation:
                         rr.log("world_center", rr.Image(rgb_center[..., :3]))
 
                 # Final check of positions for all joints that received input
-                print("\n[OUTPU] Command Finished. Active Joints Status:")
+                print("\n[OUTPUT] Command Finished. Active Joints Status:")
                 curr_q = self.robot.get_dofs_position().cpu().numpy()
                 for idx in sorted(list(self.active_joints_this_command)):
                     mapping = self.joint_dof_map[idx]
