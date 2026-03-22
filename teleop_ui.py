@@ -40,6 +40,16 @@ def send_reset():
     socket.send(msgpack.packb(payload, use_bin_type=True))
 
 
+def send_start_recording(task_name):
+    payload = {"command": "start_recording", "task": task_name}
+    socket.send(msgpack.packb(payload, use_bin_type=True))
+
+
+def send_stop_recording():
+    payload = {"command": "stop_recording"}
+    socket.send(msgpack.packb(payload, use_bin_type=True))
+
+
 def home_all():
     st.session_state.target_buffer.fill(0.0)
     st.session_state.staging_buffer.fill(0.0)
@@ -57,6 +67,26 @@ def clear_all():
 
 
 st.title("GR1 Advanced Teleop Dashboard")
+
+# --- Recording Sidebar ---
+with st.sidebar:
+    st.header("🔴 Rec Manager")
+    task_instruction = st.text_input("Task Instruction", value="Pick up the red cube")
+
+    if "is_recording" not in st.session_state:
+        st.session_state.is_recording = False
+
+    if not st.session_state.is_recording:
+        if st.button("Start Recording", type="primary", use_container_width=True):
+            send_start_recording(task_instruction)
+            st.session_state.is_recording = True
+            st.rerun()
+    else:
+        if st.button("Stop & Save", use_container_width=True):
+            send_stop_recording()
+            st.session_state.is_recording = False
+            st.rerun()
+        st.error("RECORDING...")
 
 st.markdown("### Select Joint:")
 col1, col2 = st.columns([3, 1])

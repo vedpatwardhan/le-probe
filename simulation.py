@@ -5,6 +5,7 @@ import zmq
 import msgpack
 import logging
 import torch
+from lerobot_manager import LeRobotManager
 from gr1_config import COMPACT_WIRE_JOINTS, JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
 
 URDF_PATH = "./repos/Wiki-GRx-Models/GRX/GR1/gr1t2/urdf/gr1t2_fourier_hand_6dof.urdf"
@@ -108,6 +109,11 @@ class GR1Simulation:
         self.is_running = True
         self.active_joints_this_command = set()
 
+        # LeRobot Recording State
+        self.recorder = LeRobotManager(fps=10)  # Target 10Hz for dataset
+        self.is_recording = False
+        self.current_task = "Pick up the red cube"
+
         # Precomputed mapping from joint to dof
         self.joint_dof_map = []
         for idx, joint_name in enumerate(COMPACT_WIRE_JOINTS):
@@ -135,6 +141,18 @@ class GR1Simulation:
                     "coupled": coupled_dofs,
                 }
             )
+
+    def get_state_32(self):
+        """Returns the current 32-DOF joint positions, normalized to [-1, 1]."""
+        raw_state = self.robot.get_dofs_position().cpu().numpy()
+        return self._normalize_state(raw_state)
+
+    def _normalize_state(self, raw_state):
+        """Normalizes raw joint positions to [-1, 1] based on joint limits."""
+        normalized_state = (raw_state - JOINT_LIMITS_MIN) / (
+            JOINT_LIMITS_MAX - JOINT_LIMITS_MIN + 1e-8
+        ) * 2.0 - 1.0
+        return normalized_state
 
     def reset_env(self):
         """Randomizes the cube position and resets the robot's pose."""
@@ -201,9 +219,20 @@ class GR1Simulation:
                     break
 
             data = msgpack.unpackb(msg, raw=False)
-            if data.get("command") == "reset":
+            cmd = data.get("command")
+            if cmd == "reset":
                 self.reset_env()
                 self.scene.step()
+                continue
+            elif cmd == "start_recording":
+                self.current_task = data.get("task", "Pick up the red cube")
+                self.recorder.start_episode(self.current_task)
+                self.is_recording = True
+                continue
+            elif cmd == "stop_recording":
+                if self.is_recording:
+                    self.recorder.stop_episode()
+                    self.is_recording = False
                 continue
 
             if "target" in data:
@@ -230,6 +259,19 @@ class GR1Simulation:
                         rr.log("world_right", rr.Image(rgb_right[..., :3]))
                         rr.log("world_center", rr.Image(rgb_center[..., :3]))
                         rr.log("world_wrist", rr.Image(rgb_wrist[..., :3]))
+
+                    # Capture frame for LeRobot (at 10Hz, which is every 20 steps of 200Hz burst)
+                    if self.is_recording and i % 20 == 0:
+                        imgs = {
+                            "world_top": rgb_top,
+                            "world_left": rgb_left,
+                            "world_right": rgb_right,
+                            "world_center": rgb_center,
+                            "world_wrist": rgb_wrist,
+                        }
+                        self.recorder.add_frame(
+                            imgs, self.get_state_32(), self.last_target_q
+                        )
 
                 # Final check of positions for all joints that received input
                 print("\n[OUTPUT] Command Finished. Active Joints Status:")

@@ -1,0 +1,118 @@
+import os
+import numpy as np
+from PIL import Image
+
+try:
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    LEROBOT_AVAILABLE = True
+except ImportError:
+    LEROBOT_AVAILABLE = False
+
+
+class LeRobotManager:
+    """Manages LeRobot dataset creation and frame buffering."""
+
+    def __init__(self, repo_id="gr1_pickup", fps=10, root="./datasets"):
+        self.repo_id = repo_id
+        self.fps = fps
+        self.root = os.path.abspath(root)
+        self.dataset = None
+        self.episode_frame_count = 0
+
+        if not LEROBOT_AVAILABLE:
+            print("[WARNING] LeRobot not installed. Recording will be disabled.")
+            return
+
+    def start_episode(self, task_instruction):
+        """Initializes a new episode or resumes the dataset."""
+        if not LEROBOT_AVAILABLE:
+            return
+
+        features = {
+            "observation.images.world_top": {
+                "dtype": "video",
+                "shape": (224, 224, 3),
+                "names": ["height", "width", "channels"],
+            },
+            "observation.images.world_left": {
+                "dtype": "video",
+                "shape": (224, 224, 3),
+                "names": ["height", "width", "channels"],
+            },
+            "observation.images.world_right": {
+                "dtype": "video",
+                "shape": (224, 224, 3),
+                "names": ["height", "width", "channels"],
+            },
+            "observation.images.world_center": {
+                "dtype": "video",
+                "shape": (224, 224, 3),
+                "names": ["height", "width", "channels"],
+            },
+            "observation.images.world_wrist": {
+                "dtype": "video",
+                "shape": (224, 224, 3),
+                "names": ["height", "width", "channels"],
+            },
+            "observation.state": {
+                "dtype": "float32",
+                "shape": (32,),
+                "names": ["joints"],
+            },
+            "action": {"dtype": "float32", "shape": (32,), "names": ["joints"]},
+        }
+
+        # Point root directly to the specific dataset folder
+        dataset_path = os.path.join(self.root, self.repo_id)
+        os.makedirs(self.root, exist_ok=True)
+
+        # Use resume=True to append if it exists, or create if it doesn't.
+        self.dataset = LeRobotDataset.create(
+            repo_id=self.repo_id,
+            fps=self.fps,
+            root=dataset_path,
+            features=features,
+            use_videos=True,
+            image_writer_processes=0,
+            image_writer_threads=4,
+            resume=True,
+        )
+
+        self.current_task = task_instruction
+        print(
+            f"[LEROBOT] Dataset '{self.repo_id}' ready. "
+            f"Recording NEW episode for task: '{task_instruction}'"
+        )
+
+    def add_frame(self, imgs_dict, state, action):
+        """Adds a single frame to the current episode."""
+        if self.dataset is None:
+            return
+        self.episode_frame_count += 1
+
+        frame_data = {
+            "observation.state": state.astype(np.float32),
+            "action": action.astype(np.float32),
+            "task": self.current_task,
+        }
+
+        # Add images from the dict
+        for key, img_array in imgs_dict.items():
+            # Convert genesis [H, W, 4] or [H, W, 3] to PIL Image [H, W, 3]
+            frame_data[f"observation.images.{key}"] = Image.fromarray(
+                img_array[..., :3].astype(np.uint8)
+            )
+
+        self.dataset.add_frame(frame_data)
+
+    def stop_episode(self):
+        """Finalizes and saves the current episode."""
+        if self.dataset is None:
+            return
+
+        self.dataset.save_episode(parallel_encoding=False)
+        print(f"[LEROBOT] Episode saved. Total frames: {self.episode_frame_count}")
+        # Finalize is only needed once technically, but save_episode handles the parquet write.
+        print(f"[LEROBOT] Episode saved to {self.root}/{self.repo_id}")
+        self.dataset = None
