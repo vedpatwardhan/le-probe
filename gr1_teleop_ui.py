@@ -35,6 +35,11 @@ def send_command():
     socket.send(msgpack.packb(payload, use_bin_type=True))
 
 
+def send_reset():
+    payload = {"command": "reset"}
+    socket.send(msgpack.packb(payload, use_bin_type=True))
+
+
 def home_all():
     st.session_state.target_buffer.fill(0.0)
     st.session_state.staging_buffer.fill(0.0)
@@ -110,12 +115,17 @@ else:
 
 st.divider()
 
-col_sub, col_export, col_clr_all, col_home = st.columns(4)
+col_sub, col_reset, col_export, col_clr_all, col_home = st.columns(5)
 with col_sub:
     if st.button("Submit Request", type="primary", use_container_width=True):
         st.session_state.target_buffer = np.copy(st.session_state.staging_buffer)
         send_command()
         st.toast("Sent!", icon="✅")
+
+with col_reset:
+    if st.button("Randomize Cube", use_container_width=True):
+        send_reset()
+        st.toast("Cube Randomized!", icon="🎲")
 
 with col_export:
     export_data = {}

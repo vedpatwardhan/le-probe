@@ -51,22 +51,45 @@ class GR1Simulation:
             surface=gs.surfaces.Default(color=(1, 0, 0)),
         )
 
-        # Add cameras for top, left, right and center views
+        # Add cameras for top, left, right, center and wrist views
         self.world_cam_top = self.scene.add_camera(
             res=(224, 224), fov=60, pos=(0.3, 0, 1.8), lookat=(0.3, 0, 0.8)
         )
         self.world_cam_left = self.scene.add_camera(
-            res=(224, 224), fov=60, pos=(1.0, -1.0, 1.2), lookat=(0, 0, 0.8)
+            res=(224, 224), fov=60, pos=(0.45, -0.8, 1.1), lookat=(0.45, 0, 0.8)
         )
         self.world_cam_right = self.scene.add_camera(
-            res=(224, 224), fov=60, pos=(1.0, 1.0, 1.2), lookat=(0, 0, 0.8)
+            res=(224, 224), fov=60, pos=(0.45, 0.8, 1.1), lookat=(0.45, 0, 0.8)
         )
         self.world_cam_center = self.scene.add_camera(
-            res=(224, 224), fov=60, pos=(1.0, 0.0, 1.2), lookat=(0, 0, 0.8)
+            res=(224, 224), fov=60, pos=(1.2, 0, 1.1), lookat=(0.45, 0, 0.8)
+        )
+        self.world_cam_wrist = self.scene.add_camera(
+            res=(224, 224),
+            fov=110,
+            pos=(0, 0, 0.05),
+            lookat=(0, 0, 1.0),
+            up=(0, -1, 0),
         )
 
         # Build the scene
         self.scene.build()
+
+        # Attach wrist camera after build with a transformation matrix
+        pos, lookat, up = (
+            np.array([0, 0, 0.05]),
+            np.array([0, 0, 1.0]),
+            np.array([0, -1, 0]),
+        )
+        z = (lookat - pos) / np.linalg.norm(lookat - pos)
+        x = np.cross(up, z) / np.linalg.norm(np.cross(up, z))
+        y = np.cross(z, x)
+        offset_T = np.eye(4)
+        offset_T[:3, :] = np.column_stack([x, y, z, pos])
+        self.world_cam_wrist.attach(
+            rigid_link=self.robot.get_link("right_hand_pitch_link"),
+            offset_T=offset_T,
+        )
 
         # Gains & Control (chosen after a lot of trial-and-error)
         kp_array = np.full(self.robot.n_dofs, 3500.0)
@@ -112,6 +135,18 @@ class GR1Simulation:
                     "coupled": coupled_dofs,
                 }
             )
+
+    def reset_env(self):
+        """Randomizes the cube position and resets the robot's pose."""
+        # Random position within the reachable zone of the table
+        rx = np.random.uniform(0.35, 0.55)
+        ry = np.random.uniform(-0.15, 0.15)
+        self.cube.set_pos((rx, ry, 0.82))
+
+        # Reset robot to homed state (zeros)
+        self.last_target_q.fill(0.0)
+        self.robot.set_dofs_position(self.last_target_q)
+        print(f"[RESET] Environment reset. Cube moved to ({rx:.2f}, {ry:.2f})")
 
     def process_target_32(self, action_32):
         """Maps 32-DOF actions to targets and logs progress."""
@@ -166,6 +201,11 @@ class GR1Simulation:
                     break
 
             data = msgpack.unpackb(msg, raw=False)
+            if data.get("command") == "reset":
+                self.reset_env()
+                self.scene.step()
+                continue
+
             if "target" in data:
                 self.active_joints_this_command.clear()
                 target = np.array(data["target"], dtype=np.float32)
@@ -183,11 +223,13 @@ class GR1Simulation:
                         rgb_left = self.world_cam_left.render()[0]
                         rgb_right = self.world_cam_right.render()[0]
                         rgb_center = self.world_cam_center.render()[0]
+                        rgb_wrist = self.world_cam_wrist.render()[0]
 
                         rr.log("world_top", rr.Image(rgb_top[..., :3]))
                         rr.log("world_left", rr.Image(rgb_left[..., :3]))
                         rr.log("world_right", rr.Image(rgb_right[..., :3]))
                         rr.log("world_center", rr.Image(rgb_center[..., :3]))
+                        rr.log("world_wrist", rr.Image(rgb_wrist[..., :3]))
 
                 # Final check of positions for all joints that received input
                 print("\n[OUTPUT] Command Finished. Active Joints Status:")
