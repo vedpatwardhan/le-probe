@@ -144,8 +144,10 @@ class GR1Simulation:
 
     def get_state_32(self):
         """Returns the current 32-DOF joint positions, normalized to [-1, 1]."""
-        raw_state = self.robot.get_dofs_position().cpu().numpy()
-        return self._normalize_state(raw_state)
+        raw_full_state = self.robot.get_dofs_position().cpu().numpy()
+        # Extract only the 32 joints defined in COMPACT_WIRE_JOINTS
+        raw_state_32 = np.array([raw_full_state[m["dof_idx"]] for m in self.joint_dof_map], dtype=np.float32)
+        return self._normalize_state(raw_state_32)
 
     def _normalize_state(self, raw_state):
         """Normalizes raw joint positions to [-1, 1] based on joint limits."""
@@ -237,8 +239,8 @@ class GR1Simulation:
 
             if "target" in data:
                 self.active_joints_this_command.clear()
-                target = np.array(data["target"], dtype=np.float32)
-                self.process_target_32(target)
+                action_32 = np.array(data["target"], dtype=np.float32)
+                self.process_target_32(action_32)
 
                 # Physics Burst (200 steps @ 0.005s = 1.0 second of sim-time)
                 print(f"Stepping physics (200Hz) for 1.0s sim-time...")
@@ -269,8 +271,9 @@ class GR1Simulation:
                             "world_center": rgb_center,
                             "world_wrist": rgb_wrist,
                         }
+                        # We use action_32 which is the 32-DOF input from UI
                         self.recorder.add_frame(
-                            imgs, self.get_state_32(), self.last_target_q
+                            imgs, self.get_state_32(), action_32
                         )
 
                 # Final check of positions for all joints that received input
