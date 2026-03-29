@@ -146,15 +146,23 @@ class GR1Simulation:
         """Returns the current 32-DOF joint positions, normalized to [-1, 1]."""
         raw_full_state = self.robot.get_dofs_position().cpu().numpy()
         # Extract only the 32 joints defined in COMPACT_WIRE_JOINTS
-        raw_state_32 = np.array([raw_full_state[m["dof_idx"]] for m in self.joint_dof_map], dtype=np.float32)
+        raw_state_32 = np.array(
+            [raw_full_state[m["dof_idx"]] for m in self.joint_dof_map], dtype=np.float32
+        )
         return self._normalize_state(raw_state_32)
 
     def _normalize_state(self, raw_state):
         """Normalizes raw joint positions to [-1, 1] based on joint limits."""
-        normalized_state = (raw_state - JOINT_LIMITS_MIN) / (
-            JOINT_LIMITS_MAX - JOINT_LIMITS_MIN + 1e-8
-        ) * 2.0 - 1.0
-        return normalized_state
+        # Calculate range safely to avoid division by zero
+        joint_range = JOINT_LIMITS_MAX - JOINT_LIMITS_MIN
+
+        # Where range is very small (< 1e-4), treat as fixed/zero to avoid nuclear expansion
+        safe_range = np.where(joint_range > 1e-4, joint_range, 1e-4)
+
+        normalized_state = (raw_state - JOINT_LIMITS_MIN) / safe_range * 2.0 - 1.0
+
+        # Hard clip to prevent any uninitialized or buggy values from poisoning the dataset
+        return np.clip(normalized_state, -2.0, 2.0)
 
     def reset_env(self):
         """Randomizes the cube position and resets the robot's pose."""
@@ -272,9 +280,7 @@ class GR1Simulation:
                             "world_wrist": rgb_wrist,
                         }
                         # We use action_32 which is the 32-DOF input from UI
-                        self.recorder.add_frame(
-                            imgs, self.get_state_32(), action_32
-                        )
+                        self.recorder.add_frame(imgs, self.get_state_32(), action_32)
 
                 # Final check of positions for all joints that received input
                 print("\n[OUTPUT] Command Finished. Active Joints Status:")
