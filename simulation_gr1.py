@@ -160,7 +160,6 @@ class GR1Simulation:
             offset_T=offset_T,
         )
 
-        # --- SYNC WITH TELEOP DATA ---
         # 1. Stiff Gains (Matched to teleop precision)
         self.robot.set_dofs_kp(np.full(self.robot.n_dofs, 3500.0))
         self.robot.set_dofs_kv(np.full(self.robot.n_dofs, 150.0))
