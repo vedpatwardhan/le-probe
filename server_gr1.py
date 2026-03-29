@@ -6,6 +6,7 @@ import time
 import traceback
 import json
 import os
+import argparse
 from transformers import PreTrainedModel
 from lerobot.policies.groot.modeling_groot import GrootPolicy
 from lerobot.policies.factory import make_pre_post_processors
@@ -39,10 +40,15 @@ class GR00TInferenceServer:
     and embodiment-specific joint mapping.
     """
 
-    def __init__(self, embodiment_tag="gr1", port=5555):
+    def __init__(
+        self,
+        embodiment_tag="gr1",
+        port=5555,
+        model_repo="nvidia/GR00T-N1.5-3B",
+    ):
         print(f"--- Initializing GR00T N1.5 Server (Embodiment: {embodiment_tag}) ---")
         self.port = port
-        self.model_repo = "nvidia/GR00T-N1.5-3B"
+        self.model_repo = model_repo
         self.tokenizer = None
 
         # Load Policy
@@ -228,5 +234,31 @@ class GR00TInferenceServer:
 
 
 if __name__ == "__main__":
-    server = GR00TInferenceServer(embodiment_tag="gr1", port=5555)
+    parser = argparse.ArgumentParser(description="GR00T-N1.5 Inference Server")
+    parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default="nvidia/GR00T-N1.5-3B",
+        help="Hugging Face repo ID or local path to the model.",
+    )
+    parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=5555,
+        help="Port to listen on (default: 5555).",
+    )
+    parser.add_argument(
+        "--tag",
+        "-t",
+        type=str,
+        default="gr1",
+        help="Embodiment tag (default: gr1).",
+    )
+    args = parser.parse_args()
+
+    server = GR00TInferenceServer(
+        embodiment_tag=args.tag, port=args.port, model_repo=args.model
+    )
     server.run()
