@@ -66,14 +66,16 @@ class LeRobotManager:
         # Point root directly to the specific dataset folder
         dataset_path = os.path.join(self.root, self.repo_id)
         metadata_path = os.path.join(dataset_path, "meta", "info.json")
-        
+
         # We only resume if the folder exists AND has the metadata file.
         if not os.path.exists(metadata_path):
             # If the directory exists but has no metadata, we must use .create.
             # However, LeRobotDataset.create will fail if the folder exists with exist_ok=False.
             # We check if it's an empty (or partial) folder and handle it.
             if os.path.exists(dataset_path) and not os.listdir(dataset_path):
-                print(f"[LEROBOT] Warning: '{dataset_path}' exists but is not a valid dataset. Checking for cleanup...")
+                print(
+                    f"[LEROBOT] Warning: '{dataset_path}' exists but is not a valid dataset. Checking for cleanup..."
+                )
                 os.rmdir(dataset_path)
 
             os.makedirs(self.root, exist_ok=True)
