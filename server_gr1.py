@@ -148,6 +148,7 @@ class GR00TInferenceServer:
                 image_world_left_np = unpack_np(req.get("world_left"))
                 image_world_right_np = unpack_np(req.get("world_right"))
                 image_world_center_np = unpack_np(req.get("world_center"))
+                image_world_wrist_np = unpack_np(req.get("world_wrist"))
                 state_np = unpack_np(req.get("state"))
                 instruction = req.get("instruction", "Perform the task.")
 
@@ -158,6 +159,7 @@ class GR00TInferenceServer:
                         image_world_left_np,
                         image_world_right_np,
                         image_world_center_np,
+                        image_world_wrist_np,
                     ]
                 )
                 all_images_t = torch.as_tensor(all_imgs_np, dtype=torch.uint8).permute(
@@ -168,6 +170,7 @@ class GR00TInferenceServer:
                     image_world_left_t,
                     image_world_right_t,
                     image_world_center_t,
+                    image_world_wrist_t,
                 ) = all_images_t
 
                 # Create 64-dim state (Rosetta Protocol 🧪)
@@ -186,6 +189,7 @@ class GR00TInferenceServer:
                     f"{OBS_IMAGES}.world_left": image_world_left_t,
                     f"{OBS_IMAGES}.world_right": image_world_right_t,
                     f"{OBS_IMAGES}.world_center": image_world_center_t,
+                    f"{OBS_IMAGES}.world_wrist": image_world_wrist_t,
                     OBS_STATE: state_t,
                     "task": instruction,
                     "embodiment_id": torch.tensor(
@@ -204,6 +208,7 @@ class GR00TInferenceServer:
                 print("   [DEBUG] Running Model Inference...")
                 with torch.inference_mode():
                     action_chunk = self.policy.predict_action_chunk(processed_batch)
+
                 actions_np = action_chunk[0].cpu().numpy()  # (16, 32)
                 inference_time = time.time() - start_time
                 print(f"   [DEBUG] Inference Time: {inference_time:.2f} seconds")

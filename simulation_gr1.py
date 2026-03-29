@@ -64,7 +64,7 @@ class GR1Simulation:
         # Create Scene
         self.scene = gs.Scene(
             show_viewer=False,
-            sim_options=gs.options.SimOptions(dt=0.01, substeps=4),
+            sim_options=gs.options.SimOptions(dt=0.002, substeps=1),
             vis_options=gs.options.VisOptions(
                 lights=[
                     {
@@ -104,13 +104,83 @@ class GR1Simulation:
         self.world_cam_center = self.scene.add_camera(
             res=(224, 224), fov=60, pos=(1.5, 0.0, 1.2), lookat=(0, 0, 0.8)
         )
+        self.world_cam_wrist = self.scene.add_camera(
+            res=(224, 224),
+            fov=110,
+            pos=(0, 0, 0.05),
+            lookat=(0, 0, 1.0),
+            up=(0, -1, 0),
+        )
 
         # Build the scene
         self.scene.build()
 
-        # Gains & Control
-        self.robot.set_dofs_kp(np.full(self.robot.n_dofs, 450.0))
-        self.robot.set_dofs_kv(np.full(self.robot.n_dofs, 45.0))
+        # Build joint DOF mapping (Must match Simulation.py exactly)
+        self.joint_dof_map = []
+        for idx, joint_name in enumerate(COMPACT_WIRE_JOINTS):
+            joint = self.robot.get_joint(joint_name)
+            dof_idx = joint.dofs_idx[0]
+            limit_min, limit_max = JOINT_LIMITS_MIN[idx], JOINT_LIMITS_MAX[idx]
+
+            # Finger coupling
+            coupled_dofs = []
+            if "proximal" in joint_name.lower():
+                finger_prefix = joint_name.split("_proximal")[0]
+                for other_joint in self.robot.joints:
+                    if (
+                        other_joint.name
+                        and finger_prefix in other_joint.name
+                        and other_joint.name != joint_name
+                        and "proximal" not in other_joint.name.lower()
+                    ):
+                        coupled_dofs.append(other_joint.dofs_idx[0])
+
+            self.joint_dof_map.append(
+                {
+                    "dof_idx": dof_idx,
+                    "limits": (limit_min, limit_max),
+                    "name": joint_name,
+                    "coupled": coupled_dofs,
+                }
+            )
+
+        # Attach wrist camera after build with a transformation matrix
+        pos, lookat, up = (
+            np.array([0, 0, 0.05]),
+            np.array([0, 0, 1.0]),
+            np.array([0, -1, 0]),
+        )
+        z = (lookat - pos) / np.linalg.norm(lookat - pos)
+        x = np.cross(up, z) / np.linalg.norm(np.cross(up, z))
+        y = np.cross(z, x)
+        offset_T = np.eye(4)
+        offset_T[:3, :] = np.column_stack([x, y, z, pos])
+        self.world_cam_wrist.attach(
+            rigid_link=self.robot.get_link("right_hand_pitch_link"),
+            offset_T=offset_T,
+        )
+
+        # --- SYNC WITH TELEOP DATA ---
+        # 1. Stiff Gains (Matched to teleop precision)
+        self.robot.set_dofs_kp(np.full(self.robot.n_dofs, 3500.0))
+        self.robot.set_dofs_kv(np.full(self.robot.n_dofs, 150.0))
+
+        # 2. Neutral Start (Set to zeros before first step)
+        self.robot.set_dofs_position(np.zeros(self.robot.n_dofs, dtype=np.float32))
+        self.scene.step()
+
+    def _normalize_state(self, raw_state):
+        """Normalizes raw joint positions to [-1, 1] based on joint limits."""
+        # Calculate range safely to avoid division by zero
+        joint_range = JOINT_LIMITS_MAX - JOINT_LIMITS_MIN
+
+        # Where range is very small (< 1e-4), treat as fixed/zero to avoid nuclear expansion
+        safe_range = np.where(joint_range > 1e-4, joint_range, 1e-4)
+
+        normalized_state = (raw_state - JOINT_LIMITS_MIN) / safe_range * 2.0 - 1.0
+
+        # Hard clip to prevent any uninitialized or buggy values from poisoning the dataset
+        return np.clip(normalized_state, -2.0, 2.0)
 
     def get_state_32(self):
         """Extracts 32-dim normalized state: [L_Arm(7), L_Hand(6), Head(3), R_Arm(7), R_Hand(6), Waist(3)]"""
@@ -124,11 +194,7 @@ class GR1Simulation:
             raw_state.append(q[joint.dofs_idx_local[0]])
         raw_state = np.array(raw_state, dtype=np.float32)
 
-        # Normalize to [-1, 1]
-        normalized_state = (raw_state - JOINT_LIMITS_MIN) / (
-            JOINT_LIMITS_MAX - JOINT_LIMITS_MIN + 1e-8
-        ) * 2.0 - 1.0
-        return normalized_state
+        return self._normalize_state(raw_state)
 
     def apply_action_32(self, action_32):
         """Action is normalized [-1, 1], unnormalize to Radians then apply.
@@ -137,39 +203,49 @@ class GR1Simulation:
         logging.info(
             f"[ZMQ_ACTION_STATS] min: {float(np.min(action_32)):.3f}, max: {float(np.max(action_32)):.3f}, mean: {float(np.mean(action_32)):.3f}"
         )
+        target_q = self.robot.get_dofs_position().cpu().numpy()
 
-        # Unnormalize from [-1, 1] back to Radians
-        target_radians = (action_32 + 1.0) / 2.0 * (
-            JOINT_LIMITS_MAX - JOINT_LIMITS_MIN
-        ) + JOINT_LIMITS_MIN
-        target_radians = np.clip(target_radians, JOINT_LIMITS_MIN, JOINT_LIMITS_MAX)
+        # ONLY update the joints that were actually fine-tuned (Teleop Set)
+        # 16-18 (R-Shoulder), 23-28 (R-Hand), 29-30 (Waist) - [Wrist Roll 21 Removed]
+        TELEOP_INDICES = [16, 17, 18, 23, 24, 25, 26, 27, 28, 29, 30]
 
-        # Map the 32 targets into the full robot DOF vector
-        target_q = np.zeros(self.robot.n_dofs, dtype=np.float32)
-        for idx, name in enumerate(COMPACT_WIRE_JOINTS):
-            joint = self.robot.get_joint(name)
-            target_q[joint.dofs_idx_local[0]] = target_radians[idx]
+        for idx, mapping in enumerate(self.joint_dof_map):
+            if idx not in TELEOP_INDICES:
+                # Keep other joints at zero (Homed) to avoid noise
+                target_q[mapping["dof_idx"]] = 0.0
+                continue
+
+            val = action_32[idx]
+            val = np.clip(val, -1.0, 1.0)
+            limit_min, limit_max = mapping["limits"]
+            target_rad = (val + 1.0) / 2.0 * (limit_max - limit_min) + limit_min
+            target_q[mapping["dof_idx"]] = target_rad
+
+            # Apply finger coupling (proximal -> distal)
+            for c_idx in mapping["coupled"]:
+                target_q[c_idx] = target_rad
 
         # Apply the final computed 32-dim target position
         self.robot.control_dofs_position(target_q)
 
-    def run(self, instruction="Pick up the red cube from the table down there."):
+    def run(self, instruction="Pick up the red cube"):
         client = GR1Client()
         rr.init("gr1_sim", spawn=False)
         rr.connect_grpc(
-            "rerun+http://glrnx-103-96-40-121.a.free.pinggy.link:37079/proxy"
+            "rerun+http://neonh-103-96-40-120.a.free.pinggy.link:34069/proxy"
         )
         logging.info(f"Starting Multi-Step Inference Task: {instruction}")
 
-        # Outer Loop: Number of inference requests to make
-        for cycle in range(30):
-            logging.info(f"--- Inference Cycle {cycle+1}/30 ---")
+        # Outer Loop: Number of inference requests to make (75 * 1.6s = 120 seconds)
+        for cycle in range(75):
+            logging.info(f"--- Inference Cycle {cycle+1}/75 ---")
 
             # Perception: Capture observation at the start of the horizon
             rgb_top, _, _, _ = self.world_cam_top.render()
             rgb_left, _, _, _ = self.world_cam_left.render()
             rgb_right, _, _, _ = self.world_cam_right.render()
             rgb_center, _, _, _ = self.world_cam_center.render()
+            rgb_wrist, _, _, _ = self.world_cam_wrist.render()
 
             state_32 = self.get_state_32()
             obs = {
@@ -177,6 +253,7 @@ class GR1Simulation:
                 "world_left": rgb_left[..., :3],
                 "world_right": rgb_right[..., :3],
                 "world_center": rgb_center[..., :3],
+                "world_wrist": rgb_wrist[..., :3],
                 "state": state_32,
                 "instruction": instruction,
             }
@@ -185,28 +262,31 @@ class GR1Simulation:
             logging.info("Requesting Action Chunk...")
             actions = client.get_action_chunk(obs)  # returns list of 16 actions
 
-            # Execution: Inner Loop (16 actions, 10 physics steps each)
+            # Execution: Inner Loop (Each action is 0.1s / 20 physics steps)
             for action_idx, action in enumerate(actions):
                 self.apply_action_32(np.array(action))
 
-                # Step physics for 0.1s (10 steps @ 100Hz)
-                for idx in range(10):
+                # Step physics for 0.1s (50 steps @ 500Hz)
+                for _ in range(50):
                     self.scene.step()
 
-                    # Render & Log ALL cameras to Rerun after every second action step
-                    if idx % 2 == 0:
-                        rgb_top_step, _, _, _ = self.world_cam_top.render()
-                        rgb_left_step, _, _, _ = self.world_cam_left.render()
-                        rgb_right_step, _, _, _ = self.world_cam_right.render()
-                        rgb_center_step, _, _, _ = self.world_cam_center.render()
-                        rr.log("world_top", rr.Image(rgb_top_step[..., :3]))
-                        rr.log("world_left", rr.Image(rgb_left_step[..., :3]))
-                        rr.log("world_right", rr.Image(rgb_right_step[..., :3]))
-                        rr.log("world_center", rr.Image(rgb_center_step[..., :3]))
+                # Render once per action step for 50Hz visual update
+                rgb_top_step, _, _, _ = self.world_cam_top.render()
+                rgb_left_step, _, _, _ = self.world_cam_left.render()
+                rgb_right_step, _, _, _ = self.world_cam_right.render()
+                rgb_center_step, _, _, _ = self.world_cam_center.render()
+                rgb_wrist_step, _, _, _ = self.world_cam_wrist.render()
+
+                rr.log("world_top", rr.Image(rgb_top_step[..., :3]))
+                rr.log("world_left", rr.Image(rgb_left_step[..., :3]))
+                rr.log("world_right", rr.Image(rgb_right_step[..., :3]))
+                rr.log("world_center", rr.Image(rgb_center_step[..., :3]))
+                rr.log("world_wrist", rr.Image(rgb_wrist_step[..., :3]))
 
                 # Log progress
-                if (cycle * 16 + action_idx) % 10 == 0:
-                    logging.info(f"Executed total actions: {cycle * 16 + action_idx}")
+                total_actions = cycle * len(actions) + action_idx
+                if total_actions % 10 == 0:
+                    logging.info(f"Executed total actions: {total_actions}")
 
         logging.info("Task Sequence Complete.")
 
