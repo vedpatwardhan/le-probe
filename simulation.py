@@ -22,9 +22,14 @@ DEVICE = (
 
 
 class GR1Simulation:
-    def __init__(self, urdf_path=URDF_PATH):
-        # Initialize Genesis
-        gs.init(backend=gs.gpu)
+    def __init__(self, urdf_path=URDF_PATH, test_mode=False):
+        self.test_mode = test_mode
+        # Initialize Genesis with re-init guard
+        try:
+            gs.init(backend=gs.gpu)
+        except Exception:
+             # Genesis likely already initialized in this process (e.g. during pytest)
+             pass
 
         # Create Scene
         self.scene = gs.Scene(
@@ -162,24 +167,24 @@ class GR1Simulation:
 
         # Combine IK and Teleop into a 32-DOF reporting whitelist
         self.allowed_32_indices = set()
-        allowed_names = set()
+        self.allowed_names_set = set()
 
         # Load IK joints
         with open("gr1_gr00t/ik_joints.txt", "r") as f:
-            allowed_names.update([l.strip() for l in f if l.strip()])
+            self.allowed_names_set.update([l.strip() for l in f if l.strip()])
 
         # Load teleop joints
         with open("gr1_gr00t/teleop_joints.txt", "r") as f:
-            allowed_names.update([l.strip() for l in f if l.strip()])
+            self.allowed_names_set.update([l.strip() for l in f if l.strip()])
 
         # Map these names to the 32-DOF indices in our wire protocol
         for i, name in enumerate(COMPACT_WIRE_JOINTS):
-            if name in allowed_names:
+            if name in self.allowed_names_set:
                 self.allowed_32_indices.add(i)
 
         # Also maintain raw DOF indices for IK solver jitter
         self.ik_dof_indices = [
-            j.dofs_idx[0] for j in self.robot.joints if j.name in allowed_names
+            j.dofs_idx[0] for j in self.robot.joints if j.name in self.allowed_names_set
         ]
 
         print(
@@ -375,12 +380,20 @@ class GR1Simulation:
 
     def run(self, port=5556):
         """Main Loop: Blocking ZMQ (REP) -> Physics Burst"""
+        if self.test_mode:
+            print("[TEST] Skipping ZMQ and Rerun initialization in run().")
+            return
+
         context = zmq.Context()
         socket = context.socket(zmq.REP)
         socket.bind(f"tcp://*:{port}")
 
         rr.init("gr1_teleop", spawn=False)
-        rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
+        # Handle connection failures gracefully if proxy isn't up
+        try:
+            rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
+        except Exception as e:
+            print(f"⚠️ Rerun proxy not found: {e}")
 
         print("\n🚀 BLOCKING SIMULATION RUNNING (Single-Threaded)")
         print("  - Mode: Sequential (Draining -> Step 500 -> Wait)")
