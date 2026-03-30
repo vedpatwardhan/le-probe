@@ -1,6 +1,7 @@
 import pytest
 from gr1_gr00t.simulation import GR1Simulation
 
+
 @pytest.fixture(scope="session")
 def sim():
     """

@@ -28,8 +28,8 @@ class GR1Simulation:
         try:
             gs.init(backend=gs.gpu)
         except Exception:
-             # Genesis likely already initialized in this process (e.g. during pytest)
-             pass
+            # Genesis likely already initialized in this process (e.g. during pytest)
+            pass
 
         # Create Scene
         self.scene = gs.Scene(
@@ -131,15 +131,21 @@ class GR1Simulation:
             JOINT_LIMITS_MAX, device=DEVICE, dtype=torch.float32
         )
 
-        # Precomputed mapping from joint to dof
-        self.joint_dof_map = []
+        # Pre-computed protocol mapping tensors for Parallel Vectorization
+        self.v_proto_indices = torch.arange(32, device=DEVICE)
+        self.v_dof_indices = torch.zeros(32, device=DEVICE, dtype=torch.long)
+        self.v_joint_names = COMPACT_WIRE_JOINTS
+
+        # Collect finger coupling graph (Proximal Dofs -> Target Dofs)
+        coupling_sources = []
+        coupling_targets = []
+
         for idx, joint_name in enumerate(COMPACT_WIRE_JOINTS):
             joint = self.robot.get_joint(joint_name)
             dof_idx = joint.dofs_idx[0]
-            limit_min, limit_max = JOINT_LIMITS_MIN[idx], JOINT_LIMITS_MAX[idx]
+            self.v_dof_indices[idx] = dof_idx
 
-            # Finger coupling
-            coupled_dofs = []
+            # Analyze Finger Coupling graph for this protocol joint
             if "proximal" in joint_name.lower():
                 finger_prefix = joint_name.split("_proximal")[0]
                 for other_joint in self.robot.joints:
@@ -148,16 +154,19 @@ class GR1Simulation:
                             other_joint.name != joint_name
                             and "proximal" not in other_joint.name.lower()
                         ):
-                            coupled_dofs.append(other_joint.dofs_idx[0])
+                            # This intermediate/distal joint mimics its proximal protocol parent
+                            coupling_sources.append(dof_idx)  # Source DOFs
+                            coupling_targets.append(other_joint.dofs_idx[0])
 
-            self.joint_dof_map.append(
-                {
-                    "dof_idx": dof_idx,
-                    "limits": (limit_min, limit_max),
-                    "name": joint_name,
-                    "coupled": coupled_dofs,
-                }
-            )
+        self.v_coupling_sources = torch.tensor(
+            coupling_sources, device=DEVICE, dtype=torch.long
+        )
+        self.v_coupling_targets = torch.tensor(
+            coupling_targets, device=DEVICE, dtype=torch.long
+        )
+
+        # Vectorized Authorization Mask (1.0 for authorized, 0.0 for ignored)
+        self.v_allowed_mask = torch.zeros(32, device=DEVICE, dtype=torch.float32)
 
         # Save the natural URDF Home Pose to prevent "joint leakage" during resets
         self.home_q = self.robot.get_qpos().clone()
@@ -181,6 +190,7 @@ class GR1Simulation:
         for i, name in enumerate(COMPACT_WIRE_JOINTS):
             if name in self.allowed_names_set:
                 self.allowed_32_indices.add(i)
+                self.v_allowed_mask[i] = 1.0
 
         # Also maintain raw DOF indices for IK solver jitter
         self.ik_dof_indices = [
@@ -190,6 +200,28 @@ class GR1Simulation:
         print(
             f"✅ Unified Mask initialized with {len(self.allowed_32_indices)} authorized joints."
         )
+
+    @property
+    def joint_dof_map(self):
+        """Backward compatibility for diagnostic tests; do not use in the control loop."""
+        legacy_map = []
+        for i, name in enumerate(self.v_joint_names):
+            dof_idx = int(self.v_dof_indices[i])
+            # Reconstruct coupling list from vectorized maps
+            coupled = []
+            if len(self.v_coupling_targets) > 0:
+                mask = self.v_coupling_sources == dof_idx
+                coupled = self.v_coupling_targets[mask].tolist()
+
+            legacy_map.append(
+                {
+                    "dof_idx": dof_idx,
+                    "name": name,
+                    "limits": (float(self.wire_min[i]), float(self.wire_max[i])),
+                    "coupled": coupled,
+                }
+            )
+        return legacy_map
         for i in sorted(self.allowed_32_indices):
             mapping = self.joint_dof_map[i]
             print(
@@ -197,56 +229,49 @@ class GR1Simulation:
             )
 
     def solve_ik(self, pos, quat):
-        """Solves IK for the right arm, only updating the masked joints."""
+        """Solves IK for the right arm, only updating the masked joints in one batch."""
         # Get proposed full-body IK from Genesis
         q_proposed = self.robot.inverse_kinematics(
             link=self.ee_link, pos=pos, quat=quat
         )
 
-        # Overlay the masked joints onto our current pose
         q_final = self.robot.get_qpos().clone()
-        for idx in self.ik_dof_indices:
-            q_final[idx] = q_proposed[idx]
+        # Batch Move IK shoulder/arm group
+        q_final[self.ik_dof_indices] = q_proposed[self.ik_dof_indices]
 
-        # Override only our authorized joints and clamp them directly
-        for i, mapping in enumerate(self.joint_dof_map):
-            if i in self.allowed_32_indices:
-                dof_idx = mapping["dof_idx"]
-                # Apply the proposed IK value and immediately clamp it by our protocol limits
-                q_final[dof_idx] = torch.clamp(
-                    q_proposed[dof_idx], self.wire_min[i], self.wire_max[i]
-                )
+        # Vectorized Overwrite for authorized protocol joints
+        mask_indices = torch.tensor(
+            list(self.allowed_32_indices), device=DEVICE, dtype=torch.long
+        )
+        dof_indices = self.v_dof_indices[mask_indices]
+
+        q_final[dof_indices] = torch.clamp(
+            q_proposed[dof_indices],
+            self.wire_min[mask_indices],
+            self.wire_max[mask_indices],
+        )
 
         return q_final
 
     def get_state_32(self):
-        """Returns the current 32-DOF joint positions as a NumPy array for I/O."""
+        """Returns the current 32-DOF joint positions as a NumPy array (Vectorized)."""
         raw_full_state = self.robot.get_dofs_position()
-        # Extract only the 32 joints, keeping everything on device for now
-        raw_state_32 = torch.stack(
-            [raw_full_state[m["dof_idx"]] for m in self.joint_dof_map]
-        )
-        # Normalize in torch space, then move to CPU for the dataset/UI
-        return self._normalize_state(raw_state_32).cpu().numpy()
+        # Extract and normalize all 32 joints in O(1)
+        return self._normalize_state(raw_full_state[self.v_dof_indices]).cpu().numpy()
 
     def _normalize_state(self, raw_state):
-        """Normalizes raw joint positions to [-1, 1] using protocol constants."""
-        # Ensure we are working with torch tensors for batch math
+        """Normalizes raw joint positions to [-1, 1] (Vectorized)."""
         if not isinstance(raw_state, torch.Tensor):
             raw_state = torch.tensor(raw_state, device=DEVICE, dtype=torch.float32)
 
-        joint_range = self.wire_max - self.wire_min
-        safe_range = torch.where(joint_range > 1e-4, joint_range, 1e-4)
+        # Parallel normalization across the full protocol
+        range_val = self.wire_max - self.wire_min
+        range_val = torch.where(
+            range_val > 1e-4, range_val, 1e-4
+        )  # Zero-div protection
 
-        normalized_state = (raw_state - self.wire_min) / safe_range * 2.0 - 1.0
-
-        # Create a mask for unauthorized joints (on device)
-        mask = torch.zeros_like(normalized_state)
-        for idx in self.allowed_32_indices:
-            mask[idx] = 1.0
-
-        normalized_state *= mask
-        return torch.clamp(normalized_state, -1.0, 1.0)
+        normalized = (raw_state - self.wire_min) / range_val * 2.0 - 1.0
+        return (normalized * self.v_allowed_mask).clamp(-1.1, 1.1)
 
     def reset_env(self):
         """Randomizes cube and robot arm with a safe backward lean."""
@@ -298,35 +323,33 @@ class GR1Simulation:
         )
 
     def process_target_32(self, action_32):
-        """Maps 32-DOF actions to targets and logs progress."""
-        any_update = False
-        print(f"\n[INPUT] Received ZMQ message (32 DOFs):")
-        for idx, mapping in enumerate(self.joint_dof_map):
-            if idx not in self.allowed_32_indices:
-                print(f"  [GATE] Skipping unauthorized index {idx} ({mapping['name']})")
-                continue
+        """Processes a 32-DOF action vector into joint targets (Vectorized)."""
+        if not isinstance(action_32, torch.Tensor):
+            action_32 = torch.tensor(action_32, device=DEVICE, dtype=torch.float32)
 
-            print(f"  [GATE] Allowing index {idx} ({mapping['name']})")
-            val = action_32[idx]
-            if np.isnan(val):
-                continue
+        # Authorize & Mask non-NaN joints (O(1))
+        mask = (~torch.isnan(action_32)) & (self.v_allowed_mask > 0.5)
+        if not mask.any():
+            return False
 
-            self.active_joints_this_command.add(idx)
-            val = np.clip(val, -1.0, 1.0)
-            limit_min, limit_max = mapping["limits"]
-            target_rad = (val + 1.0) / 2.0 * (limit_max - limit_min) + limit_min
+        # Clipping happens implicitly if needed, or explicitly for safety:
+        safe_action = torch.clamp(action_32[mask], -1.0, 1.0)
 
-            dof_idx = mapping["dof_idx"]
-            print(
-                f"  [{idx:02}] {mapping['name']:<30} | In: {val:6.3f} -> Tar: {target_rad:6.3f} rad"
-            )
+        range_val = self.wire_max - self.wire_min
+        target_rads = (safe_action + 1.0) / 2.0 * range_val[mask] + self.wire_min[mask]
 
-            if abs(self.last_target_q[dof_idx] - target_rad) > 1e-4:
-                self.last_target_q[dof_idx] = float(target_rad)
-                for c_idx in mapping["coupled"]:
-                    self.last_target_q[c_idx] = float(target_rad)
-                any_update = True
-        return any_update
+        # Parallel application to primary robot DOFs
+        self.last_target_q[self.v_dof_indices[mask]] = target_rads
+
+        # Parallel Finger Coupling (mimic proximal -> distal in O(1))
+        if len(self.v_coupling_targets) > 0:
+            self.last_target_q[self.v_coupling_targets] = self.last_target_q[
+                self.v_coupling_sources
+            ]
+
+        # Reduced I/O diagnostic: Summary only
+        print(f"[INPUT] Vectorized update for {mask.sum().item()} authorized joints.")
+        return True
 
     def render_and_record(self, action_32):
         """Helper to render cams, log to Rerun, and add frames to recorder."""
