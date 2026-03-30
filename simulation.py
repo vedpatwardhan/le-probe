@@ -101,9 +101,9 @@ class GR1Simulation:
             offset_T=offset_T,
         )
 
-        # Gains & Control (chosen after a lot of trial-and-error)
-        kp_array = np.full(self.robot.n_dofs, 3500.0)
-        kv_array = np.full(self.robot.n_dofs, 150.0)
+        # Gains & Control (Chosen for sharp 1.0s convergence)
+        kp_array = np.full(self.robot.n_dofs, 4500.0)
+        kv_array = np.full(self.robot.n_dofs, 180.0)
         self.robot.set_dofs_kp(kp_array)
         self.robot.set_dofs_kv(kv_array)
 
@@ -313,7 +313,7 @@ class GR1Simulation:
 
         # Smooth Glide to Randomized Pose instead of teleporting
         self.dispatch_action(
-            200, 20, np.full(32, np.nan), q, start_q=self.robot.get_qpos().clone()
+            np.full(32, np.nan), q, start_q=self.robot.get_qpos().clone()
         )
 
         self.last_target_q = q.clone()
@@ -377,14 +377,12 @@ class GR1Simulation:
             }
             self.recorder.add_frame(imgs, self.get_state_32(), action_32)
 
-    def dispatch_action(
-        self, num_steps, num_render_steps, action_32, target_q, start_q=None
-    ):
+    def dispatch_action(self, action_32, target_q, start_q=None):
         """
-        Executes a physics burst.
-        If start_q is provided, it performs a smooth interpolation.
-        Otherwise, it holds target_q for the duration.
+        Executes a physics burst (Uniform: 200 steps, recording every 20).
         """
+        num_steps = 200
+        num_render_steps = 20
         for idx in range(num_steps):
             if start_q is not None:
                 # Smooth interpolation (glide)
@@ -465,10 +463,8 @@ class GR1Simulation:
                 )
                 final_action_32 = self._normalize_state(target_q_32).cpu().numpy()
 
-                # Unified Glide Burst (500 steps)
-                self.dispatch_action(
-                    500, 50, final_action_32, target_q, start_q=start_q
-                )
+                # Unified Glide Burst (Balanced for Dataset: 1.0s)
+                self.dispatch_action(final_action_32, target_q, start_q=start_q)
 
                 # Respond with the resulting 32-DOF joint vector for slider sync
                 self.last_target_q = target_q.clone()
@@ -490,9 +486,9 @@ class GR1Simulation:
                 action_32 = np.array(data["target"], dtype=np.float32)
                 self.process_target_32(action_32)
 
-                # Unified Target Burst (200 steps)
+                # Unified Target Burst (Uniform: 1.0s)
                 print(f"Stepping physics (200Hz) for 1.0s sim-time...")
-                self.dispatch_action(200, 20, action_32, self.last_target_q)
+                self.dispatch_action(action_32, self.last_target_q)
 
                 # Final check of positions for all joints that received input
                 print("\n[OUTPUT] Command Finished. Active Joints Status:")

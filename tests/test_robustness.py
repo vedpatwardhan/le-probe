@@ -12,8 +12,8 @@ def test_pd_convergence_accuracy(sim):
     target_q[dof_idx] += 0.5
 
     start_q = sim.robot.get_qpos().clone()
-    # Execute a 400-step glide (allow extra time for high-precision convergence)
-    sim.dispatch_action(400, 40, np.full(32, np.nan), target_q, start_q=start_q)
+    # Execute a unified glide (Uniform: 200 steps)
+    sim.dispatch_action(np.full(32, np.nan), target_q, start_q=start_q)
 
     actual_q = sim.robot.get_qpos()
     delta = abs(actual_q[dof_idx] - target_q[dof_idx]).item()
