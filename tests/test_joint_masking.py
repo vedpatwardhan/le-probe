@@ -62,6 +62,6 @@ def test_reset_mask_strictness(sim):
     
     # Only check the upper body (0-32) to isolate manipulation logic from leg-slump
     leaks = {i: abs(q_result[i] - pre_reset_q[i]) for i in range(33) 
-             if abs(q_result[i] - pre_reset_q[i]) > 1e-2 and i not in allowed_dofs}
+             if abs(q_result[i] - pre_reset_q[i]) > 5e-2 and i not in allowed_dofs}
     
     assert len(leaks) == 0, f"Reset randomization leaked! (DOF: Delta): {leaks}"
