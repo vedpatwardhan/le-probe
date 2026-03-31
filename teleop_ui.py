@@ -26,6 +26,12 @@ if "target_buffer" not in st.session_state:
 if "staging_buffer" not in st.session_state:
     st.session_state.staging_buffer = np.full(32, np.nan, dtype=np.float32)
 
+if "upload_queue" not in st.session_state:
+    st.session_state.upload_queue = 0
+
+if "total_episodes" not in st.session_state:
+    st.session_state.total_episodes = 0
+
 # --- Load Default Active Joints ---
 if "active_joints" not in st.session_state:
     st.session_state.active_joints = set()
@@ -45,7 +51,15 @@ def send_command(payload):
     try:
         socket.send(msgpack.packb(payload, use_bin_type=True))
         resp = socket.recv()
-        return msgpack.unpackb(resp, raw=False)
+        data = msgpack.unpackb(resp, raw=False)
+
+        # Track background sync progress
+        if "upload_queue" in data:
+            st.session_state.upload_queue = data["upload_queue"]
+        if "total_episodes" in data:
+            st.session_state.total_episodes = data["total_episodes"]
+
+        return data
     except Exception as e:
         st.error(f"ZMQ Error: {e}")
         return None
@@ -145,6 +159,20 @@ with st.sidebar:
     st.divider()
     st.header("🎯 IK Configuration")
     reach_offset = st.slider("Reach Height (cm)", 5, 40, 20)
+
+    st.divider()
+    st.header("📊 Dataset Statistics")
+    st.metric("Total Episodes", st.session_state.total_episodes)
+
+    st.header("☁️ Cloud Sync Status")
+    if st.session_state.upload_queue > 0:
+        st.warning(f"Syncing: {st.session_state.upload_queue} episodes pending...")
+    else:
+        st.success("✅ All episodes synced to Hub.")
+
+    if st.button("Refresh Sync Status"):
+        # Dummy step command to poll status
+        send_command({"command": "poll_status"})
 
 st.markdown("### Select Joint:")
 col1, col2 = st.columns([3, 1])

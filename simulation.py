@@ -299,24 +299,25 @@ class GR1Simulation:
         changed_count = 0
         for i in range(len(curr_q)):
             if abs(curr_q[i] - home_q[i]) > 1e-5:
-                # Find joint name for this DOF
-                name = "unknown"
-                for j in self.robot.joints:
-                    if j.dofs_idx and j.dofs_idx[0] == i:
-                        name = j.name
+                # Find joint name for this robot DOF
+                joint_name = "unknown"
+                for proxy_idx in self.allowed_32_indices:
+                    if int(self.v_dof_indices[proxy_idx]) == i:
+                        joint_name = self.v_joint_names[proxy_idx]
                         break
+
                 print(
-                    f"  DOF {i:02} ({name:<30}) changed: {home_q[i]:.4f} -> {curr_q[i]:.4f}"
+                    f"  DOF {i:02} ({joint_name:<35}) changed: "
+                    f"{home_q[i]:.4f} -> {curr_q[i]:.4f}"
                 )
                 changed_count += 1
         print(f"Total Modified DOFs: {changed_count}")
 
         # Smooth Glide to Randomized Pose instead of teleporting
+        self.last_target_q = q.clone()
         self.dispatch_action(
             np.full(32, np.nan), q, start_q=self.robot.get_qpos().clone()
         )
-
-        self.last_target_q = q.clone()
         print(
             f"[RESET] Env randomized. Cube: ({rx:.2f}, {ry:.2f}) | "
             f"Waist Pitch: {q[waist_pitch_joint.dofs_idx[0]]:.2f}"
@@ -348,7 +349,8 @@ class GR1Simulation:
             ]
 
         # Reduced I/O diagnostic: Summary only
-        print(f"[INPUT] Vectorized update for {mask.sum().item()} authorized joints.")
+        non_nan_count = (~torch.isnan(action_32)).sum().item()
+        print(f"[INPUT] Vectorized update for {non_nan_count} authorized joints.")
         return True
 
     def render_and_record(self, action_32):
@@ -377,10 +379,47 @@ class GR1Simulation:
             }
             self.recorder.add_frame(imgs, self.get_state_32(), action_32)
 
+    def print_joint_status(self):
+        """Prints high-fidelity Target vs. Actual diagnostics for all active joints."""
+        if not self.active_joints_this_command:
+            print("\n[OUTPUT] No Active Joints.")
+            return
+
+        print("\n[OUTPUT] Command Finished. Active Joints Status:")
+        curr_q = self.robot.get_dofs_position().cpu().numpy()
+        for idx in sorted(list(self.active_joints_this_command)):
+            mapping = self.joint_dof_map[idx]
+            joint_name = mapping["name"]
+            dof_idx = mapping["dof_idx"]
+            target = float(self.last_target_q[dof_idx])
+            actual = float(curr_q[dof_idx])
+            diff = actual - target
+            print(
+                f"  {joint_name:<35} | Tar: {target:6.3f} | Act: {actual:6.3f} | Err: {diff:6.3f}"
+            )
+        print("-" * 50 + "\n")
+
     def dispatch_action(self, action_32, target_q, start_q=None):
         """
         Executes a physics burst (Uniform: 200 steps, recording every 20).
         """
+        # Use non-NaN selector mask (High-Fidelity Teleop State)
+        if action_32 is not None:
+            mask_nan = ~np.isnan(action_32)
+            selected_indices = np.where(mask_nan)[0].tolist()
+            self.active_joints_this_command.update(selected_indices)
+
+        # Fallback to changed-logic (For Resets or IK-only shifts)
+        if not self.active_joints_this_command:
+            current_robot_q = self.robot.get_dofs_position()
+            ref_q = start_q if start_q is not None else current_robot_q
+            diff = torch.abs(target_q - ref_q)
+            changed_dof_indices = torch.where(diff > 1e-4)[0].tolist()
+
+            for proxy_idx in self.allowed_32_indices:
+                if int(self.v_dof_indices[proxy_idx]) in changed_dof_indices:
+                    self.active_joints_this_command.add(proxy_idx)
+
         num_steps = 200
         num_render_steps = 20
         for idx in range(num_steps):
@@ -398,6 +437,9 @@ class GR1Simulation:
             # Render and record based on num_render_steps
             if idx % num_render_steps == 0:
                 self.render_and_record(action_32)
+
+        # Final status after every physics burst
+        self.print_joint_status()
 
     def run(self, port=5556):
         """Main Loop: Blocking ZMQ (REP) -> Physics Burst"""
@@ -424,15 +466,23 @@ class GR1Simulation:
         while self.is_running:
             # Block and wait for a UI message
             msg = socket.recv()
-
             data = msgpack.unpackb(msg, raw=False)
             cmd = data.get("command")
+
+            # Prep for diagnostic tracking
+            self.active_joints_this_command.clear()
+
             if cmd == "reset":
                 self.reset_env()
                 self.scene.step()
                 socket.send(
                     msgpack.packb(
-                        {"status": "reset_ok", "joints": self.get_state_32().tolist()}
+                        {
+                            "status": "reset_ok",
+                            "joints": self.get_state_32().tolist(),
+                            "upload_queue": self.recorder.pending_uploads,
+                            "total_episodes": self.recorder.total_episodes,
+                        }
                     )
                 )
                 continue
@@ -463,26 +513,49 @@ class GR1Simulation:
                 )
                 final_action_32 = self._normalize_state(target_q_32).cpu().numpy()
 
-                # Unified Glide Burst (Balanced for Dataset: 1.0s)
-                self.dispatch_action(final_action_32, target_q, start_q=start_q)
-
                 # Respond with the resulting 32-DOF joint vector for slider sync
                 self.last_target_q = target_q.clone()
+                self.dispatch_action(final_action_32, target_q, start_q=start_q)
                 resp_joints = self.get_state_32().tolist()
 
                 socket.send(
-                    msgpack.packb({"status": "auto_reach_ok", "joints": resp_joints})
+                    msgpack.packb(
+                        {
+                            "status": "auto_reach_ok",
+                            "joints": resp_joints,
+                            "upload_queue": self.recorder.pending_uploads,
+                            "total_episodes": self.recorder.total_episodes,
+                        }
+                    )
                 )
                 continue
             elif cmd == "stop_recording":
                 if self.is_recording:
                     self.recorder.stop_episode()
                     self.is_recording = False
-                socket.send(msgpack.packb({"status": "recording_stopped"}))
+                socket.send(
+                    msgpack.packb(
+                        {
+                            "status": "recording_stopped",
+                            "upload_queue": self.recorder.pending_uploads,
+                            "total_episodes": self.recorder.total_episodes,
+                        }
+                    )
+                )
+                continue
+            elif cmd == "poll_status":
+                socket.send(
+                    msgpack.packb(
+                        {
+                            "status": "status_ok",
+                            "upload_queue": self.recorder.pending_uploads,
+                            "total_episodes": self.recorder.total_episodes,
+                        }
+                    )
+                )
                 continue
 
             if "target" in data:
-                self.active_joints_this_command.clear()
                 action_32 = np.array(data["target"], dtype=np.float32)
                 self.process_target_32(action_32)
 
@@ -490,23 +563,16 @@ class GR1Simulation:
                 print(f"Stepping physics (200Hz) for 1.0s sim-time...")
                 self.dispatch_action(action_32, self.last_target_q)
 
-                # Final check of positions for all joints that received input
-                print("\n[OUTPUT] Command Finished. Active Joints Status:")
-                curr_q = self.robot.get_dofs_position().cpu().numpy()
-                for idx in sorted(list(self.active_joints_this_command)):
-                    mapping = self.joint_dof_map[idx]
-                    joint_name = mapping["name"]
-                    dof_idx = mapping["dof_idx"]
-                    target = self.last_target_q[dof_idx]
-                    actual = curr_q[dof_idx]
-                    diff = actual - target
-                    print(
-                        f"  {joint_name:<30} | Tar: {target:6.3f} | Act: {actual:6.3f} | Err: {diff:6.3f}"
-                    )
-                print("------------------------------------------\n")
-
                 # Send confirmation back to REQ socket
-                socket.send(msgpack.packb({"status": "step_ok"}))
+                socket.send(
+                    msgpack.packb(
+                        {
+                            "status": "step_ok",
+                            "upload_queue": self.recorder.pending_uploads,
+                            "total_episodes": self.recorder.total_episodes,
+                        }
+                    )
+                )
 
 
 if __name__ == "__main__":

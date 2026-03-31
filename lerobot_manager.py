@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from PIL import Image
+from concurrent.futures import ThreadPoolExecutor
 
 try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -13,7 +14,7 @@ except ImportError:
 class LeRobotManager:
     """Manages LeRobot dataset creation and frame buffering."""
 
-    def __init__(self, repo_id="gr1_pickup", fps=10, root="./datasets"):
+    def __init__(self, repo_id="gr1_pickup_large", fps=10, root="./datasets"):
         self.repo_id = repo_id
         self.fps = fps
         self.root = os.path.abspath(root)
@@ -23,6 +24,22 @@ class LeRobotManager:
         if not LEROBOT_AVAILABLE:
             print("[WARNING] LeRobot not installed. Recording will be disabled.")
             return
+
+        # Sequential Uploader: Max workers = 1 to ensure repo-level synchronization parity
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self._pending_uploads = 0
+        self._total_episodes = 0
+
+        # Initial probe of dataset scale
+        dataset_path = os.path.join(self.root, self.repo_id)
+        if LEROBOT_AVAILABLE and os.path.exists(
+            os.path.join(dataset_path, "meta", "info.json")
+        ):
+            try:
+                temp_ds = LeRobotDataset(repo_id=self.repo_id, root=dataset_path)
+                self._total_episodes = temp_ds.num_episodes
+            except Exception as e:
+                print(f"[LEROBOT] ⚠️ Metadata probe failed: {e}")
 
     def start_episode(self, task_instruction):
         """Initializes a new episode or resumes the dataset."""
@@ -125,14 +142,43 @@ class LeRobotManager:
 
         self.dataset.add_frame(frame_data)
 
+    @property
+    def total_episodes(self):
+        """Returns the total number of episodes in the dataset."""
+        return self._total_episodes
+
+    @property
+    def pending_uploads(self):
+        """Returns the current number of background upload tasks in flight."""
+        return self._pending_uploads
+
+    def _async_push_to_hub(self, dataset_to_push):
+        """Internal worker to execute the hub push operation."""
+        try:
+            print(f"[SYNC] Uploading current batch to Hub: {self.repo_id}...")
+            dataset_to_push.push_to_hub()
+            print(f"[SYNC] Hub synchronization successful.")
+        except Exception as e:
+            print(f"[SYNC] ⚠️ Hub Upload Failed: {e}")
+        finally:
+            self._pending_uploads = max(0, self._pending_uploads - 1)
+
     def stop_episode(self):
-        """Finalizes and saves the current episode."""
+        """Finalizes locally and queues a background Hub sync."""
         if self.dataset is None:
             return
 
+        print(f"[LEROBOT] Finalizing episode local save...")
         self.dataset.save_episode(parallel_encoding=False)
+        self._total_episodes = self.dataset.num_episodes
         print(f"[LEROBOT] Episode saved. Total frames: {self.episode_frame_count}")
-        # Finalize is only needed once technically, but save_episode handles the parquet write.
-        print(f"[LEROBOT] Episode saved to {self.root}/{self.repo_id}")
+
+        # Initiate non-blocking background synchronization
+        self._pending_uploads += 1
+        self.executor.submit(self._async_push_to_hub, self.dataset)
+
+        print(
+            f"[LEROBOT] Episode queued for Hub synchronization. Source: {self.root}/{self.repo_id}"
+        )
         self.episode_frame_count = 0  # Reset for next episode
         self.dataset = None
