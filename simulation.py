@@ -34,7 +34,7 @@ class GR1Simulation:
         # Create Scene
         self.scene = gs.Scene(
             show_viewer=False,
-            sim_options=gs.options.SimOptions(dt=0.002, substeps=1),
+            sim_options=gs.options.SimOptions(dt=0.0025, substeps=1),
             vis_options=gs.options.VisOptions(
                 lights=[
                     {
@@ -101,14 +101,14 @@ class GR1Simulation:
             offset_T=offset_T,
         )
 
-        # Gains & Control (Chosen for sharp 1.0s convergence)
-        kp_array = np.full(self.robot.n_dofs, 4500.0)
-        kv_array = np.full(self.robot.n_dofs, 180.0)
+        # Absolute Aggressive Control Profile (Optimized for maximum acceleration)
+        kp_array = np.full(self.robot.n_dofs, 80000.0)
+        kv_array = np.full(self.robot.n_dofs, 1200.0)
         self.robot.set_dofs_kp(kp_array)
         self.robot.set_dofs_kv(kv_array)
 
-        # Force Range (chosen after a lot of trial-and-error)
-        force_max = np.full(self.robot.n_dofs, 500.0)
+        # Industrial Force (MAX POWER: 5,000 Nm)
+        force_max = np.full(self.robot.n_dofs, 5000.0)
         force_min = -force_max
         self.robot.set_dofs_force_range(force_min, force_max)
 
@@ -192,10 +192,16 @@ class GR1Simulation:
                 self.allowed_32_indices.add(i)
                 self.v_allowed_mask[i] = 1.0
 
-        # Also maintain raw DOF indices for IK solver jitter
-        self.ik_dof_indices = [
-            j.dofs_idx[0] for j in self.robot.joints if j.name in self.allowed_names_set
-        ]
+        # Also maintain raw DOF indices for IK solver
+        self.ik_dof_indices = []
+        self.v_ik_dof_indices_local = []
+
+        # Calculate base offset for local indexing
+        base_dof_idx = self.robot.q_start
+        for j in self.robot.joints:
+            if j.name in self.allowed_names_set:
+                self.ik_dof_indices.append(j.dofs_idx[0])
+                self.v_ik_dof_indices_local.append(j.dofs_idx[0] - base_dof_idx)
 
         print(
             f"✅ Unified Mask initialized with {len(self.allowed_32_indices)} authorized joints."
@@ -229,27 +235,37 @@ class GR1Simulation:
             )
 
     def solve_ik(self, pos, quat):
-        """Solves IK for the right arm, only updating the masked joints in one batch."""
-        # Get proposed full-body IK from Genesis
+        """
+        Authoritative IK Solver: Constrains the Jacobian to native authorized joints.
+        """
+        # Get proposed full-body IK from Genesis, restricted to authorized group
         q_proposed = self.robot.inverse_kinematics(
-            link=self.ee_link, pos=pos, quat=quat
+            link=self.ee_link,
+            pos=pos,
+            quat=quat,
+            dofs_idx_local=self.v_ik_dof_indices_local,
         )
+        q_final = self.home_q.clone()
 
-        q_final = self.robot.get_qpos().clone()
-        # Batch Move IK shoulder/arm group
-        q_final[self.ik_dof_indices] = q_proposed[self.ik_dof_indices]
+        # Batch Move IK shoulder/arm group (Overwrite home values with solver proposals)
+        q_proposed_clamped = torch.clamp(
+            q_proposed[self.ik_dof_indices],
+            self.robot.get_dofs_limit()[0][self.ik_dof_indices],
+            self.robot.get_dofs_limit()[1][self.ik_dof_indices],
+        )
+        q_final[self.ik_dof_indices] = q_proposed_clamped
 
-        # Vectorized Overwrite for authorized protocol joints
+        # Also preserve ALL currently authorized 32-DOF joints (Sliders)
+        # This prevents snapping other sliders to home if they weren't in the IK group
+        current_q = self.robot.get_qpos().clone()
         mask_indices = torch.tensor(
             list(self.allowed_32_indices), device=DEVICE, dtype=torch.long
         )
         dof_indices = self.v_dof_indices[mask_indices]
+        q_final[dof_indices] = current_q[dof_indices]
 
-        q_final[dof_indices] = torch.clamp(
-            q_proposed[dof_indices],
-            self.wire_min[mask_indices],
-            self.wire_max[mask_indices],
-        )
+        # Finally, overwrite specifically with the NEW IK results where intended
+        q_final[self.ik_dof_indices] = q_proposed_clamped
 
         return q_final
 
@@ -260,18 +276,24 @@ class GR1Simulation:
         return self._normalize_state(raw_full_state[self.v_dof_indices]).cpu().numpy()
 
     def _normalize_state(self, raw_state):
-        """Normalizes raw joint positions to [-1, 1] (Vectorized)."""
+        """
+        Normalize 32-DOF protocol vector [-1.0, 1.0].
+        Unauthorized joints are mapped to NaN in a single vectorized pass.
+        """
         if not isinstance(raw_state, torch.Tensor):
             raw_state = torch.tensor(raw_state, device=DEVICE, dtype=torch.float32)
 
-        # Parallel normalization across the full protocol
+        # Parallel normalization across all 32 joints
         range_val = self.wire_max - self.wire_min
-        range_val = torch.where(
-            range_val > 1e-4, range_val, 1e-4
-        )  # Zero-div protection
+        range_val = torch.where(range_val > 1e-4, range_val, 1e-4)  # Div protection
 
-        normalized = (raw_state - self.wire_min) / range_val * 2.0 - 1.0
-        return (normalized * self.v_allowed_mask).clamp(-1.1, 1.1)
+        normalized = 2.0 * (raw_state - self.wire_min) / range_val - 1.0
+
+        # unauthorized joints -> NaN
+        masked = normalized.clone()
+        masked[self.v_allowed_mask == 0] = float("nan")
+
+        return masked.clamp(-1.1, 1.1)
 
     def reset_env(self):
         """Randomizes cube and robot arm with a safe backward lean."""
@@ -401,44 +423,41 @@ class GR1Simulation:
 
     def dispatch_action(self, action_32, target_q, start_q=None):
         """
-        Executes a physics burst (Uniform: 200 steps, recording every 20).
+        High-Frequency High-Authority Burst: 400 steps (1.0s at 400Hz).
+        Recording: 10 frames (every 40 steps).
         """
-        # Use non-NaN selector mask (High-Fidelity Teleop State)
+        # Diagnostic Registration (Selection-Based Parity)
         if action_32 is not None:
             mask_nan = ~np.isnan(action_32)
-            selected_indices = np.where(mask_nan)[0].tolist()
-            self.active_joints_this_command.update(selected_indices)
+            for idx in np.where(mask_nan)[0]:
+                self.active_joints_this_command.add(int(idx))
 
-        # Fallback to changed-logic (For Resets or IK-only shifts)
+        # Fallback Registration (Change-Based for Resets/IK)
         if not self.active_joints_this_command:
             current_robot_q = self.robot.get_dofs_position()
             ref_q = start_q if start_q is not None else current_robot_q
             diff = torch.abs(target_q - ref_q)
             changed_dof_indices = torch.where(diff > 1e-4)[0].tolist()
-
             for proxy_idx in self.allowed_32_indices:
                 if int(self.v_dof_indices[proxy_idx]) in changed_dof_indices:
                     self.active_joints_this_command.add(proxy_idx)
 
-        num_steps = 200
-        num_render_steps = 20
-        for idx in range(num_steps):
-            if start_q is not None:
-                # Smooth interpolation (glide)
-                alpha = idx / float(num_steps)
-                current_q = start_q + alpha * (target_q - start_q)
-            else:
-                # Hold fixed target (manual step)
-                current_q = target_q
+        # 1.0s Fixed-Window Physics Burst (400 steps @ 400Hz)
+        num_steps = 400
+        num_render_steps = 40
+        ref_start_q = start_q if start_q is not None else self.robot.get_qpos().clone()
 
+        for idx in range(num_steps):
+            alpha = idx / float(num_steps)
+            current_q = ref_start_q + alpha * (target_q - ref_start_q)
             self.robot.control_dofs_position(current_q)
             self.scene.step()
 
-            # Render and record based on num_render_steps
+            # Diagnostic rendering/recording sync (10 frames)
             if idx % num_render_steps == 0:
                 self.render_and_record(action_32)
 
-        # Final status after every physics burst
+        # Final status after every physics burst (Diagnostic Parity)
         self.print_joint_status()
 
     def run(self, port=5556):
@@ -459,9 +478,9 @@ class GR1Simulation:
             print(f"⚠️ Rerun proxy not found: {e}")
 
         print("\n🚀 BLOCKING SIMULATION RUNNING (Single-Threaded)")
-        print("  - Mode: Sequential (Draining -> Step 500 -> Wait)")
-        print("  - Gains: KP=3500, KV=150 (Stable Precision)")
-        print("  - Force: 500 Nm (MAX POWER)\n")
+        print("  - Mode: Sequential (400Hz / 400 Steps)")
+        print("  - Gains: KP=80000, KV=1200 (Absolute Aggressive)")
+        print("  - Force: 5000 Nm (ULTRA POWER)\n")
 
         while self.is_running:
             # Block and wait for a UI message
