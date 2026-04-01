@@ -66,9 +66,9 @@ FROZEN_JOINTS = {
 CAMERA_ATTACH_LINK = "right_hand_pitch_link"
 
 # Central URDF Path
-URDF_PATH = "/content/sim_assets/urdf/gr1t1_fourier_hand_6dof.xml"
+URDF_PATH = "/content/sim_assets/gr1t1_fourier_hand_6dof.xml"
 if not os.path.exists(URDF_PATH):
-    URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/urdf/gr1t1_fourier_hand_6dof.xml"
+    URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/gr1t1_fourier_hand_6dof.xml"
 
 
 # -----------------------------------------------------------------------------

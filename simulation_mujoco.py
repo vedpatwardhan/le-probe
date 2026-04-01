@@ -14,7 +14,7 @@ from gr1_config import COMPACT_WIRE_JOINTS, JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
 import mink
 
 # Configuration
-SCENE_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/urdf/scene_gr1_pickup.xml"
+SCENE_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/scene_gr1_pickup.xml"
 DEVICE = "cpu"
 
 import os
