@@ -83,13 +83,13 @@ def get_urdf_limits(urdf_path, joint_names):
 
     tree = ET.parse(urdf_path)
     root = tree.getroot()
-    
+
     joint_db = {}
     for j in root.iter("joint"):
         name = j.get("name")
         if name is None:
             continue
-            
+
         # Try URDF style: <joint><limit lower="..." upper="..." /></joint>
         limit_tag = j.find("limit")
         if limit_tag is not None:
@@ -97,7 +97,7 @@ def get_urdf_limits(urdf_path, joint_names):
             upper = float(limit_tag.get("upper", 0.0))
             joint_db[name] = (lower, upper)
             continue
-            
+
         # Try MuJoCo style: <joint range="min max" />
         range_attr = j.get("range")
         if range_attr is not None:
@@ -107,7 +107,7 @@ def get_urdf_limits(urdf_path, joint_names):
                 upper = float(parts[1])
                 joint_db[name] = (lower, upper)
                 continue
-        
+
         # Fallback
         joint_db[name] = (0.0, 0.0)
 
