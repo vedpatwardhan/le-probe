@@ -158,7 +158,7 @@ with st.sidebar:
 
     st.divider()
     st.header("🎯 IK Configuration")
-    reach_offset = st.slider("Reach Height (cm)", 5, 40, 20)
+    reach_offset = st.slider("Reach Height (cm)", 5, 40, 5)
 
     st.divider()
     st.header("📊 Dataset Statistics")

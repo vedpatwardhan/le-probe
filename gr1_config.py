@@ -66,9 +66,9 @@ FROZEN_JOINTS = {
 CAMERA_ATTACH_LINK = "right_hand_pitch_link"
 
 # Central URDF Path
-URDF_PATH = "/content/gr1_assets/urdf/gr1t2_fourier_hand_6dof.urdf"
+URDF_PATH = "/content/sim_assets/urdf/gr1t1_fourier_hand_6dof.xml"
 if not os.path.exists(URDF_PATH):
-    URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/repos/Wiki-GRx-Models/GRX/GR1/gr1t2/urdf/gr1t2_fourier_hand_6dof.urdf"
+    URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/urdf/gr1t1_fourier_hand_6dof.xml"
 
 
 # -----------------------------------------------------------------------------
@@ -83,14 +83,33 @@ def get_urdf_limits(urdf_path, joint_names):
 
     tree = ET.parse(urdf_path)
     root = tree.getroot()
-    joint_db = {
-        j.get("name"): (
-            float(j.find("limit").get("lower", 0.0)),
-            float(j.find("limit").get("upper", 0.0)),
-        )
-        for j in root.findall("joint")
-        if j.find("limit") is not None
-    }
+    
+    joint_db = {}
+    for j in root.iter("joint"):
+        name = j.get("name")
+        if name is None:
+            continue
+            
+        # Try URDF style: <joint><limit lower="..." upper="..." /></joint>
+        limit_tag = j.find("limit")
+        if limit_tag is not None:
+            lower = float(limit_tag.get("lower", 0.0))
+            upper = float(limit_tag.get("upper", 0.0))
+            joint_db[name] = (lower, upper)
+            continue
+            
+        # Try MuJoCo style: <joint range="min max" />
+        range_attr = j.get("range")
+        if range_attr is not None:
+            parts = range_attr.split()
+            if len(parts) == 2:
+                lower = float(parts[0])
+                upper = float(parts[1])
+                joint_db[name] = (lower, upper)
+                continue
+        
+        # Fallback
+        joint_db[name] = (0.0, 0.0)
 
     mins = [
         joint_db.get(j, (0.0, 0.0))[0] if j not in FROZEN_JOINTS else FROZEN_JOINTS[j]

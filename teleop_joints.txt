@@ -1,6 +1,8 @@
 right_shoulder_pitch_joint
 right_shoulder_roll_joint
 right_shoulder_yaw_joint
+right_elbow_pitch_joint
+right_wrist_roll_joint
 R_thumb_proximal_yaw_joint
 R_thumb_proximal_pitch_joint
 R_index_proximal_joint
