@@ -87,7 +87,7 @@ class GR1MuJoCoSimulation:
         self.recorder = LeRobotManager(repo_id="gr1_pickup_mujoco", fps=10)
         
         # IK Setup (Mink 1.1.0) with DOF Freezing for Authorization
-        self.ee_link_name = "right_hand_pitch_link"
+        self.ee_link_name = "R_index_tip_link"
         self.configuration = mink.Configuration(self.model)
         
         # ... (rest of configuration same)
@@ -310,14 +310,11 @@ class GR1MuJoCoSimulation:
                 self.is_recording = False
                 send_resp({"status": "recording_stopped"})
             elif cmd == "auto_reach":
-                offset = data.get("offset_cm", 0.01) / 100.0
                 cube_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint")
                 cube_pos = self.data.qpos[self.model.jnt_qposadr[cube_id] : self.model.jnt_qposadr[cube_id]+3].copy()
-                
-                # Reach Target (Top-down palm orientation)
-                target_pos = cube_pos + [0, 0, offset]
+
                 # Stable top-down orientation: [0, 1, 0, 0] (wxyz)
-                target_q = self.solve_ik(target_pos, [0, 1, 0, 0])
+                target_q = self.solve_ik(cube_pos, [0, 1, 0, 0])
                 
                 print(f"🎯 Auto-Reach: Target {target_pos} | Quat [0,1,0,0]")
                 self.dispatch_action(None, target_q)
