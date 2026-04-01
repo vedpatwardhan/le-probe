@@ -383,7 +383,11 @@ class GR1MuJoCoSimulation:
                 # --- PHASE 1: LIFT (Clear Obstacle + Verticalize) ---
                 print("🚀 Phase 1: Lifting to 12cm waypoint...")
                 pos_i_h = cube_pos + [0, 0.04, 0.12]
-                pos_t_h = cube_pos + [0, -0.04, 0.12]
+                pos_t_h = cube_pos + [
+                    0.015,
+                    -0.035,
+                    0.12,
+                ]  # Precision: +1.5cm forward, 5mm tighter
                 pos_w_h = cube_pos + [0, 0, 0.20]  # Wrist starts very high
                 q_reach_h = self.solve_ik(pos_i_h, pos_t_h, pos_w_h, [0, 1, 0, 0])
                 self.dispatch_action(None, q_reach_h)
@@ -391,10 +395,51 @@ class GR1MuJoCoSimulation:
                 # --- PHASE 2: DESCENT (Vertical Reverse Cup) ---
                 print("🎯 Phase 2: Descending into Vertical Fork...")
                 pos_i_l = cube_pos + [0, 0.04, 0.0]
-                pos_t_l = cube_pos + [0, -0.04, 0.0]
-                pos_w_l = cube_pos + [0, 0, 0.04]  # Maintain Wrist at +8cm
+                pos_t_l = cube_pos + [
+                    0.015,
+                    -0.035,
+                    0.0,
+                ]  # Precision: +1.5cm forward, 5mm tighter
+                pos_w_l = cube_pos + [
+                    0,
+                    0,
+                    0.04,
+                ]  # Maintain Wrist at +4cm above cube center
                 q_reach_l = self.solve_ik(pos_i_l, pos_t_l, pos_w_l, [0, 1, 0, 0])
                 self.dispatch_action(None, q_reach_l)
+
+                # --- PHASE 3: GRASP (Finger Closure) ---
+                print("🤝 Phase 3: Grasping Cube...")
+                q_grasp = q_reach_l.copy()
+                # Right Hand Gripper Mapping:
+                # 47: R_thumb_proximal_yaw (-1.6 to 0) -> Curl = -1.1
+                # 48: R_thumb_proximal_pitch (0 to 1.1) -> Curl = +1.1
+                # 50-56: Finger Proximal (-1.6 to 0) -> Curl = -1.1
+                q_grasp[47] = -1.1
+                q_grasp[48] = 1.1  # Corrected: Positive curl for thumb pitch
+                for g_id in [50, 52, 54, 56]:
+                    q_grasp[g_id] = -1.1
+                self.dispatch_action(None, q_grasp)
+
+                # --- PHASE 4: LIFT (Verifying Capture) ---
+                print("🚀 Phase 4: Lifting Assembly (+15cm)...")
+                pos_i_up = cube_pos + [0, 0.04, 0.15]
+                pos_t_up = cube_pos + [
+                    0.015,
+                    -0.035,
+                    0.15,
+                ]  # Maintaining Precision offsets during lift
+                pos_w_up = cube_pos + [
+                    0,
+                    0,
+                    0.19,
+                ]  # Maintain offset relative to new cube pos
+                q_lift = self.solve_ik(pos_i_up, pos_t_up, pos_w_up, [0, 1, 0, 0])
+                q_lift[47] = -1.1
+                q_lift[48] = 1.1
+                for g_id in [50, 52, 54, 56]:
+                    q_lift[g_id] = -1.1
+                self.dispatch_action(None, q_lift)
 
                 send_resp(
                     {"status": "auto_reach_ok", "joints": self.get_state_32().tolist()}
