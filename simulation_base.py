@@ -19,21 +19,31 @@ from gr1_config import (
 # Suppress performance warnings from qpsolvers
 warnings.filterwarnings("ignore", category=UserWarning, module="qpsolvers")
 
+
 class GR1MuJoCoBase:
     """
     Shared Physical Foundation for GR-1 MuJoCo Simulations.
     Handles XML loading, IK solving, State extraction, and Perception.
     """
+
     def __init__(self, scene_path=SCENE_PATH):
         print(f"--- GR-1 MODULAR BASE (MuJoCo) ---")
         self.model = mujoco.MjModel.from_xml_path(scene_path)
         self.data = mujoco.MjData(self.model)
-        
+
         # Session & Directory Management
         self.session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.base_log_dir = Path("/Users/vedpatwardhan/Desktop/cortex-os/temp_images") / self.session_id
-        self.cam_names = ["world_top", "world_left", "world_right", "world_center", "world_wrist"]
-        
+        self.base_log_dir = (
+            Path("/Users/vedpatwardhan/Desktop/cortex-os/temp_images") / self.session_id
+        )
+        self.cam_names = [
+            "world_top",
+            "world_left",
+            "world_right",
+            "world_center",
+            "world_wrist",
+        ]
+
         for cam in self.cam_names:
             (self.base_log_dir / cam).mkdir(parents=True, exist_ok=True)
         self.frame_indices = {cam: 0 for cam in self.cam_names}
@@ -46,7 +56,7 @@ class GR1MuJoCoBase:
         self.wire_max = np.array(JOINT_LIMITS_MAX)
         self._init_joint_mappings()
         self._init_finger_coupling()
-        
+
         # LeRobot Manager
         self.recorder = LeRobotManager(repo_id="gr1_pickup_mujoco", fps=10)
 
@@ -57,7 +67,7 @@ class GR1MuJoCoBase:
         root_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "root")
         self.root_q_idx = self.model.jnt_qposadr[root_id]
         self.data.qpos[self.root_q_idx : self.root_q_idx + 3] = [0.0, 0.0, 0.95]
-        
+
         self.last_target_q = self.data.qpos.copy()
         self.active_joints_this_command = set()
         self.is_recording = False
@@ -65,10 +75,15 @@ class GR1MuJoCoBase:
 
     def _init_joint_mappings(self):
         self.allowed_names = set()
-        for path in ["gr1_gr00t/teleop_joints.txt", "gr1_gr00t/ik_joints.txt"]:
+        for path in [
+            "gr00t-gr1-pickup/teleop_joints.txt",
+            "gr00t-gr1-pickup/ik_joints.txt",
+        ]:
             if os.path.exists(path):
                 with open(path, "r") as f:
-                    self.allowed_names.update([l.strip().split("#")[0].strip() for l in f if l.strip()])
+                    self.allowed_names.update(
+                        [l.strip().split("#")[0].strip() for l in f if l.strip()]
+                    )
 
         self.protocol_joint_ids = []
         self.v_allowed_mask = np.zeros(32)
@@ -89,9 +104,13 @@ class GR1MuJoCoBase:
                 for j in range(self.model.njnt):
                     j_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, j)
                     if j_name and base_prefix in j_name and j_name != name:
-                        if "thumb" in name.lower() and (("yaw" in name.lower() and "pitch" in j_name.lower()) or ("pitch" in name.lower() and "yaw" in j_name.lower())):
+                        if "thumb" in name.lower() and (
+                            ("yaw" in name.lower() and "pitch" in j_name.lower())
+                            or ("pitch" in name.lower() and "yaw" in j_name.lower())
+                        ):
                             continue
-                        if i not in self.coupling_map: self.coupling_map[i] = []
+                        if i not in self.coupling_map:
+                            self.coupling_map[i] = []
                         self.coupling_map[i].append(self.model.jnt_qposadr[j])
 
     def _init_ik_solver(self):
@@ -103,9 +122,27 @@ class GR1MuJoCoBase:
         self.auth_dofs = {18, 19, 20, 39, 40, 41, 42, 43, 44, 45}
         frozen_dofs = list(all_dofs - self.auth_dofs)
         self.tasks = [
-            mink.FrameTask(frame_name=self.ee_index_link, frame_type="body", position_cost=5.0, orientation_cost=0.0, lm_damping=0.001),
-            mink.FrameTask(frame_name=self.ee_thumb_link, frame_type="body", position_cost=5.0, orientation_cost=0.0, lm_damping=0.001),
-            mink.FrameTask(frame_name=self.ee_wrist_link, frame_type="body", position_cost=2.0, orientation_cost=0.0, lm_damping=0.001),
+            mink.FrameTask(
+                frame_name=self.ee_index_link,
+                frame_type="body",
+                position_cost=5.0,
+                orientation_cost=0.0,
+                lm_damping=0.001,
+            ),
+            mink.FrameTask(
+                frame_name=self.ee_thumb_link,
+                frame_type="body",
+                position_cost=5.0,
+                orientation_cost=0.0,
+                lm_damping=0.001,
+            ),
+            mink.FrameTask(
+                frame_name=self.ee_wrist_link,
+                frame_type="body",
+                position_cost=2.0,
+                orientation_cost=0.0,
+                lm_damping=0.001,
+            ),
             mink.PostureTask(model=self.model, cost=1e-6),
             mink.DofFreezingTask(model=self.model, dof_indices=frozen_dofs),
         ]
@@ -123,23 +160,38 @@ class GR1MuJoCoBase:
         return state
 
     def solve_ik(self, pos_wrist, quat, pos_index=None, pos_thumb=None):
-        if pos_index is None: pos_index = pos_wrist + [0, 0, 0.05]
-        if pos_thumb is None: pos_thumb = pos_wrist + [0, 0, 0.05]
+        pos_wrist = np.array(pos_wrist)
+        if pos_index is None:
+            pos_index = pos_wrist + np.array([0, 0, 0.05])
+        if pos_thumb is None:
+            pos_thumb = pos_wrist + np.array([0, 0, 0.05])
+        pos_index = np.array(pos_index)
+        pos_thumb = np.array(pos_thumb)
         self.configuration.update(self.data.qpos)
         rotation = mink.SO3(np.array(quat))
-        self.tasks[0].set_target(mink.SE3.from_rotation_and_translation(rotation, pos_index))
-        self.tasks[1].set_target(mink.SE3.from_rotation_and_translation(rotation, pos_thumb))
-        self.tasks[2].set_target(mink.SE3.from_rotation_and_translation(rotation, pos_wrist))
+        self.tasks[0].set_target(
+            mink.SE3.from_rotation_and_translation(rotation, pos_index)
+        )
+        self.tasks[1].set_target(
+            mink.SE3.from_rotation_and_translation(rotation, pos_thumb)
+        )
+        self.tasks[2].set_target(
+            mink.SE3.from_rotation_and_translation(rotation, pos_wrist)
+        )
         for i in range(1500):
-            solver = mink.solve_ik(self.configuration, self.tasks, dt=0.15, solver="osqp")
+            solver = mink.solve_ik(
+                self.configuration, self.tasks, dt=0.15, solver="osqp"
+            )
             q_ref = self.configuration.q.copy()
             full_vel = solver.copy()
             for d in range(len(full_vel)):
-                if d not in self.auth_dofs: full_vel[d] = 0.0
+                if d not in self.auth_dofs:
+                    full_vel[d] = 0.0
             mujoco.mj_integratePos(self.model, q_ref, full_vel, 0.05)
             self.configuration.update(q_ref)
             err = self.tasks[0].compute_error(self.configuration)
-            if np.linalg.norm(err) < 0.01: break
+            if np.linalg.norm(err) < 0.01:
+                break
         return self.configuration.q.copy()
 
     def sync_ctrl_to_qpos(self, q):
@@ -154,12 +206,14 @@ class GR1MuJoCoBase:
             self.renderer.update_scene(self.data, camera=name)
             rgb = self.renderer.render()
             views[name] = rgb
-            if self.rerun_count % 2 == 0: rr.log(name, rr.Image(rgb))
+            if self.rerun_count % 2 == 0:
+                rr.log(name, rr.Image(rgb))
             img_path = self.base_log_dir / name / f"{self.frame_indices[name]:04d}.jpg"
             Image.fromarray(rgb).save(img_path)
             self.frame_indices[name] += 1
         self.rerun_count += 1
-        if self.is_recording: self.recorder.add_frame(views, self.get_state_32(), action_32)
+        if self.is_recording:
+            self.recorder.add_frame(views, self.get_state_32(), action_32)
 
     def dispatch_action(self, action_32, target_q):
         total_steps = 200
@@ -172,7 +226,8 @@ class GR1MuJoCoBase:
             self.data.qpos[self.root_q_idx : self.root_q_idx + 7] = root_target
             self.data.qvel[:6] = 0.0
             mujoco.mj_step(self.model, self.data)
-            if step % 16 == 0: self.render_and_record(action_32)
+            if step % 16 == 0:
+                self.render_and_record(action_32)
 
     def reset_env(self):
         print("🎲 Randomizing the environment...")
@@ -181,12 +236,21 @@ class GR1MuJoCoBase:
         cube_q_idx = self.model.jnt_qposadr[cube_id]
         self.data.qpos[cube_q_idx : cube_q_idx + 3] = [rx, ry, 0.82]
         angle = np.random.uniform(0, 2 * np.pi)
-        self.data.qpos[cube_q_idx + 3 : cube_q_idx + 7] = [np.cos(angle / 2), 0, 0, np.sin(angle / 2)]
+        self.data.qpos[cube_q_idx + 3 : cube_q_idx + 7] = [
+            np.cos(angle / 2),
+            0,
+            0,
+            np.sin(angle / 2),
+        ]
         home_q = self.model.qpos0.copy()
-        home_q[cube_q_idx : cube_q_idx + 7] = self.data.qpos[cube_q_idx : cube_q_idx + 7].copy()
+        home_q[cube_q_idx : cube_q_idx + 7] = self.data.qpos[
+            cube_q_idx : cube_q_idx + 7
+        ].copy()
         for i, j_id in enumerate(self.protocol_joint_ids):
             if j_id != -1 and self.v_allowed_mask[i] > 0.5:
-                home_q[self.model.jnt_qposadr[j_id]] = (self.wire_max[i] + self.wire_min[i]) / 2.0 + np.random.normal(0, 0.05)
+                home_q[self.model.jnt_qposadr[j_id]] = (
+                    self.wire_max[i] + self.wire_min[i]
+                ) / 2.0 + np.random.normal(0, 0.05)
         home_q[self.root_q_idx : self.root_q_idx + 3] = [0.0, 0.0, 0.95]
         self.last_target_q = home_q.copy()
         self.dispatch_action(None, home_q)
@@ -202,10 +266,9 @@ class GR1MuJoCoBase:
                 self.active_joints_this_command.add(i)
                 val = np.clip(val, -1.0, 1.0)
                 q_idx = self.model.jnt_qposadr[self.protocol_joint_ids[i]]
-                rad = (
-                    (val + 1.0) / 2.0 * (self.wire_max[i] - self.wire_min[i])
-                    + self.wire_min[i]
-                )
+                rad = (val + 1.0) / 2.0 * (
+                    self.wire_max[i] - self.wire_min[i]
+                ) + self.wire_min[i]
                 self.last_target_q[q_idx] = rad
                 if i in self.coupling_map:
                     for distal_idx in self.coupling_map[i]:

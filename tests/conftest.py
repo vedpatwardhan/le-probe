@@ -1,13 +1,18 @@
 import pytest
-from gr1_gr00t.simulation import GR1Simulation
+import os
+import sys
+
+# Ensure gr1_gr00t is in path if running from root
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from simulation_base import GR1MuJoCoBase
 
 
 @pytest.fixture(scope="session")
 def sim():
     """
-    Provides a singleton, headless instance of the GR1 Simulation for tests.
-    test_mode=True ensures no ZMQ or Rerun overhead.
+    Provides a singleton instance of the GR1 MuJoCo Base for tests.
     """
-    # Initialize in test mode (no ZMQ, no Rerun)
-    simulation = GR1Simulation(test_mode=True)
+    # Initialize the base simulation (Physical layer only)
+    simulation = GR1MuJoCoBase()
     return simulation

@@ -68,11 +68,11 @@ CAMERA_ATTACH_LINK = "right_hand_pitch_link"
 # Central Paths
 XML_PATH = "/content/sim_assets/gr1t1_fourier_hand_6dof.xml"
 if not os.path.exists(XML_PATH):
-    XML_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/gr1t1_fourier_hand_6dof.xml"
+    XML_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr00t-gr1-pickup/sim_assets/gr1t1_fourier_hand_6dof.xml"
 
 SCENE_PATH = "/content/sim_assets/scene_gr1_pickup.xml"
 if not os.path.exists(SCENE_PATH):
-    SCENE_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/scene_gr1_pickup.xml"
+    SCENE_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr00t-gr1-pickup/sim_assets/scene_gr1_pickup.xml"
 
 
 # -----------------------------------------------------------------------------
