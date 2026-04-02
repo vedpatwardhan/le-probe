@@ -31,11 +31,7 @@ class GR1MuJoCoBase:
         self.model = mujoco.MjModel.from_xml_path(scene_path)
         self.data = mujoco.MjData(self.model)
 
-        # Session & Directory Management
-        self.session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.base_log_dir = (
-            Path("/Users/vedpatwardhan/Desktop/cortex-os/temp_images") / self.session_id
-        )
+        # Perception & Cameras
         self.cam_names = [
             "world_top",
             "world_left",
@@ -43,9 +39,6 @@ class GR1MuJoCoBase:
             "world_center",
             "world_wrist",
         ]
-
-        for cam in self.cam_names:
-            (self.base_log_dir / cam).mkdir(parents=True, exist_ok=True)
         self.frame_indices = {cam: 0 for cam in self.cam_names}
 
         # Renderer
@@ -78,6 +71,9 @@ class GR1MuJoCoBase:
         self.active_joints_this_command = set()
         self.is_recording = False
         self.rerun_count = 0
+        self.render_step_idx = 0
+        self._init_joint_mappings()
+        self._init_finger_coupling()
 
     def _init_joint_mappings(self):
         self.teleop_names = set()
@@ -194,6 +190,10 @@ class GR1MuJoCoBase:
         with open(self.debug_log_path, "a") as f:
             f.write(f"[{t_str}] {msg}\n")
 
+    def _post_render_hook(self, name, rgb):
+        """Optional hook for subclasses (e.g. to save debug images)."""
+        pass
+
     def get_state_32(self):
         state = np.zeros(32, dtype=np.float32)
         for i, j_id in enumerate(self.protocol_joint_ids):
@@ -255,15 +255,19 @@ class GR1MuJoCoBase:
 
     def render_and_record(self, action_32):
         views = {}
+        rr.set_time_sequence("sim_step", self.render_step_idx)
+
         for name in self.cam_names:
             self.renderer.update_scene(self.data, camera=name)
             rgb = self.renderer.render()
             views[name] = rgb
             if self.rerun_count % 2 == 0:
                 rr.log(name, rr.Image(rgb))
-            img_path = self.base_log_dir / name / f"{self.frame_indices[name]:04d}.jpg"
-            Image.fromarray(rgb).save(img_path)
+
+            self._post_render_hook(name, rgb)
             self.frame_indices[name] += 1
+
+        self.render_step_idx += 1
         self.rerun_count += 1
         if self.is_recording:
             self.recorder.add_frame(views, self.get_state_32(), action_32)

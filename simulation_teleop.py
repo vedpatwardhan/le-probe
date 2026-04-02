@@ -3,7 +3,12 @@ import zmq
 import msgpack
 import rerun as rr
 import mujoco
+import os
+import datetime
+from pathlib import Path
+from PIL import Image
 from simulation_base import GR1MuJoCoBase
+from gr1_config import BASE_DIR
 
 
 class GR1TeleopServer(GR1MuJoCoBase):
@@ -16,6 +21,12 @@ class GR1TeleopServer(GR1MuJoCoBase):
         super().__init__(scene_path) if scene_path else super().__init__()
         self.port = port
         self.is_running = True
+
+        # Debugging I/O (Moved from base to teleop)
+        self.session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.base_log_dir = Path(BASE_DIR) / "temp_images" / self.session_id
+        for cam in self.cam_names:
+            (self.base_log_dir / cam).mkdir(parents=True, exist_ok=True)
 
     def run(self):
         context = zmq.Context()
@@ -118,6 +129,13 @@ class GR1TeleopServer(GR1MuJoCoBase):
         for g_id in [50, 52, 54, 56]:
             q_lift[g_id] = -1.1
         self.dispatch_action(None, q_lift)
+
+
+    def _post_render_hook(self, name, rgb):
+        """Implement the JPEG saving for debugging."""
+        # Note: We save regardless of is_recording, as requested (debugging tool)
+        img_path = self.base_log_dir / name / f"{self.frame_indices[name]:04d}.jpg"
+        Image.fromarray(rgb).save(img_path)
 
 
 if __name__ == "__main__":
