@@ -60,6 +60,9 @@ class GR1MuJoCoBase:
         self._init_joint_mappings()
         self._init_finger_coupling()
 
+        # Diagnostic Logging
+        self.debug_log_path = None
+
         # LeRobot Manager
         self.recorder = LeRobotManager(repo_id="gr1_pickup_mujoco", fps=10)
 
@@ -183,6 +186,14 @@ class GR1MuJoCoBase:
         ]
         self.tasks[3].set_target(self.model.qpos0)
 
+    def _debug_log(self, msg):
+        """Helper for timestamped diagnostic logging. Only writes if debug_log_path is set."""
+        if self.debug_log_path is None:
+            return
+        t_str = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        with open(self.debug_log_path, "a") as f:
+            f.write(f"[{t_str}] {msg}\n")
+
     def get_state_32(self):
         state = np.full(32, np.nan, dtype=np.float32)
         for i, j_id in enumerate(self.protocol_joint_ids):
@@ -260,6 +271,9 @@ class GR1MuJoCoBase:
     def dispatch_action(self, action_32, target_q):
         total_steps = 200
         start_q = self.data.qpos.copy()
+        delta_norm = np.linalg.norm(target_q - start_q)
+        self._debug_log(f"🚀 Dispatching Action. L2 Delta Norm: {delta_norm:.6f}")
+
         root_target = target_q[self.root_q_idx : self.root_q_idx + 7]
         for step in range(total_steps):
             alpha = (step + 1) / float(total_steps)
@@ -299,6 +313,10 @@ class GR1MuJoCoBase:
 
     def process_target_32(self, action_32):
         self.active_joints_this_command.clear()
+        valid_actions = action_32[~np.isnan(action_32)]
+        self._debug_log(
+            f"📥 process_target_32: stats [min:{np.min(valid_actions):.3f}, max:{np.max(valid_actions):.3f}, mean:{np.mean(valid_actions):.3f}]"
+        )
         for i, val in enumerate(action_32):
             if (
                 not np.isnan(val)
@@ -311,7 +329,12 @@ class GR1MuJoCoBase:
                 rad = (val + 1.0) / 2.0 * (
                     self.wire_max[i] - self.wire_min[i]
                 ) + self.wire_min[i]
+                old_rad = self.last_target_q[q_idx]
                 self.last_target_q[q_idx] = rad
+                if abs(rad - old_rad) > 1e-5:
+                    self._debug_log(
+                        f"   🔗 Joint {i} ({COMPACT_WIRE_JOINTS[i]}): {old_rad:.4f} -> {rad:.4f}"
+                    )
                 if i in self.coupling_map:
                     for distal_idx in self.coupling_map[i]:
                         self.last_target_q[distal_idx] = rad

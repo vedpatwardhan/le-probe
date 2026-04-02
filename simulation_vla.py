@@ -1,5 +1,6 @@
 import os
-os.environ["MUJOCO_GL"] = "egl"     # configured for colab
+
+os.environ["MUJOCO_GL"] = "egl"  # configured for colab
 import numpy as np
 import zmq
 import msgpack
@@ -17,6 +18,14 @@ class GR1VLAClient(GR1MuJoCoBase):
 
     def __init__(self, scene_path=None, server_port=5555):
         super().__init__(scene_path) if scene_path else super().__init__()
+
+        # Enable VLA-specific diagnostic logging
+        self.debug_log_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "vla_debug.log"
+        )
+        with open(self.debug_log_path, "w") as f:
+            f.write(f"--- VLA DEBUG LOG INITIALIZED: {datetime.datetime.now()} ---\n")
+
         self.vla_context = zmq.Context()
         self.vla_client = self.vla_context.socket(zmq.REQ)
         self.vla_client.setsockopt(zmq.RCVTIMEO, 30000)
@@ -55,6 +64,11 @@ class GR1VLAClient(GR1MuJoCoBase):
 
                 if "action" in resp:
                     actions = resp["action"]
+                    actions_np = np.array(actions, dtype=np.float32)
+                    self._debug_log(
+                        f"🧠 Received Action Chunk: {actions_np.shape}. Stats -> [min:{np.min(actions_np):.3f}, max:{np.max(actions_np):.3f}, mean:{np.mean(actions_np):.3f}]"
+                    )
+
                     print(f"   🚀 Executing {len(actions)} actions...")
                     for action in actions:
                         action_32 = np.array(action, dtype=np.float32)
