@@ -341,7 +341,7 @@ class GR1MuJoCoSimulation:
                 views[name] = rgb
 
                 # Throttled Rerun Logging (Only log to Rerun every 3rd render to save CPU)
-                if self.rerun_count % 3 == 0:
+                if self.rerun_count % 2 == 0:
                     rr.log(name, rr.Image(rgb))
 
                 # Serial Disk Serialization
@@ -360,8 +360,8 @@ class GR1MuJoCoSimulation:
 
     def dispatch_action(self, action_32, target_q):
         """Physics-driven Liquid-Smooth trajectory sweep."""
-        # Total physics steps for 1.0s window @ 2ms = 500 steps.
-        total_steps = 500
+        # Total physics steps for 0.4s window @ 2ms = 200 steps.
+        total_steps = 200
         start_q = self.data.qpos.copy()
 
         # Retrieve root target from baseline to keep stabilized
