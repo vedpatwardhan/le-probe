@@ -195,9 +195,9 @@ class GR1MuJoCoBase:
             f.write(f"[{t_str}] {msg}\n")
 
     def get_state_32(self):
-        state = np.full(32, np.nan, dtype=np.float32)
+        state = np.zeros(32, dtype=np.float32)
         for i, j_id in enumerate(self.protocol_joint_ids):
-            if j_id != -1 and self.v_allowed_mask[i] > 0.5:
+            if j_id != -1:
                 qpos_idx = self.model.jnt_qposadr[j_id]
                 val = self.data.qpos[qpos_idx]
                 rng = max(1e-4, self.wire_max[i] - self.wire_min[i])
@@ -314,9 +314,12 @@ class GR1MuJoCoBase:
     def process_target_32(self, action_32):
         self.active_joints_this_command.clear()
         valid_actions = action_32[~np.isnan(action_32)]
-        self._debug_log(
-            f"📥 process_target_32: stats [min:{np.min(valid_actions):.3f}, max:{np.max(valid_actions):.3f}, mean:{np.mean(valid_actions):.3f}]"
-        )
+        if len(valid_actions) > 0:
+            self._debug_log(
+                f"📥 process_target_32: stats [min:{np.min(valid_actions):.3f}, max:{np.max(valid_actions):.3f}, mean:{np.mean(valid_actions):.3f}]"
+            )
+        else:
+            self._debug_log("⚠️ process_target_32: action_32 is ALL NAN")
         for i, val in enumerate(action_32):
             if (
                 not np.isnan(val)

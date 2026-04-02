@@ -42,7 +42,11 @@ class GR1VLAClient(GR1MuJoCoBase):
                 "dtype": str(arr.dtype),
             }
 
-        obs = {"instruction": instruction, "state": pack_np(self.get_state_32())}
+        state = self.get_state_32()
+        self._debug_log(
+            f"📤 capture_vla_observation: state stats [min:{np.nanmin(state):.3f}, max:{np.nanmax(state):.3f}, mean:{np.nanmean(state):.3f}, NaNs:{np.isnan(state).sum()}]"
+        )
+        obs = {"instruction": instruction, "state": pack_np(state)}
         for cam in self.cam_names:
             self.renderer.update_scene(self.data, camera=cam)
             obs[cam] = pack_np(self.renderer.render())
@@ -66,9 +70,15 @@ class GR1VLAClient(GR1MuJoCoBase):
                 if "action" in resp:
                     actions = resp["action"]
                     actions_np = np.array(actions, dtype=np.float32)
-                    self._debug_log(
-                        f"🧠 Received Action Chunk: {actions_np.shape}. Stats -> [min:{np.min(actions_np):.3f}, max:{np.max(actions_np):.3f}, mean:{np.mean(actions_np):.3f}]"
-                    )
+                    valid_mask = ~np.isnan(actions_np)
+                    if np.any(valid_mask):
+                        self._debug_log(
+                            f"🧠 Received Action Chunk: {actions_np.shape}. Stats -> [min:{np.nanmin(actions_np):.3f}, max:{np.nanmax(actions_np):.3f}, mean:{np.nanmean(actions_np):.3f}]"
+                        )
+                    else:
+                        self._debug_log(
+                            f"⚠️ Received Action Chunk: {actions_np.shape} BUT ALL VALUES ARE NAN!"
+                        )
 
                     print(f"   🚀 Executing {len(actions)} actions...")
                     for action in actions:
