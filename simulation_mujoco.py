@@ -174,6 +174,7 @@ class GR1MuJoCoSimulation:
         # Initial simulation step to settle robot and sync ctrl
         self.sync_ctrl_to_qpos(self.data.qpos)
         mujoco.mj_fwdPosition(self.model, self.data)
+        self.rerun_count = 0  # Frame counter for throttled logging
 
     def sync_ctrl_to_qpos(self, q):
         """Syncs the actuator control buffer for all model actuators."""
@@ -338,7 +339,10 @@ class GR1MuJoCoSimulation:
                 self.renderer.update_scene(self.data, camera=name)
                 rgb = self.renderer.render()
                 views[name] = rgb
-                rr.log(name, rr.Image(rgb))
+
+                # Throttled Rerun Logging (Only log to Rerun every 3rd render to save CPU)
+                if self.rerun_count % 3 == 0:
+                    rr.log(name, rr.Image(rgb))
 
                 # Serial Disk Serialization
                 img_path = (
@@ -349,38 +353,37 @@ class GR1MuJoCoSimulation:
             except Exception as e:
                 pass  # Camera might not be reachable yet
 
+        self.rerun_count += 1
+
         if self.is_recording:
             self.recorder.add_frame(views, self.get_state_32(), action_32)
 
     def dispatch_action(self, action_32, target_q):
-        """Physics-driven fixed window movement."""
-        # 1.0s window at 2ms timestep = 500 steps.
-        # We iteration 100 times, doing 5 physics steps per iteration.
-        num_iters = 100
-        steps_per_iter = 5
+        """Physics-driven Liquid-Smooth trajectory sweep."""
+        # Total physics steps for 1.0s window @ 2ms = 500 steps.
+        total_steps = 500
         start_q = self.data.qpos.copy()
 
-        # Retrieve root target to keep the robot stabilized at its z-height
+        # Retrieve root target from baseline to keep stabilized
         root_target = target_q[self.root_q_idx : self.root_q_idx + 7]
 
-        for i in range(num_iters):
-            alpha = (i + 1) / float(num_iters)
-            # Interpolated target for actuators
+        for step in range(total_steps):
+            # 1. PER-STEP Interpolation: Zero 'staircase' jitter
+            alpha = (step + 1) / float(total_steps)
             current_target_q = start_q + alpha * (target_q - start_q)
 
-            for _ in range(steps_per_iter):
-                # 1. Update Actuator Targets
-                self.sync_ctrl_to_qpos(current_target_q)
+            # 2. Update Actuators
+            self.sync_ctrl_to_qpos(current_target_q)
 
-                # 2. Pin Root (Keep floating at 0.95m)
-                # This ensures the robot stays upright during teleop.
-                self.data.qpos[self.root_q_idx : self.root_q_idx + 7] = root_target
-                self.data.qvel[:6] = 0.0
+            # 3. Pin Root (Baseline logic: Keep floating at 0.95m)
+            self.data.qpos[self.root_q_idx : self.root_q_idx + 7] = root_target
+            self.data.qvel[:6] = 0.0
 
-                # 3. Step Physics (Enforces Collisions)
-                mujoco.mj_step(self.model, self.data)
+            # 4. Step Physics
+            mujoco.mj_step(self.model, self.data)
 
-            if i % 10 == 0:
+            # 5. Render/Record periodically (targeting ~30 FPS)
+            if step % 16 == 0:
                 self.render_and_record(action_32)
 
         self.print_joint_status()
