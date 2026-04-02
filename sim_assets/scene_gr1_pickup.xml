@@ -23,7 +23,7 @@
     <!-- 5 Cameras with Absolute Orientation (Using xyaxes for robust schema alignment) -->
     <camera name="world_top" pos="0.45 0 1.8" xyaxes="0 -1 0 1 0 0" fovy="60"/>
     <camera name="world_left" pos="0.45 -1.2 1.1" xyaxes="1 0 0 0 0.15 1" fovy="60"/>
-    <camera name="world_right" pos="0.45 1.2 1.1" xyaxes="-1 0 0 0 0.15 1" fovy="60"/>
+    <camera name="world_right" pos="0.45 1.2 1.1" xyaxes="-1 0 0 0 -0.15 1" fovy="60"/>
     <camera name="world_center" pos="1.6 0 1.1" xyaxes="0 1 0 -0.15 0 1" fovy="60"/>
     <!-- Wrist camera is handled programmatically in renderer -->
   </worldbody>
