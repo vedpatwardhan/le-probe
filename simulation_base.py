@@ -77,18 +77,29 @@ class GR1MuJoCoBase:
         self.rerun_count = 0
 
     def _init_joint_mappings(self):
-        self.allowed_names = set()
-        # Make paths relative to THIS file
+        self.teleop_names = set()
+        self.ik_names = set()
         base_path = os.path.dirname(os.path.abspath(__file__))
-        for fname in ["teleop_joints.txt", "ik_joints.txt"]:
-            path = os.path.join(base_path, fname)
-            if os.path.exists(path):
-                with open(path, "r") as f:
-                    self.allowed_names.update(
-                        [l.strip().split("#")[0].strip() for l in f if l.strip()]
-                    )
 
-        print(f"✅ Loaded {len(self.allowed_names)} authorized joint names.")
+        # Load Teleop whitelist
+        t_path = os.path.join(base_path, "teleop_joints.txt")
+        if os.path.exists(t_path):
+            with open(t_path, "r") as f:
+                self.teleop_names.update(
+                    [l.strip().split("#")[0].strip() for l in f if l.strip()]
+                )
+
+        # Load IK whitelist
+        i_path = os.path.join(base_path, "ik_joints.txt")
+        if os.path.exists(i_path):
+            with open(i_path, "r") as f:
+                self.ik_names.update(
+                    [l.strip().split("#")[0].strip() for l in f if l.strip()]
+                )
+
+        print(
+            f"✅ Loaded {len(self.teleop_names)} teleop / {len(self.ik_names)} IK joint names."
+        )
 
         self.protocol_joint_ids = []
         self.v_allowed_mask = np.zeros(32)
@@ -96,7 +107,8 @@ class GR1MuJoCoBase:
             try:
                 j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
                 self.protocol_joint_ids.append(j_id)
-                if name in self.allowed_names:
+                # Use teleop names for perception masking
+                if name in self.teleop_names:
                     self.v_allowed_mask[i] = 1.0
             except:
                 self.protocol_joint_ids.append(-1)
@@ -126,9 +138,9 @@ class GR1MuJoCoBase:
         self.ee_wrist_link = "right_hand_pitch_link"
         self.configuration = mink.Configuration(self.model)
 
-        # Determine authorized velocity indices (DOFs) from the whitelist
+        # Determine authorized velocity indices (DOFs) from the IK whitelist ONLY
         self.auth_dofs = set()
-        for name in self.allowed_names:
+        for name in self.ik_names:
             j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
             if j_id != -1:
                 v_idx = self.model.jnt_dofadr[j_id]
@@ -137,7 +149,8 @@ class GR1MuJoCoBase:
                 j_type = self.model.jnt_type[j_id]
                 dnum = dof_counts[j_type]
                 for d in range(dnum):
-                    self.auth_dofs.add(v_idx + d)
+                    self.auth_dofs.add(int(v_idx + d))
+        print("auth_dofs", self.auth_dofs)
 
         # Always allow root for relative calculations if needed,
         # but here we strictly follow the whitelist for robot bones.
