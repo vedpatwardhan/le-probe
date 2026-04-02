@@ -3,6 +3,7 @@ import zmq
 import msgpack
 import time
 import argparse
+import os
 import rerun as rr
 from simulation_base import GR1MuJoCoBase
 
@@ -76,7 +77,8 @@ if __name__ == "__main__":
 
     # Re-init Rerun for standalone run
     rr.init("gr1_vla", spawn=False)
-    rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
+    rerun_url = os.environ.get("RERUN_URL", "rerun+http://127.0.0.1:9876/proxy")
+    rr.connect_grpc(rerun_url)
 
     sim = GR1VLAClient()
     sim.run(instruction=args.instruction, max_chunks=args.chunks)
