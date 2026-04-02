@@ -3,6 +3,7 @@ import numpy as np
 import zmq
 import msgpack
 import json
+import os
 from gr1_config import COMPACT_WIRE_JOINTS
 
 st.set_page_config(page_title="GR1 Teleop Dashboard", layout="wide")
@@ -35,7 +36,8 @@ if "total_episodes" not in st.session_state:
 # --- Load Default Active Joints ---
 if "active_joints" not in st.session_state:
     st.session_state.active_joints = set()
-    with open("gr1_gr00t/teleop_joints.txt", "r") as f:
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    with open(f"{base_path}/teleop_joints.txt", "r") as f:
         default_joint_names = [
             line.strip().split("#")[0].strip() for line in f if line.strip()
         ]

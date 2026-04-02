@@ -49,7 +49,10 @@ class GR1MuJoCoBase:
         self.frame_indices = {cam: 0 for cam in self.cam_names}
 
         # Renderer
-        self.renderer = mujoco.Renderer(self.model, height=480, width=480)
+        self.res = (480, 480)
+        self.renderer = mujoco.Renderer(
+            self.model, height=self.res[1], width=self.res[0]
+        )
 
         # Mapping Protocol Names -> Joint IDs
         self.wire_min = np.array(JOINT_LIMITS_MIN)
@@ -75,15 +78,17 @@ class GR1MuJoCoBase:
 
     def _init_joint_mappings(self):
         self.allowed_names = set()
-        for path in [
-            "gr00t-gr1-pickup/teleop_joints.txt",
-            "gr00t-gr1-pickup/ik_joints.txt",
-        ]:
+        # Make paths relative to THIS file
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        for fname in ["teleop_joints.txt", "ik_joints.txt"]:
+            path = os.path.join(base_path, fname)
             if os.path.exists(path):
                 with open(path, "r") as f:
                     self.allowed_names.update(
                         [l.strip().split("#")[0].strip() for l in f if l.strip()]
                     )
+
+        print(f"✅ Loaded {len(self.allowed_names)} authorized joint names.")
 
         self.protocol_joint_ids = []
         self.v_allowed_mask = np.zeros(32)
@@ -111,16 +116,35 @@ class GR1MuJoCoBase:
                             continue
                         if i not in self.coupling_map:
                             self.coupling_map[i] = []
-                        self.coupling_map[i].append(self.model.jnt_qposadr[j])
+                        # Store qpos index instead of joint id!
+                        q_idx = self.model.jnt_qposadr[j]
+                        self.coupling_map[i].append(q_idx)
 
     def _init_ik_solver(self):
         self.ee_index_link = "R_index_tip_link"
         self.ee_thumb_link = "R_thumb_tip_link"
         self.ee_wrist_link = "right_hand_pitch_link"
         self.configuration = mink.Configuration(self.model)
+
+        # Determine authorized velocity indices (DOFs) from the whitelist
+        self.auth_dofs = set()
+        for name in self.allowed_names:
+            j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if j_id != -1:
+                v_idx = self.model.jnt_dofadr[j_id]
+                # Map joint type (free=0, ball=1, slide=2, hinge=3) to DOF count
+                dof_counts = [6, 3, 1, 1]
+                j_type = self.model.jnt_type[j_id]
+                dnum = dof_counts[j_type]
+                for d in range(dnum):
+                    self.auth_dofs.add(v_idx + d)
+
+        # Always allow root for relative calculations if needed,
+        # but here we strictly follow the whitelist for robot bones.
+
         all_dofs = set(range(self.model.nv))
-        self.auth_dofs = {18, 19, 20, 39, 40, 41, 42, 43, 44, 45}
         frozen_dofs = list(all_dofs - self.auth_dofs)
+
         self.tasks = [
             mink.FrameTask(
                 frame_name=self.ee_index_link,

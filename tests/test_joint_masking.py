@@ -8,20 +8,20 @@ def test_ik_mask_strictness(sim):
     """
     # 1. Reset to home first
     sim.reset_env()
-    home_q = sim.model.qpos0.copy()
+    pre_ik_q = sim.data.qpos.copy()
 
-    # 2. Define an extreme reach target to force global IK movement
-    pos = np.array([0.5, -0.2, 1.1])
-    quat = np.array([0.707, 0, 0.707, 0])
+    # 2. Define a distant reach target to force global IK movement
+    pos = np.array([0.6, -0.3, 0.8])
+    quat = np.array([0, 0.707, 0, 0.707])  # Palms down
 
     # 3. Solve IK (internally respects authorized joints)
     q_result = sim.solve_ik(pos, quat)
 
     # 4. Global Verification
-    # Every changed joint MUST be in the v_allowed_mask (ignoring small integration noise)
+    # Every changed joint MUST be in the authorized qpos indices
     changed_indices = []
     for i in range(sim.model.nq):
-        if abs(q_result[i] - home_q[i]) > 1e-3:
+        if abs(q_result[i] - pre_ik_q[i]) > 1e-4:
             changed_indices.append(i)
 
     # CRITICAL ASSERTION: All changed indices must be authorized
