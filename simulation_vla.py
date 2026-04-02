@@ -1,9 +1,10 @@
+import os
+os.environ["MUJOCO_GL"] = "egl"     # configured for colab
 import numpy as np
 import zmq
 import msgpack
 import time
 import argparse
-import os
 import rerun as rr
 from simulation_base import GR1MuJoCoBase
 
