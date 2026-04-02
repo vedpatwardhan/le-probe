@@ -14,9 +14,12 @@ except ImportError:
 class LeRobotManager:
     """Manages LeRobot dataset creation and frame buffering."""
 
-    def __init__(self, repo_id="gr1_pickup_large", fps=10, root="./datasets"):
+    def __init__(self, repo_id="gr1_pickup_large", fps=10, root=None):
         self.repo_id = repo_id
         self.fps = fps
+        if root is None:
+            # Default to 'datasets' folder sibling to this file
+            root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datasets")
         self.root = os.path.abspath(root)
         self.dataset = None
         self.episode_frame_count = 0

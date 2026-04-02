@@ -66,13 +66,9 @@ FROZEN_JOINTS = {
 CAMERA_ATTACH_LINK = "right_hand_pitch_link"
 
 # Central Paths
-XML_PATH = "/content/sim_assets/gr1t1_fourier_hand_6dof.xml"
-if not os.path.exists(XML_PATH):
-    XML_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr00t-gr1-pickup/sim_assets/gr1t1_fourier_hand_6dof.xml"
-
-SCENE_PATH = "/content/sim_assets/scene_gr1_pickup.xml"
-if not os.path.exists(SCENE_PATH):
-    SCENE_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr00t-gr1-pickup/sim_assets/scene_gr1_pickup.xml"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+XML_PATH = os.path.join(BASE_DIR, "sim_assets/gr1t1_fourier_hand_6dof.xml")
+SCENE_PATH = os.path.join(BASE_DIR, "sim_assets/scene_gr1_pickup.xml")
 
 
 # -----------------------------------------------------------------------------

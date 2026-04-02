@@ -115,7 +115,8 @@ class GR00TInferenceServer:
         }
 
         # Load existing inference history if any
-        log_file = "inference_history.json"
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        log_file = os.path.join(base_dir, "inference_history.json")
         history = []
         if os.path.exists(log_file):
             with open(log_file, "r") as f:

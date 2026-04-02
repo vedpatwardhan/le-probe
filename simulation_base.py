@@ -83,19 +83,17 @@ class GR1MuJoCoBase:
 
         # Load Teleop whitelist
         t_path = os.path.join(base_path, "teleop_joints.txt")
-        if os.path.exists(t_path):
-            with open(t_path, "r") as f:
-                self.teleop_names.update(
-                    [l.strip().split("#")[0].strip() for l in f if l.strip()]
-                )
+        with open(t_path, "r") as f:
+            self.teleop_names.update(
+                [l.strip().split("#")[0].strip() for l in f if l.strip()]
+            )
 
         # Load IK whitelist
         i_path = os.path.join(base_path, "ik_joints.txt")
-        if os.path.exists(i_path):
-            with open(i_path, "r") as f:
-                self.ik_names.update(
-                    [l.strip().split("#")[0].strip() for l in f if l.strip()]
-                )
+        with open(i_path, "r") as f:
+            self.ik_names.update(
+                [l.strip().split("#")[0].strip() for l in f if l.strip()]
+            )
 
         print(
             f"✅ Loaded {len(self.teleop_names)} teleop / {len(self.ik_names)} IK joint names."
