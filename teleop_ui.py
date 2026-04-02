@@ -111,6 +111,10 @@ def send_stop_recording():
     return send_command({"command": "stop_recording"})
 
 
+def send_discard_recording():
+    return send_command({"command": "discard_recording"})
+
+
 def home_all():
     st.session_state.target_buffer.fill(0.0)
     st.session_state.staging_buffer.fill(0.0)
@@ -152,10 +156,17 @@ with st.sidebar:
             args=(task_instruction,),
         )
     else:
-        if st.button("Stop & Save", use_container_width=True):
-            send_stop_recording()
-            st.session_state.is_recording = False
-            st.rerun()
+        col_save, col_discard = st.columns(2)
+        with col_save:
+            if st.button("✅ Save", use_container_width=True):
+                send_stop_recording()
+                st.session_state.is_recording = False
+                st.rerun()
+        with col_discard:
+            if st.button("❌ Discard", use_container_width=True):
+                send_discard_recording()
+                st.session_state.is_recording = False
+                st.rerun()
         st.error("RECORDING...")
 
     st.divider()

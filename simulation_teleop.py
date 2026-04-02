@@ -67,6 +67,11 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 self.is_recording = False
                 send_resp({"status": "recording_stopped"})
 
+            elif cmd == "discard_recording":
+                self.recorder.discard_episode()
+                self.is_recording = False
+                send_resp({"status": "recording_discarded"})
+
             elif cmd == "poll_status":
                 send_resp({"status": "status_ok"})
 
@@ -129,7 +134,6 @@ class GR1TeleopServer(GR1MuJoCoBase):
         for g_id in [50, 52, 54, 56]:
             q_lift[g_id] = -1.1
         self.dispatch_action(None, q_lift)
-
 
     def _post_render_hook(self, name, rgb):
         """Implement the JPEG saving for debugging."""

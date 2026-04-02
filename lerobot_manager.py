@@ -185,3 +185,13 @@ class LeRobotManager:
         )
         self.episode_frame_count = 0  # Reset for next episode
         self.dataset = None
+
+    def discard_episode(self):
+        """Aborts the current episode without saving or syncing."""
+        if self.dataset is None:
+            return
+        print(
+            f"[LEROBOT] Discarding current episode frames ({self.episode_frame_count})..."
+        )
+        self.episode_frame_count = 0  # Reset
+        self.dataset = None  # Drop reference (temp data ignored)
