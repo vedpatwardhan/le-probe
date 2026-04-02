@@ -14,7 +14,9 @@ from gr1_config import COMPACT_WIRE_JOINTS, JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
 import mink
 
 # Configuration
-SCENE_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/scene_gr1_pickup.xml"
+SCENE_PATH = (
+    "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/scene_gr1_pickup.xml"
+)
 DEVICE = "cpu"
 
 import os
@@ -89,10 +91,18 @@ class GR1MuJoCoSimulation:
         self.coupling_map = {}
         for i, name in enumerate(COMPACT_WIRE_JOINTS):
             if "proximal" in name.lower():
-                prefix = name.split("_proximal")[0]
+                base_prefix = name.split("_proximal")[0]
+
                 for j in range(self.model.njnt):
                     j_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, j)
-                    if j_name and prefix in j_name and j_name != name:
+                    if j_name and base_prefix in j_name and j_name != name:
+                        # Thumb Special Case: Yaw and Pitch are independent prox DOFs
+                        if "thumb" in name.lower() and (
+                            ("yaw" in name.lower() and "pitch" in j_name.lower())
+                            or ("pitch" in name.lower() and "yaw" in j_name.lower())
+                        ):
+                            continue
+
                         if i not in self.coupling_map:
                             self.coupling_map[i] = []
                         self.coupling_map[i].append(self.model.jnt_qposadr[j])
