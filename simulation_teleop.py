@@ -90,7 +90,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             cube_pos + [0.015, -0.035, 0.12],
             cube_pos + [0, 0, 0.20],
         )
-        q_reach_h = self.solve_ik(pos_i_h, pos_t_h, pos_w_h, [0, 1, 0, 0])
+        q_reach_h = self.solve_ik(pos_w_h, [0, 1, 0, 0], pos_i_h, pos_t_h)
         self.dispatch_action(None, q_reach_h)
 
         # Phase 2: Descent
@@ -99,7 +99,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             cube_pos + [0.015, -0.035, 0.0],
             cube_pos + [0, 0, 0.04],
         )
-        q_reach_l = self.solve_ik(pos_i_l, pos_t_l, pos_w_l, [0, 1, 0, 0])
+        q_reach_l = self.solve_ik(pos_w_l, [0, 1, 0, 0], pos_i_l, pos_t_l)
         self.dispatch_action(None, q_reach_l)
 
         # Phase 3: Grasp
@@ -115,7 +115,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             cube_pos + [0.015, -0.035, 0.15],
             cube_pos + [0, 0, 0.19],
         )
-        q_lift = self.solve_ik(pos_i_up, pos_t_up, pos_w_up, [0, 1, 0, 0])
+        q_lift = self.solve_ik(pos_w_up, [0, 1, 0, 0], pos_i_up, pos_t_up)
         q_lift[47], q_lift[48] = -1.1, 1.1
         for g_id in [50, 52, 54, 56]:
             q_lift[g_id] = -1.1

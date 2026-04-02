@@ -184,15 +184,22 @@ class GR1MuJoCoBase:
         return state
 
     def solve_ik(self, pos_wrist, quat, pos_index=None, pos_thumb=None):
+        """Hardened IK solver for a 3-tip end effector (Index, Thumb, Wrist)."""
+        quat = np.array(quat)
+        if quat.shape[0] != 4:
+            raise ValueError(f"solve_ik: quat must be length 4 (wxyz), got {len(quat)}")
+
         pos_wrist = np.array(pos_wrist)
         if pos_index is None:
             pos_index = pos_wrist + np.array([0, 0, 0.05])
         if pos_thumb is None:
             pos_thumb = pos_wrist + np.array([0, 0, 0.05])
+
         pos_index = np.array(pos_index)
         pos_thumb = np.array(pos_thumb)
+
         self.configuration.update(self.data.qpos)
-        rotation = mink.SO3(np.array(quat))
+        rotation = mink.SO3(quat)
         self.tasks[0].set_target(
             mink.SE3.from_rotation_and_translation(rotation, pos_index)
         )
