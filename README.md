@@ -1,65 +1,62 @@
-# GR-1 GR00T-N1.5 Inference & Teleoperation System
+# GR-1 GR00T-N1.5: Modular MuJoCo Foundation 🦾
 
-This repository contains the logic for running real-time inference and teleoperation for the GR-1 humanoid robot using the GR00T-N1.5 model.
+This repository contains the high-fidelity physics environment and inference lifecycle for the GR-1 humanoid robot, now powered by **MuJoCo** and the **Minkowski** IK solver.
 
-## 🏗️ System Architecture
-The system is divided into two parts:
-1.  **Inference Server (Cloud/Colab)**: Runs the 3B-parameter GR00T-N1.5 model. Listens for observation payloads (images + state) over ZMQ.
-2.  **Simulation Client (Local Mac)**: Runs the Genesis physics simulation, captures camera frames, and sends them to the server.
+## 🏗️ System Architecture: The Modular Split
+The system is decoupled into specialized drivers sharing a common physical foundation.
+
+1.  **`simulation_base.py` (The Physical Core)**: The "Source of Truth" for robot physics. Handles MuJoCo XML loading, Minkowski Triple-Link IK solving, and state normalization.
+2.  **`simulation_vla.py` (Autonomous Mission)**: A proactive **REQ Client** designed for headless/Colab execution. It drives the "Sense -> Plan -> Act" loop for a 10-chunk (160 step) mission.
+3.  **`simulation_teleop.py` (Dashboard Server)**: A reactive **REP Server** specifically for interactive control and dataset recording via the Streamlit UI.
+4.  **`gr00t_server.py` (The Brain)**: A passive inference brain that processes 5-camera observations and returns 16-action chunks.
 
 ---
 
-## 🚀 Quick Start (Inference)
+## 🚀 Headless Autonomy (VLA Mission)
+Designed for Colab or remote environments where no UI is needed.
 
-### 1. Start the Inference Server (Colab)
-Run the server pointing to your desired model.
+### 1. Start the Inference Server
 ```bash
-# For the fine-tuned pickup model:
-python -m gr1_gr00t.server_gr1 --model vedpatwardhan/GR00T-N1.5-finetuned-pickup
-
-# For the base Nvidia model:
-python -m gr1_gr00t.server_gr1 --model nvidia/GR00T-N1.5-3B
+uv run gr1_gr00t/gr00t_server.py --model nvidia/GR00T-N1.5-3B
 ```
 
-### 2. Setup the Rerun Tunnel (Local Mac)
-To see the robot's vision in real-time, you must tunnel your local Rerun instance (Port 9876) to the cloud.
+### 2. Launch the Mission Driver
 ```bash
-ssh -p 443 -R0:localhost:9876 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 tcp@pinggy.io
-```
-**Important**: Note the URL and port Pinggy gives you (e.g., `tcp://xxxx.pinggy.link:12345`).
-
-### 3. Start the Simulation Client (Local Mac)
-Update the Pinggy URL in `gr1_gr00t/simulation_gr1.py` and run:
-```bash
-python gr1_gr00t/simulation_gr1.py
+uv run gr1_gr00t/simulation_vla.py --instruction "Pick up the red cube" --chunks 10
 ```
 
 ---
 
-## 🕹️ Teleoperation & Data Collection
-If you need to record new demonstration data:
-1.  Run **`teleop_ui.py`** to start the slider-based control interface.
-2.  Run **`simulation.py`** to start the recording-enabled simulation environment.
-3.  Toggle "Record" in the TUI to save episodes in `lerobot` format.
+## 🕹️ Interactive Teleop & Data Collection
+For manual joint control, IK calibration, and `LeRobot` dataset generation.
+
+### 1. Start the Teleop Sim Server (Port 5556)
+```bash
+uv run gr1_gr00t/simulation_teleop.py
+```
+
+### 2. Start the Streamlit Dashboard
+```bash
+streamlit run gr1_gr00t/teleop_ui.py
+```
+
+### 3. Record Data
+- Click **"Start Recording"** in the Dashboard.
+- Use sliders or the **🎯 IK Pickup** button to perform tasks.
+- Click **"Stop Recording"** to finalize the episode and push it to the Hub.
 
 ---
 
 ## 📂 Key Files
-- **`server_gr1.py`**: The ZMQ server handling model loading and batch inference.
-- **`simulation_gr1.py`**: The multi-step inference client with Genesis physics.
-- **`simulation.py`**: The teleoperation simulator with `LeRobotManager` integration.
-- **`gr1_config.py`**: The "Source of Truth" for joint limits and Rosetta protocol mappings.
-- **`lerobot_manager.py`**: Utility for saving dataset episodes (images + states + actions).
+- **`gr1_config.py`**: Central registry for `XML_PATH`, `SCENE_PATH`, and joint normalization limits.
+- **`sim_assets/`**: High-fidelity MuJoCo XMLs for the robot and pickup environments.
+- **`lerobot_manager.py`**: Background uploader for episodic dataset management.
+- **`teleop_joints.txt` / `ik_joints.txt`**: Whitelists for joint authorization during control.
 
 ---
 
-## ⚠️ Common Troubleshooting
-### "Transport Error" in Rerun
-This happens if your Pinggy tunnel is pointing to the wrong local port. 
-- **Correct**: `-R0:localhost:9876` (Rerun Port)
-- **Incorrect**: `-R0:localhost:8000` (Default Pinggy Port)
-
-### "Input Shape Mismatch"
-Ensure the server and client agree on the number of cameras.
-- **Legacy**: 4 cameras.
-- **Pickup Task**: 5 cameras (including `world_wrist`).
+## ⚠️ Requirements
+- **OS**: macOS (Local) / Linux (Colab)
+- **Physics**: `mujoco`, `mink`
+- **Networking**: `zmq`, `msgpack`
+- **Visualization**: `rerun-sdk` (Ensure Port 9876 is open/tunneled)

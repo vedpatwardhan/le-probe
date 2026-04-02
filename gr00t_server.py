@@ -150,7 +150,7 @@ class GR00TInferenceServer:
                 image_world_center_np = unpack_np(req.get("world_center"))
                 image_world_wrist_np = unpack_np(req.get("world_wrist"))
                 state_np = unpack_np(req.get("state"))
-                instruction = req.get("instruction", "Perform the task.")
+                instruction = req.get("instruction", "Pick up the red cube")
 
                 # Transform images ((224, 224, 3) -> (3, 224, 224))
                 all_imgs_np = np.stack(

@@ -91,11 +91,11 @@ def handle_reset():
         st.session_state.last_msg = ("Randomized! Sliders synced.", "🎲")
 
 
-def handle_auto_reach(offset_cm):
-    resp = send_command({"command": "auto_reach", "offset_cm": offset_cm})
+def handle_ik_pickup(offset_cm):
+    resp = send_command({"command": "ik_pickup", "offset_cm": offset_cm})
     if resp and "joints" in resp:
         sync_ui_to_joints(resp["joints"])
-        st.session_state.last_msg = ("Reach Complete! Sliders synced.", "🎯")
+        st.session_state.last_msg = ("Pickup Complete! Sliders synced.", "🎯")
 
 
 def handle_start_recording(task_name):
@@ -244,9 +244,9 @@ with col_sub:
 
 with col_reach:
     st.button(
-        "🚀 Auto-Reach Cube",
+        "🎯 IK Pickup",
         use_container_width=True,
-        on_click=handle_auto_reach,
+        on_click=handle_ik_pickup,
         args=(reach_offset,),
     )
 

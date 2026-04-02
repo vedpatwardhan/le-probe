@@ -65,23 +65,27 @@ FROZEN_JOINTS = {
 
 CAMERA_ATTACH_LINK = "right_hand_pitch_link"
 
-# Central URDF Path
-URDF_PATH = "/content/sim_assets/gr1t1_fourier_hand_6dof.xml"
-if not os.path.exists(URDF_PATH):
-    URDF_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/gr1t1_fourier_hand_6dof.xml"
+# Central Paths
+XML_PATH = "/content/sim_assets/gr1t1_fourier_hand_6dof.xml"
+if not os.path.exists(XML_PATH):
+    XML_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/gr1t1_fourier_hand_6dof.xml"
+
+SCENE_PATH = "/content/sim_assets/scene_gr1_pickup.xml"
+if not os.path.exists(SCENE_PATH):
+    SCENE_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/gr1_gr00t/sim_assets/scene_gr1_pickup.xml"
 
 
 # -----------------------------------------------------------------------------
 # PHYSICAL BONES (Dynamic Sync 🔗)
 # -----------------------------------------------------------------------------
-def get_urdf_limits(urdf_path, joint_names):
-    """Scans URDF XML for joint limit bounds."""
-    if not os.path.exists(urdf_path):
+def get_limits(xml_path, joint_names):
+    """Scans robotic asset files (URDF/XML) for joint limit bounds."""
+    if not os.path.exists(xml_path):
         return np.zeros(len(joint_names), dtype=np.float32), np.zeros(
             len(joint_names), dtype=np.float32
         )
 
-    tree = ET.parse(urdf_path)
+    tree = ET.parse(xml_path)
     root = tree.getroot()
 
     joint_db = {}
@@ -122,13 +126,13 @@ def get_urdf_limits(urdf_path, joint_names):
     return np.array(mins, dtype=np.float32), np.array(maxs, dtype=np.float32)
 
 
-JOINT_LIMITS_MIN, JOINT_LIMITS_MAX = get_urdf_limits(URDF_PATH, COMPACT_WIRE_JOINTS)
+JOINT_LIMITS_MIN, JOINT_LIMITS_MAX = get_limits(XML_PATH, COMPACT_WIRE_JOINTS)
 
 # -----------------------------------------------------------------------------
 # DIAGNOSTIC REPORT 📋
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    print(f"\n--- GR1 Protocol Config (URDF: {os.path.basename(URDF_PATH)}) ---")
+    print(f"\n--- GR1 Protocol Config (XML: {os.path.basename(XML_PATH)}) ---")
     print(f"Camera Mount: {CAMERA_ATTACH_LINK}")
     print(f"{'Idx':<4} {'Joint Name':<40} {'Min':<10} {'Max':<10}")
     print("-" * 70)
