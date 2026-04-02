@@ -70,14 +70,25 @@ class GR1MuJoCoSimulation:
                         [l.strip().split("#")[0].strip() for l in f if l.strip()]
                     )
 
-        # Mapping Protocol Names -> Joint / Qpos IDs
+        # Mapping Protocol Names -> Joint / Qpos / Actuator IDs
         self.protocol_joint_ids = []
+        self.protocol_actuator_ids = []
         self.v_allowed_mask = np.zeros(32)
         print("\n[INIT] Proxy -> MuJoCo Mapping Diagnostics:")
         for i, name in enumerate(COMPACT_WIRE_JOINTS):
             try:
                 j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
                 self.protocol_joint_ids.append(j_id)
+
+                # Map to Actuator (Order matches COMPACT_WIRE_JOINTS)
+                try:
+                    a_id = mujoco.mj_name2id(
+                        self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name
+                    )
+                    self.protocol_actuator_ids.append(a_id)
+                except:
+                    self.protocol_actuator_ids.append(-1)
+
                 if name in self.allowed_names:
                     self.v_allowed_mask[i] = 1.0
                     q_idx = self.model.jnt_qposadr[j_id]
@@ -86,6 +97,7 @@ class GR1MuJoCoSimulation:
                     )
             except:
                 self.protocol_joint_ids.append(-1)
+                self.protocol_actuator_ids.append(-1)
 
         # Finger Coupling Graph (Proximal -> Distal)
         self.coupling_map = {}
@@ -151,13 +163,25 @@ class GR1MuJoCoSimulation:
         # Pre-set robot height in model defaults
         root_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "root")
         self.root_q_idx = self.model.jnt_qposadr[root_id]
-        self.data.qpos[self.root_q_idx + 2] = 0.95
+        self.data.qpos[self.root_q_idx : self.root_q_idx + 3] = [0.0, 0.0, 0.95]
 
         # Internal state
         self.last_target_q = self.data.qpos.copy()
         self.active_joints_this_command = set()
         self.is_recording = False
         self.is_running = True
+
+        # Initial simulation step to settle robot and sync ctrl
+        self.sync_ctrl_to_qpos(self.data.qpos)
+        mujoco.mj_fwdPosition(self.model, self.data)
+
+    def sync_ctrl_to_qpos(self, q):
+        """Syncs the actuator control buffer for all model actuators."""
+        for a_id in range(self.model.nu):
+            # Actuator ID -> Joint ID -> Qpos Index
+            j_id = self.model.actuator_trnid[a_id, 0]
+            q_idx = self.model.jnt_qposadr[j_id]
+            self.data.ctrl[a_id] = q[q_idx]
 
     def get_state_32(self):
         """Returns normalized 32-DOF protocol vector [-1.0, 1.0]."""
@@ -253,8 +277,8 @@ class GR1MuJoCoSimulation:
                 jitter = np.random.normal(0, 0.05)
                 home_q[self.model.jnt_qposadr[j_id]] = mid + jitter
 
-        # Set Root Height
-        home_q[self.root_q_idx + 2] = 0.95
+        # Set Root Position (x=0, y=0, z=0.95)
+        home_q[self.root_q_idx : self.root_q_idx + 3] = [0.0, 0.0, 0.95]
 
         # Jitter Waist Pitch
         try:
@@ -329,19 +353,36 @@ class GR1MuJoCoSimulation:
             self.recorder.add_frame(views, self.get_state_32(), action_32)
 
     def dispatch_action(self, action_32, target_q):
-        """1.0s Fixed Window Interpolation."""
-        num_steps = 100  # Smooth enough for visual
+        """Physics-driven fixed window movement."""
+        # 1.0s window at 2ms timestep = 500 steps.
+        # We iteration 100 times, doing 5 physics steps per iteration.
+        num_iters = 100
+        steps_per_iter = 5
         start_q = self.data.qpos.copy()
-        for i in range(num_steps):
-            alpha = i / float(num_steps)
-            self.data.qpos[:] = start_q + alpha * (target_q - start_q)
-            mujoco.mj_fwdPosition(self.model, self.data)
+
+        # Retrieve root target to keep the robot stabilized at its z-height
+        root_target = target_q[self.root_q_idx : self.root_q_idx + 7]
+
+        for i in range(num_iters):
+            alpha = (i + 1) / float(num_iters)
+            # Interpolated target for actuators
+            current_target_q = start_q + alpha * (target_q - start_q)
+
+            for _ in range(steps_per_iter):
+                # 1. Update Actuator Targets
+                self.sync_ctrl_to_qpos(current_target_q)
+
+                # 2. Pin Root (Keep floating at 0.95m)
+                # This ensures the robot stays upright during teleop.
+                self.data.qpos[self.root_q_idx : self.root_q_idx + 7] = root_target
+                self.data.qvel[:6] = 0.0
+
+                # 3. Step Physics (Enforces Collisions)
+                mujoco.mj_step(self.model, self.data)
+
             if i % 10 == 0:
                 self.render_and_record(action_32)
-                time.sleep(0.005)  # Force visual separation
 
-        self.data.qpos[:] = target_q
-        mujoco.mj_fwdPosition(self.model, self.data)
         self.print_joint_status()
 
     def run(self, port=5556):

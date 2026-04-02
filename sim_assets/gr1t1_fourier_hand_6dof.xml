@@ -65,13 +65,13 @@
     <mesh name="waist_roll_link" file="waist_roll_link.STL" />
     <mesh name="waist_yaw_link" file="waist_yaw_link.STL" />
   </asset>
-  <default>
-    <joint armature="0.01" damping="0.05" limited="true" />
-    <geom type="mesh" rgba="0.75 0.75 0.75 1" contype="1" conaffinity="1" />
-  </default>
+    <default>
+      <joint armature="0.01" damping="0.05" limited="true" />
+      <geom type="mesh" rgba="0.75 0.75 0.75 1" contype="2" conaffinity="1" />
+    </default>
   <worldbody>
     <light directional="true" diffuse=".8 .8 .8" specular=".2 .2 .2" pos="0 0 5" dir="0 0 -1" />
-    <geom name="floor" type="plane" size="10 10 .1" material="grid" />
+    <geom name="floor" type="plane" size="10 10 .1" material="grid" contype="1" conaffinity="3" />
     <body name="base_link">
       <freejoint name="root" />
       <geom mesh="base_link" pos="0 0 0" euler="0 0 0" />
@@ -134,6 +134,7 @@
             <geom mesh="waist_roll_link" pos="0 0 0" euler="0 0 0" />
             <body name="torso_link" pos="-0.00414 0 0.16071" euler="0 0 0">
               <geom mesh="torso_link" pos="0 0 0" euler="0 0 0" />
+              <geom type="box" size="0.1 0.12 0.15" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
               <body name="left_upper_arm_pitch_link" pos="0 0.10111 0.047149" euler="0.43633 0 0">
                 <joint name="left_shoulder_pitch_joint" axis="0 1 0" range="-2.79 1.92" />
                 <geom mesh="left_upper_arm_pitch_link" pos="0 0 0" euler="0 0 0" />
@@ -222,12 +223,14 @@
                 <body name="right_upper_arm_roll_link" pos="0 -0.09515 0" euler="0.43633 0 0">
                   <joint name="right_shoulder_roll_joint" axis="1 0 0" range="-3.27 0.57" />
                   <geom mesh="right_upper_arm_roll_link" pos="0 0 0" euler="0 0 0" />
-                  <body name="right_upper_arm_yaw_link" pos="0 -0.04 -0.07095" euler="0 0 0">
-                    <joint name="right_shoulder_yaw_joint" axis="0 0 1" range="-2.97 2.97" />
-                    <geom mesh="right_upper_arm_yaw_link" pos="0 0 0" euler="0 0 0" />
-                    <body name="right_lower_arm_pitch_link" pos="0 0 -0.1751" euler="0 0 0">
-                      <joint name="right_elbow_pitch_joint" axis="0 1 0" range="-2.27 2.27" />
-                      <geom mesh="right_lower_arm_pitch_link" pos="0 0 0" euler="0 0 0" />
+                    <body name="right_upper_arm_yaw_link" pos="0 -0.04 -0.07095" euler="0 0 0">
+                      <joint name="right_shoulder_yaw_joint" axis="0 0 1" range="-2.97 2.97" />
+                      <geom mesh="right_upper_arm_yaw_link" pos="0 0 0" euler="0 0 0" />
+                      <geom type="capsule" fromto="0 0 0 0 0 -0.17" size="0.035" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
+                      <body name="right_lower_arm_pitch_link" pos="0 0 -0.1751" euler="0 0 0">
+                        <joint name="right_elbow_pitch_joint" axis="0 1 0" range="-2.27 2.27" />
+                        <geom mesh="right_lower_arm_pitch_link" pos="0 0 0" euler="0 0 0" />
+                        <geom type="capsule" fromto="0 0 0 0 0 -0.18" size="0.03" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                       <body name="right_hand_yaw_link" pos="0 -5.033E-05 -0.05395" euler="0 0 0">
                         <joint name="right_wrist_yaw_joint" axis="0 0 1" range="-2.97 2.97" />
                         <geom mesh="right_hand_yaw_link" pos="0 0 0" euler="0 0 0" />
@@ -241,15 +244,18 @@
                             <body name="right_end_effector_link" pos="0 0 -0.023" euler="0 0 0">
                               <body name="R_hand_base_link" pos="0 0 0" euler="0 0 0">
                                 <geom mesh="R_hand_base_link" pos="0 0 0" euler="0 0 0" />
+                                <geom type="capsule" fromto="0.01 0.01 -0.02 -0.01 -0.01 -0.08" size="0.03" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                 <body name="R_thumb_proximal_yaw_link" pos="0.022 0.0155 -0.022892" euler="3.1416 0 0">
                                   <joint name="R_thumb_proximal_yaw_joint" axis="0 0 1" range="-1.676 0" />
                                   <geom mesh="R_thumb_proximal_yaw_link" pos="0 0 0" euler="0 0 0" />
                                   <body name="R_thumb_proximal_pitch_link" pos="0.02175 -7.414E-05 0" euler="1.5708 0 -0.0057076">
                                     <joint name="R_thumb_proximal_pitch_joint" axis="0 0 1" range="0 1.159" />
                                     <geom mesh="R_thumb_proximal_pitch_link" pos="0 0 0" euler="0 0 0" />
+                                    <geom type="capsule" fromto="0 0 0 0.06 0 0" size="0.012" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="R_thumb_distal_link" pos="0.061549 0.007464 0" euler="0 1.7448E-05 -0.055652">
                                       <joint name="R_thumb_distal_joint" axis="0 0 1" range="0 1.267" />
                                       <geom mesh="R_thumb_distal_link" pos="0 0 0" euler="0 0 0" />
+                                      <geom type="capsule" fromto="0 0 0 0.03 0 0" size="0.01" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                       <body name="R_thumb_tip_link" pos="0.030 -0.0015 0" euler="0 0 0" />
                                     </body>
                                   </body>
@@ -257,36 +263,44 @@
                                 <body name="R_index_proximal_link" pos="0.026866 0.0123 -0.09399" euler="3.1416 -1.5708 0">
                                   <joint name="R_index_proximal_joint" axis="0 0 1" range="-1.602 0" />
                                   <geom mesh="R_index_proximal_link" pos="0 0 0" euler="0 0 0" />
+                                  <geom type="capsule" fromto="0 0 0 0.035 0 0" size="0.009" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                   <body name="R_index_intermediate_link" pos="0.031535 -0.0054349 0" euler="0 0 0">
                                     <joint name="R_index_intermediate_joint" axis="0 0 1" range="-1.791 0" />
                                     <geom mesh="R_index_intermediate_link" pos="0 0 0" euler="0 0 0" />
+                                    <geom type="capsule" fromto="0 0 0 0.025 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="R_index_tip_link" pos="0.0390 -0.0020 0" euler="0 0 0" />
                                   </body>
                                 </body>
                                 <body name="R_middle_proximal_link" pos="0.0085 0.0123 -0.096" euler="3.1416 -1.5708 0">
                                   <joint name="R_middle_proximal_joint" axis="0 0 1" range="-1.603 0" />
                                   <geom mesh="R_middle_proximal_link" pos="0 0 0" euler="0 0 0" />
+                                  <geom type="capsule" fromto="0 0 0 0.04 0 0" size="0.009" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                   <body name="R_middle_intermediate_link" pos="0.031531 -0.0054597 0" euler="0 0 0">
                                     <joint name="R_middle_intermediate_joint" axis="0 0 1" range="-1.791 0" />
                                     <geom mesh="R_middle_intermediate_link" pos="0 0 0" euler="0 0 0" />
+                                    <geom type="capsule" fromto="0 0 0 0.025 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="R_middle_tip_link" pos="0.047 -0.0025 0" euler="0 0 0" />
                                   </body>
                                 </body>
                                 <body name="R_ring_proximal_link" pos="-0.0099658 0.0123 -0.095888" euler="0 -1.5708 3.1416">
                                   <joint name="R_ring_proximal_joint" axis="0 0 1" range="-1.602 0" />
                                   <geom mesh="R_ring_proximal_link" pos="0 0 0" euler="0 0 0" />
+                                  <geom type="capsule" fromto="0 0 0 0.035 0 0" size="0.009" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                   <body name="R_ring_intermediate_link" pos="0.031474 -0.0057806 0" euler="0 0 0">
                                     <joint name="R_ring_intermediate_joint" axis="0 0 1" range="-1.798 0" />
                                     <geom mesh="R_ring_intermediate_link" pos="0 0 0" euler="0 0 0" />
+                                    <geom type="capsule" fromto="0 0 0 0.025 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="R_ring_tip_link" pos="0.0385 -0.0015 0" euler="0 0 0" />
                                   </body>
                                 </body>
                                 <body name="R_pinky_proximal_link" pos="-0.028223 0.0123 -0.093963" euler="0 -1.5708 3.1416">
                                   <joint name="R_pinky_proximal_joint" axis="0 0 1" range="-1.602 0" />
                                   <geom mesh="R_pinky_proximal_link" pos="0 0 0" euler="0 0 0" />
+                                  <geom type="capsule" fromto="0 0 0 0.03 0 0" size="0.009" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                   <body name="R_pinky_intermediate_link" pos="0.031474 -0.0057796 0" euler="0 0 0">
                                     <joint name="R_pinky_intermediate_joint" axis="0 0 1" range="-1.796 0" />
                                     <geom mesh="R_pinky_intermediate_link" pos="0 0 0" euler="0 0 0" />
+                                    <geom type="capsule" fromto="0 0 0 0.02 0 0" size="0.008" group="0" rgba="1 0 0 0.1" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="R_pinky_tip_link" pos="0.033 -0.0015 0" euler="0 0 0" />
                                   </body>
                                 </body>
@@ -366,5 +380,18 @@
     <position name="waist_yaw_joint" joint="waist_yaw_joint" kp="3500" />
     <position name="waist_pitch_joint" joint="waist_pitch_joint" kp="3500" />
     <position name="waist_roll_joint" joint="waist_roll_joint" kp="3500" />
+    <!-- Leg Actuators for Stability -->
+    <position name="left_hip_roll_joint" joint="left_hip_roll_joint" kp="3500" />
+    <position name="left_hip_yaw_joint" joint="left_hip_yaw_joint" kp="3500" />
+    <position name="left_hip_pitch_joint" joint="left_hip_pitch_joint" kp="3500" />
+    <position name="left_knee_pitch_joint" joint="left_knee_pitch_joint" kp="3500" />
+    <position name="left_ankle_pitch_joint" joint="left_ankle_pitch_joint" kp="3500" />
+    <position name="left_ankle_roll_joint" joint="left_ankle_roll_joint" kp="3500" />
+    <position name="right_hip_roll_joint" joint="right_hip_roll_joint" kp="3500" />
+    <position name="right_hip_yaw_joint" joint="right_hip_yaw_joint" kp="3500" />
+    <position name="right_hip_pitch_joint" joint="right_hip_pitch_joint" kp="3500" />
+    <position name="right_knee_pitch_joint" joint="right_knee_pitch_joint" kp="3500" />
+    <position name="right_ankle_pitch_joint" joint="right_ankle_pitch_joint" kp="3500" />
+    <position name="right_ankle_roll_joint" joint="right_ankle_roll_joint" kp="3500" />
   </actuator>
 </mujoco>
