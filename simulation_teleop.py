@@ -1,10 +1,9 @@
 import numpy as np
 import zmq
 import msgpack
-import argparse
 import rerun as rr
+import mujoco
 from simulation_base import GR1MuJoCoBase
-from gr1_config import COMPACT_WIRE_JOINTS
 
 
 class GR1TeleopServer(GR1MuJoCoBase):
@@ -77,7 +76,6 @@ class GR1TeleopServer(GR1MuJoCoBase):
     def _handle_ik_pickup_logic(self):
         """Hardened multi-phase IK solver for red cube."""
         print("🎯 Executing IK Pickup Phase...")
-        import mujoco
 
         cube_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint")
         cube_pos = self.data.qpos[

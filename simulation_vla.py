@@ -3,6 +3,7 @@ import zmq
 import msgpack
 import time
 import argparse
+import rerun as rr
 from simulation_base import GR1MuJoCoBase
 
 
@@ -74,8 +75,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Re-init Rerun for standalone run
-    import rerun as rr
-
     rr.init("gr1_vla", spawn=False)
     rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
 

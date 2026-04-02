@@ -231,8 +231,6 @@ class GR00TInferenceServer:
                 socket.send(msgpack.packb(payload, use_bin_type=True))
 
             except Exception as e:
-                import traceback
-
                 print(f"❌ Error in Inference Loop: {e}")
                 traceback.print_exc()
                 socket.send(msgpack.packb({"error": str(e)}, use_bin_type=True))
