@@ -1,4 +1,5 @@
 import os
+import datetime
 
 os.environ["MUJOCO_GL"] = "egl"  # configured for colab
 import numpy as np
