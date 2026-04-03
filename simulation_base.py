@@ -77,16 +77,8 @@ class GR1MuJoCoBase:
         self._init_finger_coupling()
 
     def _init_joint_mappings(self):
-        self.teleop_names = set()
         self.ik_names = set()
         base_path = os.path.dirname(os.path.abspath(__file__))
-
-        # Load Teleop whitelist
-        t_path = os.path.join(base_path, "teleop_joints.txt")
-        with open(t_path, "r") as f:
-            self.teleop_names.update(
-                [l.strip().split("#")[0].strip() for l in f if l.strip()]
-            )
 
         # Load IK whitelist
         i_path = os.path.join(base_path, "ik_joints.txt")
@@ -95,9 +87,7 @@ class GR1MuJoCoBase:
                 [l.strip().split("#")[0].strip() for l in f if l.strip()]
             )
 
-        print(
-            f"✅ Loaded {len(self.teleop_names)} teleop / {len(self.ik_names)} IK joint names."
-        )
+        print(f"✅ Loaded {len(self.ik_names)} IK joint names.")
 
         self.protocol_joint_ids = []
         self.v_allowed_mask = np.zeros(32)

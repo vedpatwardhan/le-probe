@@ -36,8 +36,9 @@ if "total_episodes" not in st.session_state:
 # --- Load Default Active Joints ---
 if "active_joints" not in st.session_state:
     st.session_state.active_joints = set()
+    # Load default active joints from IK whitelist
     base_path = os.path.dirname(os.path.abspath(__file__))
-    with open(f"{base_path}/teleop_joints.txt", "r") as f:
+    with open(f"{base_path}/ik_joints.txt", "r") as f:
         default_joint_names = [
             line.strip().split("#")[0].strip() for line in f if line.strip()
         ]
@@ -78,10 +79,6 @@ def sync_ui_to_joints(joints):
         val = float(np.clip(val, -1, 1))
         if abs(val) > 1e-4:
             if idx not in st.session_state.active_joints:
-                name = COMPACT_WIRE_JOINTS[idx]
-                print(
-                    f"[UI] Auto-activating '{name}' (idx {idx}) because value is {val:.6f}"
-                )
                 st.session_state.active_joints.add(idx)
             st.session_state[f"input_{idx}"] = val
 
