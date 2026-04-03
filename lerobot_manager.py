@@ -14,9 +14,13 @@ except ImportError:
 class LeRobotManager:
     """Manages LeRobot dataset creation and frame buffering."""
 
-    def __init__(self, repo_id="gr1_pickup_large", fps=10, root=None):
+    def __init__(
+        self, repo_id="gr1_pickup_large", fps=10, root=None, upload_interval=20
+    ):
         self.repo_id = repo_id
         self.fps = fps
+        self.upload_interval = upload_interval
+        self.episodes_since_sync = 0
         if root is None:
             # Default to 'datasets' folder sibling to this file
             root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datasets")
@@ -167,24 +171,45 @@ class LeRobotManager:
             self._pending_uploads = max(0, self._pending_uploads - 1)
 
     def stop_episode(self):
-        """Finalizes locally and queues a background Hub sync."""
+        """Finalizes locally and and then conditionally queues a Hub sync."""
         if self.dataset is None:
             return
 
         print(f"[LEROBOT] Finalizing episode local save...")
         self.dataset.save_episode(parallel_encoding=False)
         self._total_episodes = self.dataset.num_episodes
+        self.episodes_since_sync += 1
         print(f"[LEROBOT] Episode saved. Total frames: {self.episode_frame_count}")
 
-        # Initiate non-blocking background synchronization
-        self._pending_uploads += 1
-        self.executor.submit(self._async_push_to_hub, self.dataset)
-
-        print(
-            f"[LEROBOT] Episode queued for Hub synchronization. Source: {self.root}/{self.repo_id}"
-        )
+        # Batch Sync: Periodic or and then conditional Hub synchronization
         self.episode_frame_count = 0  # Reset for next episode
         self.dataset = None
+
+        if self.episodes_since_sync >= self.upload_interval:
+            self.force_sync()
+        else:
+            print(
+                f"[LEROBOT] Batch Status: {self.episodes_since_sync}/{self.upload_interval} episodes. Sync deferred."
+            )
+
+    def force_sync(self):
+        """Manually triggers a motorized Hub synchronization of all new episodes."""
+        if not LEROBOT_AVAILABLE:
+            return
+
+        # Use a temporary dataset object to trigger the push if not currently in an episode
+        try:
+            print(
+                f"[LEROBOT] Initiating Hub synchronization (Batch size: {self.episodes_since_sync})..."
+            )
+            dataset_path = os.path.join(self.root, self.repo_id)
+            temp_ds = LeRobotDataset(repo_id=self.repo_id, root=dataset_path)
+
+            self._pending_uploads += 1
+            self.executor.submit(self._async_push_to_hub, temp_ds)
+            self.episodes_since_sync = 0
+        except Exception as e:
+            print(f"[LEROBOT] ⚠️ Manual sync trigger failed: {e}")
 
     def discard_episode(self):
         """Aborts the current episode without saving or syncing."""

@@ -47,6 +47,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
                     {
                         "upload_queue": self.recorder.pending_uploads,
                         "total_episodes": self.recorder.total_episodes,
+                        "batch_status": self.recorder.episodes_since_sync,
                     }
                 )
                 socket.send(msgpack.packb(payload))
@@ -56,6 +57,10 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 send_resp(
                     {"status": "reset_ok", "joints": self.get_state_32().tolist()}
                 )
+
+            elif cmd == "sync":
+                self.recorder.force_sync()
+                send_resp({"status": "sync_started"})
 
             elif cmd == "start_recording":
                 self.recorder.start_episode(data.get("task", "Pick up red cube"))

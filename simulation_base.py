@@ -58,7 +58,9 @@ class GR1MuJoCoBase:
         self.debug_log_path = None
 
         # LeRobot Manager
-        self.recorder = LeRobotManager(repo_id="gr1_pickup_mujoco", fps=10)
+        self.recorder = LeRobotManager(
+            repo_id="vedpatwardhan/gr1_pickup_large", fps=10, upload_interval=20
+        )
 
         # IK Setup (Mink 1.1.0)
         self._init_ik_solver()

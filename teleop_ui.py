@@ -33,6 +33,9 @@ if "upload_queue" not in st.session_state:
 if "total_episodes" not in st.session_state:
     st.session_state.total_episodes = 0
 
+if "batch_status" not in st.session_state:
+    st.session_state.batch_status = 0
+
 if "ik_phase" not in st.session_state:
     st.session_state.ik_phase = None
 
@@ -58,6 +61,10 @@ def send_command(payload):
         socket.send(msgpack.packb(payload, use_bin_type=True))
         resp = socket.recv()
         data = msgpack.unpackb(resp, raw=False)
+        st.session_state.upload_queue = data.get("upload_queue", 0)
+        st.session_state.total_episodes = data.get("total_episodes", 0)
+        st.session_state.batch_status = data.get("batch_status", 0)
+        return data
 
         # Track background sync progress
         if "upload_queue" in data:
@@ -186,7 +193,11 @@ with st.sidebar:
 
     st.divider()
     st.header("📊 Dataset Statistics")
-    st.metric("Total Episodes", st.session_state.total_episodes)
+    col_stat1, col_stat2 = st.columns(2)
+    with col_stat1:
+        st.metric("Total Episodes", st.session_state.total_episodes)
+    with col_stat2:
+        st.metric("Batch Status", f"{st.session_state.batch_status}/20")
 
     st.header("☁️ Cloud Sync Status")
     if st.session_state.upload_queue > 0:
@@ -194,9 +205,17 @@ with st.sidebar:
     else:
         st.success("✅ All episodes synced to Hub.")
 
-    if st.button("Refresh Sync Status"):
-        # Dummy step command to poll status
-        send_command({"command": "poll_status"})
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("Refresh", icon="🔄", use_container_width=True):
+            send_command({"command": "poll_status"})
+            st.rerun()
+    with col_btn2:
+        if st.button(
+            "Push to Hub", icon="☁️", type="primary", use_container_width=True
+        ):
+            send_command({"command": "sync"})
+            st.rerun()
 
 st.markdown("### Select Joint:")
 col1, col2 = st.columns([3, 1])
