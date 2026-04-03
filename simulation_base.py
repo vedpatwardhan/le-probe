@@ -288,7 +288,9 @@ class GR1MuJoCoBase:
 
     def reset_env(self):
         print("🎲 Randomizing the environment...")
-        rx, ry = np.random.uniform(0.35, 0.55), np.random.uniform(-0.15, 0.15)
+        # Constrain cube randomization to table bounds (X: 0.25-0.65, Y: ±0.25)
+        # Using [0.27, 0.63] and ±0.23 for a small safety margin from the edges
+        rx, ry = np.random.uniform(0.27, 0.63), np.random.uniform(-0.23, 0.23)
         cube_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint")
         cube_q_idx = self.model.jnt_qposadr[cube_id]
         self.data.qpos[cube_q_idx : cube_q_idx + 3] = [rx, ry, 0.82]
@@ -305,9 +307,10 @@ class GR1MuJoCoBase:
         ].copy()
         for i, j_id in enumerate(self.protocol_joint_ids):
             if j_id != -1 and self.v_allowed_mask[i] > 0.5:
+                # Wider joint randomization range (±0.2 rad) to test starting configuration limits
                 home_q[self.model.jnt_qposadr[j_id]] = (
                     self.wire_max[i] + self.wire_min[i]
-                ) / 2.0 + np.random.normal(0, 0.05)
+                ) / 2.0 + np.random.uniform(-0.2, 0.2)
         home_q[self.root_q_idx : self.root_q_idx + 3] = [0.0, 0.0, 0.95]
         self.last_target_q = home_q.copy()
         self.dispatch_action(None, home_q)
