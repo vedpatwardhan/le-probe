@@ -8,7 +8,7 @@ import datetime
 from pathlib import Path
 from PIL import Image
 from simulation_base import GR1MuJoCoBase
-from gr1_config import BASE_DIR
+from gr1_config import BASE_DIR, SCENE_PATH
 
 
 class GR1TeleopServer(GR1MuJoCoBase):
@@ -18,7 +18,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
     """
 
     def __init__(self, scene_path=None, port=5556):
-        super().__init__(scene_path) if scene_path else super().__init__()
+        super().__init__(scene_path or SCENE_PATH, restrict_ik=True)
         self.port = port
         self.is_running = True
 

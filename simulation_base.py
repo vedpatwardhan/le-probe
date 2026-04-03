@@ -26,8 +26,9 @@ class GR1MuJoCoBase:
     Handles XML loading, IK solving, State extraction, and Perception.
     """
 
-    def __init__(self, scene_path=SCENE_PATH):
+    def __init__(self, scene_path=SCENE_PATH, restrict_ik=True):
         print(f"--- GR-1 MODULAR BASE (MuJoCo) ---")
+        self.restrict_ik = restrict_ik
         self.model = mujoco.MjModel.from_xml_path(scene_path)
         self.data = mujoco.MjData(self.model)
 
@@ -104,8 +105,9 @@ class GR1MuJoCoBase:
             try:
                 j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
                 self.protocol_joint_ids.append(j_id)
-                # Use teleop names for perception masking
-                if name in self.teleop_names:
+                # v_allowed_mask is ALWAYS 1.0 for valid joints to allow full protocol freedom
+                # (randomization, VLA actions, etc.), even if IK is restricted.
+                if j_id != -1:
                     self.v_allowed_mask[i] = 1.0
             except:
                 self.protocol_joint_ids.append(-1)
@@ -135,9 +137,10 @@ class GR1MuJoCoBase:
         self.ee_wrist_link = "right_hand_pitch_link"
         self.configuration = mink.Configuration(self.model)
 
-        # Determine authorized velocity indices (DOFs) from the IK whitelist ONLY
+        # Determine authorized velocity indices (DOFs) for the IK Solver
         self.auth_dofs = set()
-        for name in self.ik_names:
+        whitelist = self.ik_names if self.restrict_ik else COMPACT_WIRE_JOINTS
+        for name in whitelist:
             j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
             if j_id != -1:
                 v_idx = self.model.jnt_dofadr[j_id]
@@ -147,7 +150,7 @@ class GR1MuJoCoBase:
                 dnum = dof_counts[j_type]
                 for d in range(dnum):
                     self.auth_dofs.add(int(v_idx + d))
-        print("auth_dofs", self.auth_dofs)
+        print(f"IK auth_dofs (restricted={self.restrict_ik}):", self.auth_dofs)
 
         # Always allow root for relative calculations if needed,
         # but here we strictly follow the whitelist for robot bones.
