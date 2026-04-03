@@ -27,15 +27,12 @@ if "target_buffer" not in st.session_state:
 if "staging_buffer" not in st.session_state:
     st.session_state.staging_buffer = np.full(32, np.nan, dtype=np.float32)
 
-if "upload_queue" not in st.session_state:
-    st.session_state.upload_queue = 0
-
 if "total_episodes" not in st.session_state:
     st.session_state.total_episodes = 0
-
+if "upload_queue" not in st.session_state:
+    st.session_state.upload_queue = 0
 if "batch_status" not in st.session_state:
     st.session_state.batch_status = 0
-
 if "ik_phase" not in st.session_state:
     st.session_state.ik_phase = None
 
@@ -76,6 +73,23 @@ def send_command(payload):
     except Exception as e:
         st.error(f"ZMQ Error: {e}")
         return None
+
+
+# Automated status refresh on EVERY rerun to ensure parity with server
+try:
+    data = send_command({"command": "poll_status"})
+    if data:
+        st.session_state.total_episodes = data.get(
+            "total_episodes", st.session_state.total_episodes
+        )
+        st.session_state.upload_queue = data.get(
+            "upload_queue", st.session_state.upload_queue
+        )
+        st.session_state.batch_status = data.get(
+            "batch_status", st.session_state.batch_status
+        )
+except Exception as e:
+    print("Error while setting initial total episodes", e)
 
 
 def sync_ui_to_joints(joints):

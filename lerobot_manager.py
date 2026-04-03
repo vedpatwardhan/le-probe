@@ -37,6 +37,15 @@ class LeRobotManager:
         self._pending_uploads = 0
         self._total_episodes = 0
 
+        # Scan for existing episodes to initialize counter
+        try:
+            chunk_path = os.path.join(self.root, self.repo_id, "data", "chunk-000")
+            if os.path.exists(chunk_path):
+                existing = [f for f in os.listdir(chunk_path) if f.endswith(".parquet")]
+                self._total_episodes = len(existing)
+        except Exception as e:
+            print(f"[LEROBOT] Warning: Could not scan existing episodes: {e}")
+
         # Initial probe of dataset scale
         dataset_path = os.path.join(self.root, self.repo_id)
         if LEROBOT_AVAILABLE and os.path.exists(
