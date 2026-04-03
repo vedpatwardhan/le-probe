@@ -33,6 +33,9 @@ if "upload_queue" not in st.session_state:
 if "total_episodes" not in st.session_state:
     st.session_state.total_episodes = 0
 
+if "ik_phase" not in st.session_state:
+    st.session_state.ik_phase = None
+
 # --- Load Default Active Joints ---
 if "active_joints" not in st.session_state:
     st.session_state.active_joints = set()
@@ -73,13 +76,13 @@ def sync_ui_to_joints(joints):
     st.session_state.staging_buffer = np.array(joints, dtype=np.float32)
     st.session_state.target_buffer = np.copy(st.session_state.staging_buffer)
 
-    # Automatically activate and update sliders for important joints
+    # Automatically activate sliders for important joints
     for idx, val in enumerate(joints):
-        # Use a safe epsilon clip to prevent StreamlitValueAboveMaxErrors (1.0000004...)
         val = float(np.clip(val, -1, 1))
         if abs(val) > 1e-4:
             if idx not in st.session_state.active_joints:
                 st.session_state.active_joints.add(idx)
+            # Update the key associated with the slider so it jumps to the value
             st.session_state[f"input_{idx}"] = val
 
 
@@ -91,10 +94,8 @@ def handle_reset():
 
 
 def handle_ik_pickup(offset_cm):
-    resp = send_command({"command": "ik_pickup", "offset_cm": offset_cm})
-    if resp and "joints" in resp:
-        sync_ui_to_joints(resp["joints"])
-        st.session_state.last_msg = ("Pickup Complete! Sliders synced.", "🎯")
+    st.session_state.ik_phase = 0
+    st.session_state.ik_offset = offset_cm
 
 
 def handle_start_recording(task_name):
@@ -128,6 +129,13 @@ def clear_all():
     st.session_state.staging_buffer.fill(np.nan)
 
 
+# --- Phase Machine Sync Consumer ---
+# This ensures that IK phase updates are applied to widgets BEFORE they are instantiated,
+# while the actual phase command happened at the end of the previous run (after instantiation).
+if "pending_sync" in st.session_state:
+    sync_ui_to_joints(st.session_state.pending_sync)
+    del st.session_state.pending_sync
+
 st.title("GR1 Advanced Teleop Dashboard")
 
 # Show any pending toasts from callbacks
@@ -155,12 +163,18 @@ with st.sidebar:
     else:
         col_save, col_discard = st.columns(2)
         with col_save:
-            if st.button("✅ Save", use_container_width=True):
+            if st.button(
+                "✅ Save",
+                use_container_width=True,
+            ):
                 send_stop_recording()
                 st.session_state.is_recording = False
                 st.rerun()
         with col_discard:
-            if st.button("❌ Discard", use_container_width=True):
+            if st.button(
+                "❌ Discard",
+                use_container_width=True,
+            ):
                 send_discard_recording()
                 st.session_state.is_recording = False
                 st.rerun()
@@ -195,7 +209,11 @@ with col1:
         label_visibility="collapsed",
     )
 with col2:
-    if st.button("Add", type="primary", use_container_width=True):
+    if st.button(
+        "Add",
+        type="primary",
+        use_container_width=True,
+    ):
         if selected_joint_name:
             idx = COMPACT_WIRE_JOINTS.index(selected_joint_name)
             st.session_state.active_joints.add(idx)
@@ -218,20 +236,22 @@ else:
         with col_lbl:
             st.markdown(f"**[{idx:02}] {name}**")
         with col_inp:
-            if f"input_{idx}" not in st.session_state:
-                st.session_state[f"input_{idx}"] = 0.0
-
+            # Sliders pull value from keyed session state to reflect IK movement in real-time
             new_val = st.slider(
                 f"Value for {name}",
                 min_value=-1.0,
                 max_value=1.0,
                 step=0.01,
-                key=f"input_{idx}",
                 label_visibility="collapsed",
+                key=f"input_{idx}",
             )
             st.session_state.staging_buffer[idx] = new_val
         with col_clr:
-            if st.button("Remove", key=f"remove_btn_{idx}", use_container_width=True):
+            if st.button(
+                "Remove",
+                key=f"remove_btn_{idx}",
+                use_container_width=True,
+            ):
                 st.session_state.active_joints.remove(idx)
                 if f"input_{idx}" in st.session_state:
                     del st.session_state[f"input_{idx}"]
@@ -243,7 +263,11 @@ st.divider()
 
 col_sub, col_reach, col_reset, col_export, col_clr_all, col_home = st.columns(6)
 with col_sub:
-    if st.button("Submit Request", type="primary", use_container_width=True):
+    if st.button(
+        "Submit Request",
+        type="primary",
+        use_container_width=True,
+    ):
         # Explicitly construct a clean 32-DOF packet to prevent cross-wiring
         final_packet = [float("nan")] * 32
         for idx in st.session_state.active_joints:
@@ -261,7 +285,11 @@ with col_reach:
     )
 
 with col_reset:
-    st.button("Randomize Env", use_container_width=True, on_click=handle_reset)
+    st.button(
+        "Randomize Env",
+        use_container_width=True,
+        on_click=handle_reset,
+    )
 
 with col_export:
     export_data = {}
@@ -280,11 +308,44 @@ with col_export:
     )
 
 with col_clr_all:
-    if st.button("Clear", use_container_width=True):
+    if st.button(
+        "Clear",
+        use_container_width=True,
+    ):
         clear_all()
         st.rerun()
 
 with col_home:
-    if st.button("Home All", use_container_width=True):
+    if st.button(
+        "Home All",
+        use_container_width=True,
+    ):
         home_all()
         st.rerun()
+
+
+# --- Phase Machine Executor (Producer) ---
+# We execute the next phase at the end of the script so that the CURRENT state
+# was rendered for the user before we request the next state and rerun.
+if st.session_state.ik_phase is not None and st.session_state.ik_phase < 4:
+    phase = st.session_state.ik_phase
+    offset = st.session_state.get("ik_offset", 5)
+    with st.spinner(f"Executing IK Phase {phase + 1} / 4..."):
+        # Small delay to ensure the UI actually shows the state before moving to next
+        import time
+
+        time.sleep(0.1)
+        resp = send_command(
+            {"command": "ik_pickup", "phase": phase, "offset_cm": offset}
+        )
+        if resp and "joints" in resp:
+            # Store for the NEXT run to avoid "modified after instantiation" errors
+            st.session_state.pending_sync = resp["joints"]
+            st.session_state.ik_phase += 1
+            if st.session_state.ik_phase >= 4:
+                st.session_state.ik_phase = None
+                st.session_state.last_msg = (
+                    "Pickup Complete! Sliders synced.",
+                    "🎯",
+                )
+            st.rerun()

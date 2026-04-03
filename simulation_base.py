@@ -188,11 +188,15 @@ class GR1MuJoCoBase:
         pass
 
     def get_state_32(self):
+        return self.qpos_to_action_32(self.data.qpos)
+
+    def qpos_to_action_32(self, qpos):
+        """Converts a 76-dim qpos vector to a normalized 32-dim protocol action/state."""
         state = np.zeros(32, dtype=np.float32)
         for i, j_id in enumerate(self.protocol_joint_ids):
             if j_id != -1:
                 qpos_idx = self.model.jnt_qposadr[j_id]
-                val = self.data.qpos[qpos_idx]
+                val = qpos[qpos_idx]
                 rng = max(1e-4, self.wire_max[i] - self.wire_min[i])
                 norm = 2.0 * (val - self.wire_min[i]) / rng - 1.0
                 state[i] = np.clip(norm, -1.1, 1.1)
