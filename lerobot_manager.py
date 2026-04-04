@@ -10,6 +10,23 @@ try:
 except ImportError:
     LEROBOT_AVAILABLE = False
 
+# -----------------------------------------------------------------------------
+# ROSETTA 64-DIM MAPPING (Simulation 32 -> Dataset 64)
+# -----------------------------------------------------------------------------
+# Compact 32: 0-6:L_Arm, 7-12:L_Hand, 13-15:Head, 16-22:R_Arm, 23-28:R_Hand, 29-31:Waist
+ROSETTA_MAP = {
+    # Arms
+    **{i: i for i in range(7)},  # L-Arm: 0-6 -> 0-6
+    **{i + 16: i + 7 for i in range(7)},  # R-Arm: 16-22 -> 7-13
+    # Waist
+    **{i + 29: i + 14 for i in range(3)},  # Waist: 29-31 -> 14-16
+    # Head
+    **{i + 13: i + 17 for i in range(3)},  # Head: 13-15 -> 17-19
+    # Hands
+    **{i + 7: i + 20 for i in range(6)},  # L-Hand: 7-12 -> 20-25
+    **{i + 23: i + 32 for i in range(6)},  # R-Hand: 23-28 -> 32-37
+}
+
 
 class LeRobotManager:
     """Manages LeRobot dataset creation and frame buffering."""
@@ -90,10 +107,10 @@ class LeRobotManager:
             },
             "observation.state": {
                 "dtype": "float32",
-                "shape": (32,),
+                "shape": (64,),
                 "names": ["joints"],
             },
-            "action": {"dtype": "float32", "shape": (32,), "names": ["joints"]},
+            "action": {"dtype": "float32", "shape": (64,), "names": ["joints"]},
         }
 
         # Point root directly to the specific dataset folder
@@ -137,24 +154,31 @@ class LeRobotManager:
             f"Recording NEW episode for task: '{task_instruction}'"
         )
 
-    def add_frame(self, imgs_dict, state, action):
-        """Adds a single frame to the current episode."""
+    def add_frame(self, views, state_32, action_32):
+        """Remaps 32-dim simulation protocol to 64-dim Rosetta for the Hub."""
         if self.dataset is None:
             return
         self.episode_frame_count += 1
 
+        # Create 64-dim buffers
+        state_64 = np.zeros(64, dtype=np.float32)
+        action_64 = np.zeros(64, dtype=np.float32)
+
+        # Apply remapping
+        for old_idx, new_idx in ROSETTA_MAP.items():
+            state_64[new_idx] = state_32[old_idx]
+            action_64[new_idx] = action_32[old_idx]
+
+        # Add to LeRobot dataset features
         frame_data = {
-            "observation.state": state.astype(np.float32),
-            "action": action.astype(np.float32),
+            **{
+                f"observation.images.{k}": Image.fromarray(v[..., :3].astype(np.uint8))
+                for k, v in views.items()
+            },
+            "observation.state": state_64.astype(np.float32),
+            "action": action_64.astype(np.float32),
             "task": self.current_task,
         }
-
-        # Add images from the dict
-        for key, img_array in imgs_dict.items():
-            # Convert genesis [H, W, 4] or [H, W, 3] to PIL Image [H, W, 3]
-            frame_data[f"observation.images.{key}"] = Image.fromarray(
-                img_array[..., :3].astype(np.uint8)
-            )
 
         self.dataset.add_frame(frame_data)
 
