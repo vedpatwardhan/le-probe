@@ -75,6 +75,12 @@ class GR1MuJoCoBase:
         self.is_recording = False
         self.rerun_count = 0
         self.render_step_idx = 0
+        self.session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.base_log_dir = (
+            Path(os.path.dirname(os.path.abspath(__file__)))
+            / "temp_images"
+            / self.session_id
+        )
         self._init_joint_mappings()
         self._init_finger_coupling()
 
@@ -186,8 +192,13 @@ class GR1MuJoCoBase:
             f.write(f"[{t_str}] {msg}\n")
 
     def _post_render_hook(self, name, rgb):
-        """Optional hook for subclasses (e.g. to save debug images)."""
-        pass
+        """Saves camera views to the filesystem for diagnostic-verification (Mirrors original teleop logic)."""
+        # Save in a subdirectory for this specific camera inside the session folder
+        cam_dir = self.base_log_dir / name
+        cam_dir.mkdir(parents=True, exist_ok=True)
+
+        img_path = cam_dir / f"{self.frame_indices[name]:04d}.png"
+        Image.fromarray(rgb).save(img_path)
 
     def get_state_32(self):
         return self.qpos_to_action_32(self.data.qpos)
