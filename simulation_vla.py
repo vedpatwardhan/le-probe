@@ -1,7 +1,5 @@
 import os
 import datetime
-
-os.environ["MUJOCO_GL"] = "egl"  # configured for colab
 import numpy as np
 import zmq
 import msgpack
@@ -17,7 +15,7 @@ class GR1VLAClient(GR1MuJoCoBase):
     Matches the Genesis simulation_gr1.py workflow.
     """
 
-    def __init__(self, scene_path=None, server_port=5555):
+    def __init__(self, scene_path=None, server_host="localhost", server_port=5555):
         super().__init__(scene_path) if scene_path else super().__init__()
 
         # Enable VLA-specific diagnostic logging
@@ -29,8 +27,8 @@ class GR1VLAClient(GR1MuJoCoBase):
 
         self.vla_context = zmq.Context()
         self.vla_client = self.vla_context.socket(zmq.REQ)
-        self.vla_client.setsockopt(zmq.RCVTIMEO, 30000)
-        self.vla_client.connect(f"tcp://localhost:{server_port}")
+        self.vla_client.setsockopt(zmq.RCVTIMEO, 120000)
+        self.vla_client.connect(f"tcp://{server_host}:{server_port}")
 
     def capture_vla_observation(self, instruction):
         """Captures 5-cam view and state in the standard ZMQ 'Handshake' format."""
@@ -99,12 +97,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GR-1 Autonomous Mission Driver")
     parser.add_argument("--instruction", type=str, default="Pick up the red cube")
     parser.add_argument("--chunks", type=int, default=10)
+    parser.add_argument("--host", type=str, default="localhost", help="VLA Server host")
+    parser.add_argument("--port", type=int, default=5555, help="VLA Server port")
     args = parser.parse_args()
 
-    # Re-init Rerun for standalone run
+    # Re-init Rerun for standalone local run
     rr.init("gr1_vla", spawn=False)
-    rerun_url = os.environ.get("RERUN_URL", "rerun+http://127.0.0.1:9876/proxy")
-    rr.connect_grpc(rerun_url)
+    rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
 
-    sim = GR1VLAClient()
+    sim = GR1VLAClient(server_host=args.host, server_port=args.port)
     sim.run(instruction=args.instruction, max_chunks=args.chunks)
