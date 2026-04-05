@@ -1,3 +1,5 @@
+import sys
+import os
 import torch
 import torch.nn.functional as F
 from transformers import ViTConfig, ViTModel
@@ -7,8 +9,11 @@ from torch.utils.data import DataLoader
 from einops import rearrange
 from tqdm import tqdm
 
-from le_wm.jepa import JEPA
-from le_wm.module import ARPredictor, Embedder, MLP
+# Add the submodule to the path so we don't have to touch its internal files
+sys.path.append(os.path.join(os.path.dirname(__file__), "le_wm"))
+
+from jepa import JEPA
+from module import ARPredictor, Embedder, MLP
 
 # 1. Configuration
 DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
