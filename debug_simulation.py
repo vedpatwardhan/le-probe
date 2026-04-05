@@ -21,8 +21,10 @@ def reconstruct_session(session_path):
 
         print(f"🎬 Reconstructing {cam_dir.name}...")
 
-        # Collect and sort images
-        images = sorted([f for f in cam_dir.glob("*.jpg")])
+        # Collect and sort images (support both jpg and png)
+        images = sorted(
+            [f for f in cam_dir.glob("*.jpg")] + [f for f in cam_dir.glob("*.png")]
+        )
         if not images:
             print(f"  No images found for {cam_dir.name}, skipping.")
             continue
