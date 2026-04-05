@@ -11,11 +11,11 @@ msgpack
 pyzmq
 rembg
 
-# --- VLA Control & Training ---
-# Pinned to match Run4/Rosetta-64 stabilization
 lerobot[intelrealsense,dynamixel]==0.4.3
 transformers<5.0.0
 torch>=2.2.0
+einops
+huggingface-hub
 
 # --- Diagnostics & Visuals ---
 # Matches the current dashboard configuration

@@ -1,14 +1,15 @@
-# GR-1 GR00T-N1.5: Modular MuJoCo Foundation 🦾
+# 🦾 cortex-gr1: Modular MuJoCo Foundation
 
 This repository contains the high-fidelity physics environment and inference lifecycle for the GR-1 humanoid robot, now powered by **MuJoCo** and the **Minkowski** IK solver.
 
 ## 🏗️ System Architecture: The Modular Split
 The system is decoupled into specialized drivers sharing a common physical foundation.
 
-1.  **`simulation_base.py` (The Physical Core)**: The "Source of Truth" for robot physics. Handles MuJoCo XML loading, Minkowski Triple-Link IK solving, and state normalization.
-2.  **`simulation_vla.py` (Autonomous Mission)**: A proactive **REQ Client** designed for headless/Colab execution. It drives the "Sense -> Plan -> Act" loop for a 10-chunk (160 step) mission.
-3.  **`simulation_teleop.py` (Dashboard Server)**: A reactive **REP Server** specifically for interactive control and dataset recording via the Streamlit UI.
-4.  **`gr00t_server.py` (The Brain)**: A passive inference brain that processes 5-camera observations and returns 16-action chunks.
+1.  **`simulation_base.py` (The Physical Core)**: The "Source of Truth" for robot physics.
+2.  **`le_wm/` (The Brain)**: A git submodule containing the JEPA (Joint-Embedding Predictive Architecture) world model.
+3.  **`train_lewm.py` (Proprioceptive Learning)**: Fine-tunes the world model on your local 64-D Rosetta datasets.
+4.  **`simulation_vla.py` (Autonomous Mission)**: A proactive **REQ Client** designed for headless/Colab execution.
+5.  **`gr00t_server.py` (VLA Inference)**: A passive inference brain that processes observations using pre-trained VLAs.
 
 ---
 
@@ -49,14 +50,30 @@ streamlit run gr1_gr00t/teleop_ui.py
 
 ## 📂 Key Files
 - **`gr1_config.py`**: Central registry for `XML_PATH`, `SCENE_PATH`, and joint normalization limits.
+- **`le_wm/`**: Submodule containing the JEPA architecture core.
+- **`train_lewm.py`**: The main entry point for proprioceptive fine-tuning on Rosetta-64 datasets.
 - **`sim_assets/`**: High-fidelity MuJoCo XMLs for the robot and pickup environments.
-- **`lerobot_manager.py`**: Background uploader for episodic dataset management.
-- **`teleop_joints.txt` / `ik_joints.txt`**: Whitelists for joint authorization during control.
+
+---
+
+## 🧠 World Model Training (JEPA)
+To teach the robot's "Brain" how its body moves and affects the world, you can fine-tune the JEPA world model on your collected `LeRobot` datasets.
+
+### 1. Initialize Submodule
+```bash
+git submodule update --init --recursive
+```
+
+### 2. Start Fine-tuning
+Trains the 64-D action predictor while leveraging pre-trained vision weights.
+```bash
+uv run train_lewm.py
+```
 
 ---
 
 ## ⚠️ Requirements
 - **OS**: macOS (Local) / Linux (Colab)
 - **Physics**: `mujoco`, `mink`
-- **Networking**: `zmq`, `msgpack`
+- **Dependencies**: `lerobot`, `einops`, `transformers`, `huggingface-hub`
 - **Visualization**: `rerun-sdk` (Ensure Port 9876 is open/tunneled)
