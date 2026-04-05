@@ -3,3 +3,4 @@ __pycache__
 temp_images
 datasets
 *.log
+run_*
