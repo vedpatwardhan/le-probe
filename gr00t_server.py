@@ -44,15 +44,16 @@ class GR00TInferenceServer:
         self,
         embodiment_tag="gr1",
         port=5555,
-        model_repo="nvidia/GR00T-N1.5-3B",
+        weights_path="nvidia/GR00T-N1.5-3B",
     ):
         print(f"--- Initializing GR00T N1.5 Server (Embodiment: {embodiment_tag}) ---")
         self.port = port
-        self.model_repo = model_repo
+        self.weights_path = weights_path
         self.tokenizer = None
 
-        # Load Policy
-        self.policy = GrootPolicy.from_pretrained(self.model_repo)
+        # Load Policy (Supports both HF Repo ID and local paths)
+        print(f"Loading weights from: {self.weights_path}")
+        self.policy = GrootPolicy.from_pretrained(self.weights_path)
         self.policy.to(DEVICE)
         self.policy.eval()
 
@@ -240,11 +241,11 @@ class GR00TInferenceServer:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GR00T-N1.5 Inference Server")
     parser.add_argument(
-        "--model",
-        "-m",
+        "--weights",
+        "-w",
         type=str,
         default="nvidia/GR00T-N1.5-3B",
-        help="Hugging Face repo ID or local path to the model.",
+        help="Hugging Face repo ID or local path to the fine-tuned weights (e.g. /path/to/checkpoint/pretrained_model).",
     )
     parser.add_argument(
         "--port",
@@ -263,6 +264,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     server = GR00TInferenceServer(
-        embodiment_tag=args.tag, port=args.port, model_repo=args.model
+        embodiment_tag=args.tag, port=args.port, weights_path=args.weights
     )
     server.run()
