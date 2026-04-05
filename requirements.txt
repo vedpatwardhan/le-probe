@@ -1,0 +1,24 @@
+# 🦾 GR-1 Pickup Simulation & Inference Dependencies
+# Optimized for local macOS (M2) environment
+
+# --- Core Physics & Math ---
+mujoco>=3.0.0
+numpy>=1.24.0,<2.0.0
+pyyaml
+msgpack
+
+# --- Networking & Server (ZMQ) ---
+pyzmq
+rembg
+
+# --- VLA Control & Training ---
+# Pinned to match Run4/Rosetta-64 stabilization
+lerobot[intelrealsense,dynamixel]==0.4.3
+transformers<5.0.0
+torch>=2.2.0
+
+# --- Diagnostics & Visuals ---
+# Matches the current dashboard configuration
+rerun-sdk[all]==0.28.2
+pillow
+imageio[ffmpeg]
