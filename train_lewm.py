@@ -35,29 +35,47 @@ XML_PATH = os.path.join(os.path.dirname(__file__), "sim_assets/scene_gr1_pickup.
 mj_model = mujoco.MjModel.from_xml_path(XML_PATH)
 mj_data = mujoco.MjData(mj_model)
 
-JOINT_MAP = {
-    0: "left_shoulder_pitch_joint",
-    1: "left_shoulder_roll_joint",
-    2: "left_shoulder_yaw_joint",
-    3: "left_elbow_pitch_joint",
-    4: "left_wrist_yaw_joint",
-    5: "left_wrist_roll_joint",
-    6: "left_wrist_pitch_joint",
-    22: "right_shoulder_pitch_joint",
-    23: "right_shoulder_roll_joint",
-    24: "right_shoulder_yaw_joint",
-    25: "right_elbow_pitch_joint",
-    26: "right_wrist_yaw_joint",
-    27: "right_wrist_roll_joint",
-    28: "right_wrist_pitch_joint",
-    41: "waist_yaw_joint",
-    42: "waist_pitch_joint",
-    43: "waist_roll_joint",
-}
+# 32-dim Compact Protocol (Matches vedpatwardhan/gr1_pickup_large)
+JOINT_NAMES = [
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_pitch_joint",
+    "left_wrist_yaw_joint",
+    "left_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "L_thumb_proximal_yaw_joint",
+    "L_thumb_proximal_pitch_joint",
+    "L_index_proximal_joint",
+    "L_middle_proximal_joint",
+    "L_ring_proximal_joint",
+    "L_pinky_proximal_joint",
+    "head_pitch_joint",
+    "head_roll_joint",
+    "head_yaw_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_pitch_joint",
+    "right_wrist_yaw_joint",
+    "right_wrist_roll_joint",
+    "right_wrist_pitch_joint",
+    "R_thumb_proximal_yaw_joint",
+    "R_thumb_proximal_pitch_joint",
+    "R_index_proximal_joint",
+    "R_middle_proximal_joint",
+    "R_ring_proximal_joint",
+    "R_pinky_proximal_joint",
+    "waist_yaw_joint",
+    "waist_pitch_joint",
+    "waist_roll_joint",
+]
 
 QPOS_ADDR = {
-    k: mj_model.jnt_qposadr[mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_JOINT, v)]
-    for k, v in JOINT_MAP.items()
+    i: mj_model.jnt_qposadr[
+        mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_JOINT, name)
+    ]
+    for i, name in enumerate(JOINT_NAMES)
 }
 HAND_BODY_ID = mujoco.mj_name2id(
     mj_model, mujoco.mjtObj.mjOBJ_BODY, "right_hand_pitch_link"
