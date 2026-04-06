@@ -126,7 +126,9 @@ def get_hand_z(state_batch):
             mj_data.qpos[q_addr] = states_np[i, rosetta_idx]
         mujoco.mj_kinematics(mj_model, mj_data)
         heights.append(mj_data.xpos[HAND_BODY_ID][2])
-    return torch.tensor(heights, device=state_batch.device).unsqueeze(-1)
+    return torch.tensor(
+        heights, device=state_batch.device, dtype=torch.float32
+    ).unsqueeze(-1)
 
 
 def train():
