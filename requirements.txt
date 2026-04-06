@@ -1,4 +1,4 @@
-# 🦾 GR-1 Pickup Simulation & Inference Dependencies
+# Needs to be fixed 🚧
 # Optimized for local macOS (M2) environment
 
 # --- Core Physics & Math ---
