@@ -17,6 +17,21 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "le_wm"))
 
 from jepa import JEPA
 from module import ARPredictor, Embedder, MLP, SIGReg
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+
+
+def compute_soft_rank(z):
+    """Computes the Effective Rank (SoftRank) of a latent batch."""
+    try:
+        # SVD on the latent batch (B, D)
+        singular_values = torch.linalg.svdvals(z)
+        singular_values = singular_values / (singular_values.sum() + 1e-10)
+        entropy = -torch.sum(singular_values * torch.log(singular_values + 1e-10))
+        return torch.exp(entropy).item()
+    except:
+        return 0.0
+
 
 # 1. GR-1 Configuration
 DEVICE = (
@@ -148,8 +163,8 @@ def train():
         },
     )
 
-    # A. Load Dataset (Streaming from Hub for speed)
-    dataset = LeRobotDataset(repo_id=REPO_ID_DATASET)
+    # A. Load Dataset (Stable pyav backend for macOS)
+    dataset = LeRobotDataset(repo_id=REPO_ID_DATASET, video_backend="pyav")
     dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
 
     # B. Build Architecture
@@ -256,7 +271,9 @@ def train():
             total_loss.backward()
             optimizer.step()
 
-            # Live Metrics & Height Trace Logging
+            # Live Metrics & Research Interpretability
+            soft_rank = compute_soft_rank(z_curr.squeeze(1))
+
             metrics = {
                 "loss/total": total_loss.item(),
                 "loss/jepa": loss_jepa.item(),
@@ -264,7 +281,22 @@ def train():
                 "loss/height": loss_height.item(),
                 "trace/pred_z": pred_height[0].item(),
                 "trace/gt_z": gt_height[0].item(),
+                "latent/effective_rank": soft_rank,
             }
+
+            # Periodically log PCA "Cloud" to track Latent Space geometry
+            if pbar.n % 50 == 0:
+                z_np = z_curr.squeeze(1).detach().cpu().numpy()
+                pca = PCA(n_components=2)
+                z_2d = pca.fit_transform(z_np)
+
+                plt.figure(figsize=(6, 6))
+                plt.scatter(z_2d[:, 0], z_2d[:, 1], alpha=0.6, c="blue")
+                plt.title(f"Latent PCA Cloud (Step {pbar.n})")
+                plt.grid(True)
+                metrics["visuals/pca_cloud"] = wandb.Image(plt)
+                plt.close()
+
             wandb.log(metrics)
             pbar.set_postfix(
                 jepa=f"{loss_jepa.item():.4f}",

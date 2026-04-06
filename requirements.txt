@@ -3,7 +3,7 @@
 
 # --- Core Physics & Math ---
 mujoco>=3.0.0
-numpy>=1.24.0,<2.0.0
+numpy>=2.0.0
 pyyaml
 msgpack
 
@@ -19,9 +19,12 @@ transformers<5.0.0
 torch>=2.2.0
 einops
 huggingface-hub
+scikit-learn      # For PCA projections
+matplotlib        # For plotting clouds
 
 # --- Diagnostics & Visuals ---
 # Matches the current dashboard configuration
 rerun-sdk[all]==0.28.2
+av                # Stable video backend for macOS
 pillow
 imageio[ffmpeg]
