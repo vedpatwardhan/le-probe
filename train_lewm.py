@@ -240,14 +240,17 @@ def train():
 
             # Loss components
             loss_jepa = F.mse_loss(z_pred.squeeze(1), z_target)
-            loss_sigreg = sigreg(z_pred)
+
+            # Apply SIGReg to the encoder output (z_curr) to enforce diversity at the source
+            loss_sigreg = sigreg(z_curr.squeeze(1))
 
             # Grounding with MuJoCo FK
             gt_height = get_hand_z(state)
-            pred_height = height_head(z_pred.squeeze(1))
+            # DETACH: Prevent the height regressor from pulling the encoder towards a mean-guess collapse
+            pred_height = height_head(z_pred.squeeze(1).detach())
             loss_height = F.mse_loss(pred_height, gt_height)
 
-            total_loss = loss_jepa + (0.1 * loss_sigreg) + (2.0 * loss_height)
+            total_loss = loss_jepa + (1.0 * loss_sigreg) + (1.0 * loss_height)
 
             optimizer.zero_grad()
             total_loss.backward()
