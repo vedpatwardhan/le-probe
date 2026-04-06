@@ -129,7 +129,7 @@ def train():
     )
 
     # A. Load Dataset (Streaming from Hub for speed)
-    dataset = LeRobotDataset(repo_id=REPO_ID_DATASET) # lerobot-0.4.3 uses the repo_id automatically
+    dataset = LeRobotDataset(repo_id=REPO_ID_DATASET)
     dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
 
     # B. Build Architecture
@@ -192,11 +192,20 @@ def train():
             actions = batch["action"].to(DEVICE)
             state = batch["observation.state"].to(DEVICE)
 
+            # Resize images from 480x480 (Dataset) to 224x224 (ViT Model)
+            pixels = F.interpolate(
+                pixels, size=(224, 224), mode="bilinear", align_corners=False
+            )
+
             target = (
                 batch["next.observation.images.world_center"].to(DEVICE)
                 if "next.observation.images.world_center" in batch
                 else pixels
             )
+            target = F.interpolate(
+                target, size=(224, 224), mode="bilinear", align_corners=False
+            )
+
             with torch.no_grad():
                 z_target = model.encoder(target).last_hidden_state[:, 0, :]
 
