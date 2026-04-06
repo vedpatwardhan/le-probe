@@ -14,7 +14,7 @@ rembg
 # --- Training & Experiment Tracking ---
 wandb>=0.16.0
 tqdm>=4.66.0
-lerobot[intelrealsense,dynamixel]==0.4.3
+lerobot==0.4.3
 transformers<5.0.0
 torch>=2.2.0
 einops

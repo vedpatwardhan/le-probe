@@ -128,8 +128,8 @@ def train():
         },
     )
 
-    # A. Load Dataset (Automatically downloads from Hub if not cached)
-    dataset = LeRobotDataset(repo_id=REPO_ID_DATASET)
+    # A. Load Dataset (Streaming from Hub for speed)
+    dataset = LeRobotDataset(repo_id=REPO_ID_DATASET) # lerobot-0.4.3 uses the repo_id automatically
     dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
 
     # B. Build Architecture
@@ -237,6 +237,18 @@ def train():
                 sig=f"{loss_sigreg.item():.4f}",
                 h=f"{loss_height.item():.4f}",
             )
+
+        # Per-Epoch Checkpoint (Essential for Colab stability)
+        print(f"Saving checkpoint for Epoch {epoch}...")
+        torch.save(
+            {
+                "epoch": epoch,
+                "jepa": model.state_dict(),
+                "height_head": height_head.state_dict(),
+                "optimizer": optimizer.state_dict(),
+            },
+            f"gr1_lewm_epoch_{epoch}.pt",
+        )
 
     print("✅ Training Complete. Saving GR-1 World Model...")
     torch.save(
