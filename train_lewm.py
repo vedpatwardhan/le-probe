@@ -25,7 +25,7 @@ DEVICE = (
     else ("mps" if torch.backends.mps.is_available() else "cpu")
 )
 HIDDEN_DIM = 192  # ViT-Tiny
-ACTION_DIM = 64  # Rosetta-64 Protocol
+ACTION_DIM = 32  # Dataset uses 32 action columns
 HISTORY_LEN = 3  # 3 frames of history
 REPO_ID_MODEL = "quentinll/lewm-cube"
 REPO_ID_DATASET = "vedpatwardhan/gr1_pickup_large"
@@ -118,7 +118,7 @@ def train():
     # Initialize WandB experiment
     wandb.init(
         project="gr1-lewm-phase1",
-        name="refinement-run-001",
+        name="refinement",
         config={
             "hidden_dim": HIDDEN_DIM,
             "action_dim": ACTION_DIM,
@@ -152,7 +152,9 @@ def train():
         heads=16,
         mlp_dim=2048,
     )
-    action_encoder = Embedder(input_dim=ACTION_DIM, emb_dim=HIDDEN_DIM)
+    action_encoder = Embedder(
+        input_dim=ACTION_DIM, smoothed_dim=HIDDEN_DIM, emb_dim=HIDDEN_DIM
+    )
 
     projector = MLP(input_dim=HIDDEN_DIM, hidden_dim=2048, output_dim=HIDDEN_DIM)
     pred_proj = MLP(input_dim=HIDDEN_DIM, hidden_dim=2048, output_dim=HIDDEN_DIM)
