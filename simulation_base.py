@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image
 import mink
 
-from lerobot_manager import LeRobotManager
+from research.lerobot_manager import LeRobotManager
 from gr1_config import (
     COMPACT_WIRE_JOINTS,
     JOINT_LIMITS_MIN,
