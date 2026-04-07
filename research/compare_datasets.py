@@ -14,17 +14,17 @@ def compare_datasets():
     print("\n📦 Fetching PushT Dataset Archive...")
     archive_path = hf_hub_download(
         repo_id="quentinll/lewm-pusht",
-        filename="pusht_expert.tar.zst",
+        filename="pusht_expert_train.h5.zst",
         repo_type="dataset",
     )
 
-    print(f"📦 Extracting {archive_path}...")
+    print(f"📦 Decompressing {archive_path}...")
     import subprocess
 
-    subprocess.run(["tar", "--zstd", "-xvf", archive_path, "-C", "."], check=True)
-
-    # After extraction, it should yield pusht_expert_train.h5
+    # Use zstd -d to decompress the .h5.zst file
+    # -f forces overwrite if it already exists, -o specifies output
     ogb_path = "pusht_expert_train.h5"
+    subprocess.run(["zstd", "-d", archive_path, "-o", ogb_path, "-f"], check=True)
 
     with h5py.File(ogb_path, "r") as f:
         # PushT keys: action, pixels, proprio, state
