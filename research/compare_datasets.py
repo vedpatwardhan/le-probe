@@ -5,26 +5,29 @@ import matplotlib.pyplot as plt
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from huggingface_hub import hf_hub_download
 import pandas as pd
+import os
 
 
 def compare_datasets():
     print("🧪 Starting Dataset Comparison: PushT vs. GR-1")
 
-    # 1. Download and Extract PushT Dataset (tar.zst)
-    print("\n📦 Fetching PushT Dataset Archive...")
-    archive_path = hf_hub_download(
-        repo_id="quentinll/lewm-pusht",
-        filename="pusht_expert_train.h5.zst",
-        repo_type="dataset",
-    )
-
-    print(f"📦 Decompressing {archive_path}...")
-    import subprocess
-
-    # Use zstd -d to decompress the .h5.zst file
-    # -f forces overwrite if it already exists, -o specifies output
+    # 1. Download and Extract PushT Dataset (h5.zst)
     ogb_path = "pusht_expert_train.h5"
-    subprocess.run(["zstd", "-d", archive_path, "-o", ogb_path, "-f"], check=True)
+    if not os.path.exists(ogb_path):
+        print("\n📦 Fetching PushT Dataset Archive...")
+        archive_path = hf_hub_download(
+            repo_id="quentinll/lewm-pusht",
+            filename="pusht_expert_train.h5.zst",
+            repo_type="dataset",
+        )
+
+        print(f"📦 Decompressing {archive_path}...")
+        import subprocess
+
+        # Use zstd -d to decompress the .h5.zst file
+        subprocess.run(["zstd", "-d", archive_path, "-o", ogb_path, "-f"], check=True)
+    else:
+        print(f"\n✅ Found existing dataset at {ogb_path}, skipping download.")
 
     with h5py.File(ogb_path, "r") as f:
         # PushT keys: action, pixels, proprio, state
