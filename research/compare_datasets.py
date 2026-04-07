@@ -2,6 +2,7 @@ import h5py
 import hdf5plugin  # Required to read zstd-compressed HDF5 files
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from huggingface_hub import hf_hub_download
 import pandas as pd
@@ -41,10 +42,23 @@ def compare_datasets():
     print("\n📂 Loading GR-1 LeRobot Dataset...")
     gr1_dataset = LeRobotDataset("vedpatwardhan/gr1_pickup_large")
 
-    gr1_batch = gr1_dataset[0:1000]
-    gr1_actions = gr1_batch["action"].numpy()
-    gr1_pixels = gr1_batch["observation.images.world_center"].numpy()
-    gr1_state = gr1_batch["observation.state"].numpy()
+    num_samples = min(1000, len(gr1_dataset))
+    print(f"📥 Sampling {num_samples} frames from GR-1...")
+
+    gr1_actions_list = []
+    gr1_pixels_list = []
+    gr1_state_list = []
+
+    for i in range(num_samples):
+        frame = gr1_dataset[i]
+        gr1_actions_list.append(frame["action"])
+        gr1_pixels_list.append(frame["observation.images.world_center"])
+        gr1_state_list.append(frame["observation.state"])
+
+    gr1_actions = torch.stack(gr1_actions_list).numpy()
+    gr1_pixels = torch.stack(gr1_pixels_list).numpy()
+    gr1_state = torch.stack(gr1_state_list).numpy()
+
     print(f"GR-1 Action Shape: {gr1_actions.shape}")
     print(f"GR-1 State Shape: {gr1_state.shape}")
 
