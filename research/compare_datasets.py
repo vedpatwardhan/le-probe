@@ -1,4 +1,5 @@
 import h5py
+import hdf5plugin  # Required to read zstd-compressed HDF5 files
 import numpy as np
 import matplotlib.pyplot as plt
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -7,7 +8,7 @@ import pandas as pd
 
 
 def compare_datasets():
-    print("🧪 Starting Dataset Comparison: OGBench (Cube) vs. GR-1 (Pickup)")
+    print("🧪 Starting Dataset Comparison: PushT vs. GR-1")
 
     # 1. Download and Extract PushT Dataset (tar.zst)
     print("\n📦 Fetching PushT Dataset Archive...")
@@ -20,55 +21,58 @@ def compare_datasets():
     print(f"📦 Extracting {archive_path}...")
     import subprocess
 
-    # Run the extraction command mentioned in the LeWM README
     subprocess.run(["tar", "--zstd", "-xvf", archive_path, "-C", "."], check=True)
 
     # After extraction, it should yield pusht_expert_train.h5
     ogb_path = "pusht_expert_train.h5"
 
     with h5py.File(ogb_path, "r") as f:
-        # OGBench typical keys: actions, observations, terminals, rewards
-        ogb_actions = np.array(f["action"][:1000])  # Sample 1000 steps
-        ogb_pixels = np.array(f["pixels"][:100])  # Sample 100 images
-        print(f"OGB Action Shape: {ogb_actions.shape}")
-        print(f"OGB Pixel Shape: {ogb_pixels.shape}")
+        # PushT keys: action, pixels, proprio, state
+        ogb_actions = np.array(f["action"][:1000])
+        ogb_pixels = np.array(f["pixels"][:100])
+        ogb_state = np.array(f["proprio"][:1000])
+        print(f"PushT Action Shape: {ogb_actions.shape}")
+        print(f"PushT State Shape: {ogb_state.shape}")
 
     # 2. Load GR-1 Dataset (LeRobot)
     print("\n📂 Loading GR-1 LeRobot Dataset...")
     gr1_dataset = LeRobotDataset("vedpatwardhan/gr1_pickup_large")
 
-    # Sample a few batches
     gr1_batch = gr1_dataset[0:1000]
     gr1_actions = gr1_batch["action"].numpy()
     gr1_pixels = gr1_batch["observation.images.world_center"].numpy()
+    gr1_state = gr1_batch["observation.state"].numpy()
     print(f"GR-1 Action Shape: {gr1_actions.shape}")
-    print(f"GR-1 Pixel Shape: {gr1_pixels.shape}")
+    print(f"GR-1 State Shape: {gr1_state.shape}")
 
     # 3. Comparison Metrics
     comparison = {
         "Metric": [
             "Action Dim",
-            "Action Mean",
             "Action Std",
-            "Action Min",
-            "Action Max",
+            "Action Range",
+            "State Dim",
+            "State Std",
+            "State Range",
             "Pixel Range",
         ],
-        "OGB-Cube": [
+        "PushT": [
             ogb_actions.shape[-1],
-            np.mean(ogb_actions),
             np.std(ogb_actions),
-            np.min(ogb_actions),
-            np.max(ogb_actions),
-            f"{np.min(ogb_pixels)} to {np.max(ogb_pixels)}",
+            f"[{np.min(ogb_actions):.2f}, {np.max(ogb_actions):.2f}]",
+            ogb_state.shape[-1],
+            np.std(ogb_state),
+            f"[{np.min(ogb_state):.2f}, {np.max(ogb_state):.2f}]",
+            f"[{np.min(ogb_pixels)}, {np.max(ogb_pixels)}]",
         ],
         "GR-1-Pickup": [
             gr1_actions.shape[-1],
-            np.mean(gr1_actions),
             np.std(gr1_actions),
-            np.min(gr1_actions),
-            np.max(gr1_actions),
-            f"{np.min(gr1_pixels)} to {np.max(gr1_pixels)}",
+            f"[{np.min(gr1_actions):.2f}, {np.max(gr1_actions):.2f}]",
+            gr1_state.shape[-1],
+            np.std(gr1_state),
+            f"[{np.min(gr1_state):.2f}, {np.max(gr1_state):.2f}]",
+            f"[{np.min(gr1_pixels)}, {np.max(gr1_pixels)}]",
         ],
     }
 
@@ -76,18 +80,26 @@ def compare_datasets():
     print("\n📊 Dataset Statistics Comparison:")
     print(df.to_markdown())
 
-    # 4. Visualization: Action Distributions
-    plt.figure(figsize=(12, 5))
+    # 4. Visualization
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-    plt.subplot(1, 2, 1)
-    plt.hist(ogb_actions.flatten(), bins=50, color="blue", alpha=0.7)
-    plt.title("OGB-Cube Action Distribution")
-    plt.xlabel("Value")
+    # Action Dist
+    axes[0].hist(ogb_actions.flatten(), bins=50, color="blue", alpha=0.5, label="PushT")
+    axes[0].hist(gr1_actions.flatten(), bins=50, color="green", alpha=0.5, label="GR-1")
+    axes[0].set_title("Action Distributions")
+    axes[0].legend()
 
-    plt.subplot(1, 2, 2)
-    plt.hist(gr1_actions.flatten(), bins=50, color="green", alpha=0.7)
-    plt.title("GR-1-Pickup Action Distribution")
-    plt.xlabel("Value")
+    # State Dist
+    axes[1].hist(ogb_state.flatten(), bins=50, color="blue", alpha=0.5, label="PushT")
+    axes[1].hist(gr1_state.flatten(), bins=50, color="green", alpha=0.5, label="GR-1")
+    axes[1].set_title("State (Proprio) Distributions")
+    axes[1].legend()
+
+    # Pixel Dist
+    axes[2].hist(ogb_pixels.flatten(), bins=50, color="blue", alpha=0.5, label="PushT")
+    axes[2].hist(gr1_pixels.flatten(), bins=50, color="green", alpha=0.5, label="GR-1")
+    axes[2].set_title("Pixel Distributions")
+    axes[2].legend()
 
     plt.tight_layout()
     plt.savefig("dataset_comparison.png")
