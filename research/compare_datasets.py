@@ -9,12 +9,11 @@ import pandas as pd
 def compare_datasets():
     print("🧪 Starting Dataset Comparison: OGBench (Cube) vs. GR-1 (Pickup)")
 
-    # 1. Download and Extract OGBench Cube Dataset (tar.zst)
-    print("\n📦 Fetching Cube Dataset Archive...")
-    # Corrected repo and filename from https://huggingface.co/datasets/quentinll/lewm-cube
+    # 1. Download and Extract PushT Dataset (tar.zst)
+    print("\n📦 Fetching PushT Dataset Archive...")
     archive_path = hf_hub_download(
-        repo_id="quentinll/lewm-cube",
-        filename="cube_single_expert.tar.zst",
+        repo_id="quentinll/lewm-pusht",
+        filename="pusht_expert.tar.zst",
         repo_type="dataset",
     )
 
@@ -24,8 +23,8 @@ def compare_datasets():
     # Run the extraction command mentioned in the LeWM README
     subprocess.run(["tar", "--zstd", "-xvf", archive_path, "-C", "."], check=True)
 
-    # After extraction, it should yield cube_single_expert.h5
-    ogb_path = "cube_single_expert.h5"
+    # After extraction, it should yield pusht_expert_train.h5
+    ogb_path = "pusht_expert_train.h5"
 
     with h5py.File(ogb_path, "r") as f:
         # OGBench typical keys: actions, observations, terminals, rewards
