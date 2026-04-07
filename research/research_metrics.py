@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import wandb
 
+
 class ResearchMetricsCallback(pl.Callback):
     """
     Advanced interpretability metrics for world model training.
@@ -14,6 +15,7 @@ class ResearchMetricsCallback(pl.Callback):
     2. Grounding Linearity (Path Straightening)
     3. Manifold Geometry (PCA Visuals)
     """
+
     def __init__(self, log_every_n_steps=50, pca_n_samples=256):
         super().__init__()
         self.log_every_n_steps = log_every_n_steps
@@ -29,7 +31,7 @@ class ResearchMetricsCallback(pl.Callback):
 
         # 1. SoftRank (Effective Rank)
         # emb shape: (B, T, D)
-        z = outputs["emb"][:, 0, :] # Use first timestep for rank analysis
+        z = outputs["emb"][:, 0, :]  # Use first timestep for rank analysis
         soft_rank = self.compute_soft_rank(z)
         pl_module.log("research/soft_rank", soft_rank)
 
@@ -56,17 +58,17 @@ class ResearchMetricsCallback(pl.Callback):
 
     def compute_path_straightening(self, emb):
         """
-        Calculates the average cosine similarity between consecutive 
+        Calculates the average cosine similarity between consecutive
         latent displacement vectors: (z_t - z_t-1) and (z_t+1 - z_t).
         Higher = Straighter/More Predictable trajectories.
         """
         # emb: (B, T, D)
         if emb.shape[1] < 3:
-            return 1.0 # Not enough history to compute straightening
-            
+            return 1.0  # Not enough history to compute straightening
+
         v1 = emb[:, 1] - emb[:, 0]
         v2 = emb[:, 2] - emb[:, 1]
-        
+
         cos_sim = torch.nn.functional.cosine_similarity(v1, v2, dim=-1)
         return cos_sim.mean().item()
 
@@ -74,7 +76,7 @@ class ResearchMetricsCallback(pl.Callback):
         """Generates and logs a 2D PCA cloud of the latents."""
         z_np = z.detach().cpu().numpy()
         if z_np.shape[0] < 5:
-            return # Skip if batch too small
+            return  # Skip if batch too small
 
         pca = PCA(n_components=2)
         z_2d = pca.fit_transform(z_np)
@@ -85,6 +87,6 @@ class ResearchMetricsCallback(pl.Callback):
         plt.xlabel(f"PC1 (Var: {pca.explained_variance_ratio_[0]:.2%})")
         plt.ylabel(f"PC2 (Var: {pca.explained_variance_ratio_[1]:.2%})")
         plt.grid(True)
-        
+
         wandb.log({"visuals/latent_pca": wandb.Image(plt)})
         plt.close()

@@ -21,6 +21,7 @@ from module import ARPredictor, Embedder, MLP, SIGReg
 from utils import get_column_normalizer, get_img_preprocessor, ModelObjectCallBack
 from lewm_data_plugin import LEWMDataPlugin
 
+
 def lejepa_forward(self, batch, stage, cfg):
     """encode observations, predict next states, compute losses."""
     ctx_len = cfg.wm.history_size
@@ -35,19 +36,20 @@ def lejepa_forward(self, batch, stage, cfg):
     act_emb = output["act_emb"]
 
     ctx_emb = emb[:, :ctx_len]
-    ctx_act = act_emb[:, : ctx_len]
+    ctx_act = act_emb[:, :ctx_len]
 
-    tgt_emb = emb[:, n_preds:] # label
-    pred_emb = self.model.predict(ctx_emb, ctx_act) # pred
+    tgt_emb = emb[:, n_preds:]  # label
+    pred_emb = self.model.predict(ctx_emb, ctx_act)  # pred
 
     # LeWM loss
     output["pred_loss"] = (pred_emb - tgt_emb).pow(2).mean()
-    output["sigreg_loss"]= self.sigreg(emb.transpose(0, 1))
-    output["loss"] = output["pred_loss"] + lambd * output["sigreg_loss"]  
+    output["sigreg_loss"] = self.sigreg(emb.transpose(0, 1))
+    output["loss"] = output["pred_loss"] + lambd * output["sigreg_loss"]
 
     losses_dict = {f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k}
     self.log_dict(losses_dict, on_step=True, sync_dist=True)
     return output
+
 
 @hydra.main(version_base=None, config_path="./config", config_name="lewm")
 def run(cfg):
@@ -56,21 +58,22 @@ def run(cfg):
     #########################
     ##       dataset       ##
     #########################
-    
+
     # Inject GR1DataPlugin if repo_id is present in the config
     if "repo_id" in cfg.data.dataset:
         print(f"📦 Using LEWMDataPlugin for repository: {cfg.data.dataset.repo_id}")
         dataset = LEWMDataPlugin(
-            repo_id=cfg.data.dataset.repo_id,
-            keys_to_load=cfg.data.dataset.keys_to_load
+            repo_id=cfg.data.dataset.repo_id, keys_to_load=cfg.data.dataset.keys_to_load
         )
     else:
         # Fallback to official dataset loader
         dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
 
     # 1. Rescale & Normalize Pixels
-    transforms = [get_img_preprocessor(source='pixels', target='pixels', img_size=cfg.img_size)]
-    
+    transforms = [
+        get_img_preprocessor(source="pixels", target="pixels", img_size=cfg.img_size)
+    ]
+
     # 2. Standardize States/Actions (Z-Score)
     with open_dict(cfg):
         for col in cfg.data.dataset.keys_to_load:
@@ -79,7 +82,7 @@ def run(cfg):
 
             normalizer = get_column_normalizer(dataset, col, col)
             transforms.append(normalizer)
-            
+
             # Update WM dims for the predictor
             col_dim = dataset.get_dim(col)
             setattr(cfg.wm, f"{col}_dim", col_dim)
@@ -93,9 +96,13 @@ def run(cfg):
         dataset, lengths=[cfg.train_split, 1 - cfg.train_split], generator=rnd_gen
     )
 
-    train = torch.utils.data.DataLoader(train_set, **cfg.loader, shuffle=True, drop_last=True, generator=rnd_gen)
-    val = torch.utils.data.DataLoader(val_set, **cfg.loader, shuffle=False, drop_last=False)
-    
+    train = torch.utils.data.DataLoader(
+        train_set, **cfg.loader, shuffle=True, drop_last=True, generator=rnd_gen
+    )
+    val = torch.utils.data.DataLoader(
+        val_set, **cfg.loader, shuffle=False, drop_last=False
+    )
+
     ##############################
     ##       model / optim      ##
     ##############################
@@ -121,7 +128,7 @@ def run(cfg):
     )
 
     action_encoder = Embedder(input_dim=effective_act_dim, emb_dim=embed_dim)
-    
+
     projector = MLP(
         input_dim=hidden_dim,
         output_dim=embed_dim,
@@ -145,8 +152,8 @@ def run(cfg):
     )
 
     optimizers = {
-        'model_opt': {
-            "modules": 'model',
+        "model_opt": {
+            "modules": "model",
             "optimizer": dict(cfg.optimizer),
             "scheduler": {"type": "LinearWarmupCosineAnnealingLR"},
             "interval": "epoch",
@@ -155,8 +162,8 @@ def run(cfg):
 
     data_module = spt.data.DataModule(train=train, val=val)
     world_model = spt.Module(
-        model = world_model,
-        sigreg = SIGReg(**cfg.loss.sigreg.kwargs),
+        model=world_model,
+        sigreg=SIGReg(**cfg.loss.sigreg.kwargs),
         forward=partial(lejepa_forward, cfg=cfg),
         optim=optimizers,
     )
@@ -179,7 +186,14 @@ def run(cfg):
     with open(run_dir / "config.yaml", "w") as f:
         OmegaConf.save(cfg, f)
 
+    object_dump_callback = ModelObjectCallBack(
+        dirpath=run_dir,
+        filename=cfg.output_model_name,
+        epoch_interval=1,
+    )
+
     from research_metrics import ResearchMetricsCallback
+
     research_callback = ResearchMetricsCallback(log_every_n_steps=50)
 
     trainer = pl.Trainer(
@@ -197,12 +211,13 @@ def run(cfg):
         # ckpt_path=None  # Start from scratch or load weights below
     )
 
-    # Note: If you want to load pre-trained vision weights, 
+    # Note: If you want to load pre-trained vision weights,
     # you would do encoder.load_state_dict(...) here.
 
     print("🚀 Launching GR-1 Official Training Loop...")
     manager()
     return
+
 
 if __name__ == "__main__":
     run()
