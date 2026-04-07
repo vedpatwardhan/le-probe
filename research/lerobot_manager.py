@@ -40,7 +40,9 @@ class LeRobotManager:
         self.episodes_since_sync = 0
         if root is None:
             # Default to 'datasets' folder at the cortex-gr1 root
-            root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "datasets")
+            root = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", "datasets"
+            )
         self.root = os.path.abspath(root)
         self.dataset = None
         self.episode_frame_count = 0
