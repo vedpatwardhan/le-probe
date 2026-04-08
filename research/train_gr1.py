@@ -8,6 +8,7 @@ import lightning as pl
 import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
+from huggingface_hub import hf_hub_download
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
@@ -254,11 +255,25 @@ def run(cfg):
         trainer=trainer,
         module=world_model,
         data=data_module,
-        # ckpt_path=None  # Start from scratch or load weights below
     )
 
-    # Note: If you want to load pre-trained vision weights,
-    # you would do encoder.load_state_dict(...) here.
+    # 🔗 Warm-start from Pretrained Weights (HF: quentinll/lewm-cube)
+    # This seeds the Vision Encoder and Predictor with manipulation "common sense"
+    # while allowing the action_encoder to re-initialize for the 32-DoF GR-1.
+    if cfg.get("use_pretrained_cube"):
+        print("📥 Downloading pretrained cube manipulation weights from HF...")
+        weights_path = hf_hub_download(
+            repo_id="quentinll/lewm-cube", filename="weights.pt"
+        )
+        state_dict = torch.load(weights_path, map_location="cpu")
+
+        print("🧠 Loading weights into World Model (warm-start)...")
+        # We load into world_model.model (the JEPA instance)
+        # using strict=False to bypass the 25 vs 32 action_dim mismatch.
+        msg = world_model.model.load_state_dict(state_dict, strict=False)
+        print(
+            f"✅ Pretrained weights loaded. Mismatched/Missing keys: {len(msg.missing_keys)} (expected for action_encoder)"
+        )
 
     print("🚀 Launching GR-1 Official Training Loop...")
     manager()
