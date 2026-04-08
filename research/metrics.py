@@ -7,7 +7,7 @@ import numpy as np
 import wandb
 
 
-class ResearchMetricsCallback(pl.Callback):
+class MetricsCallback(pl.Callback):
     """
     Advanced interpretability metrics for world model training.
     Monitoring for:

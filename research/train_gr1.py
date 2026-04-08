@@ -20,6 +20,7 @@ from jepa import JEPA
 from module import ARPredictor, Embedder, MLP, SIGReg
 from utils import get_column_normalizer, get_img_preprocessor, ModelObjectCallBack
 from lewm_data_plugin import LEWMDataPlugin
+from metrics import MetricsCallback
 
 
 def lejepa_forward(self, batch, stage, cfg):
@@ -194,13 +195,11 @@ def run(cfg):
         epoch_interval=1,
     )
 
-    from research_metrics import ResearchMetricsCallback
-
-    research_callback = ResearchMetricsCallback(log_every_n_steps=50)
+    metrics_callback = MetricsCallback(log_every_n_steps=50)
 
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[object_dump_callback, research_callback],
+        callbacks=[object_dump_callback, metrics_callback],
         num_sanity_val_steps=1,
         logger=logger,
         enable_checkpointing=True,
