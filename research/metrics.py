@@ -48,16 +48,17 @@ class MetricsCallback(pl.Callback):
     def compute_soft_rank(self, z):
         """Computes the Effective Rank (SoftRank) of a latent batch."""
         try:
-            # SVD on the latent batch (B, D)
-            singular_values = torch.linalg.svdvals(z.detach())
+            # Center the latents: Remove the "mean shift" (DC offset)
+            # This ensures we measure the dimensionality of the spread, not distance from origin.
+            z_centered = z.detach() - z.detach().mean(dim=0, keepdim=True)
+
+            # SVD on the centered latent batch (B, D)
+            singular_values = torch.linalg.svdvals(z_centered)
 
             # Avoid division by zero if all latents are identical/zero
             s_sum = singular_values.sum()
-            if s_sum < 1e-10:
-                return 1.0  # Mathematically, rank is at least 1 if any value exists,
-                # but we report 1.0 to indicate total collapse.
-
-            singular_values = singular_values / s_sum
+            if s_sum < 1e-12:
+                return 1.0
             # Entropy calculation with numerical stability
             dist = singular_values + 1e-10
             entropy = -torch.sum(dist * torch.log(dist))
