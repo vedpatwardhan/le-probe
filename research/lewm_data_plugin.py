@@ -6,12 +6,13 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 class LEWMDataPlugin(torch.utils.data.Dataset):
     """
     A shim for LeRobotDataset to make it compatible with LeWorldModel's HDF5Dataset interface.
-    Handles rescaling pixels from [0, 1] to [0, 255] on-the-fly.
+    Handles rescaling pixels from [0, 1] to [0, 255] and seq-slicing (T, C, H, W).
     """
 
-    def __init__(self, repo_id, keys_to_load, transform=None):
+    def __init__(self, repo_id, keys_to_load, num_steps=1, transform=None):
         self.dataset = LeRobotDataset(repo_id)
         self.keys_to_load = keys_to_load
+        self.num_steps = num_steps
         self.transform = transform
 
         # Mapping LeRobot keys to LeWM expected keys
@@ -23,26 +24,47 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         }
 
     def __len__(self):
-        return len(self.dataset)
+        # We must ensure there's enough room for a full sequence
+        return len(self.dataset) - self.num_steps
 
     def __getitem__(self, idx):
-        # LeRobot [idx] returns a dict of tensors
-        item = self.dataset[idx]
+        """Returns a sequence of frames of length self.num_steps."""
 
-        # Extract and rename keys
+        # 1. Handle Episode Boundaries: ensure all steps are in the same episode
+        # LeRobotDataset stores indices in its 'hf_dataset'
+        curr_episode = self.dataset.hf_dataset[idx]["episode_index"]
+        last_episode = self.dataset.hf_dataset[idx + self.num_steps - 1][
+            "episode_index"
+        ]
+
+        if curr_episode != last_episode:
+            # If we cross an episode, shift the index back so we stay within the current episode
+            # This is a standard strategy for world model temporal slicing
+            idx = idx - (self.num_steps - 1)
+            if idx < 0:
+                idx = 0
+
+        # 2. Extract and slice keys
         batch = {}
         for target_key in self.keys_to_load:
             source_key = self.key_map.get(target_key, target_key)
-            if source_key in item:
-                val = item[source_key]
+
+            # Pull the sequence [idx : idx + num_steps]
+            seq = []
+            for i in range(idx, idx + self.num_steps):
+                val = self.dataset[i][source_key]
 
                 # SPECIAL RANGE CONVERSION: Rescale pixels 0-1 -> 0-255
                 if target_key == "pixels":
                     val = val * 255.0
 
-                batch[target_key] = val
+                seq.append(val)
 
-        # Apply LeWM transforms (ImageNet normalizer, etc.)
+            # Stack into (T, ...)
+            batch[target_key] = torch.stack(seq)
+
+        # 3. Apply LeWM transforms (ImageNet normalizer, etc.)
+        # Transformations in LeWM expect dicts of (T, ...) or (B, T, ...)
         if self.transform:
             batch = self.transform(batch)
 
@@ -53,8 +75,7 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         source_key = self.key_map.get(col_name, col_name)
         print(f"📊 Scanning dataset for column: {col_name} (source: {source_key})")
 
-        # LeRobot stores metrics in its own parquet files, but for a 150-episode dataset,
-        # we can just pull a large sample to compute stable stats.
+        # Pull a large sample to compute stable stats.
         sample_size = min(5000, len(self.dataset))
         data_list = []
         for i in range(0, sample_size, max(1, sample_size // 1000)):

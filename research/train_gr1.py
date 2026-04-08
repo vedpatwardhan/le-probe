@@ -63,7 +63,9 @@ def run(cfg):
     if "repo_id" in cfg.data.dataset:
         print(f"📦 Using LEWMDataPlugin for repository: {cfg.data.dataset.repo_id}")
         dataset = LEWMDataPlugin(
-            repo_id=cfg.data.dataset.repo_id, keys_to_load=cfg.data.dataset.keys_to_load
+            repo_id=cfg.data.dataset.repo_id,
+            keys_to_load=cfg.data.dataset.keys_to_load,
+            num_steps=cfg.data.dataset.num_steps,
         )
     else:
         # Fallback to official dataset loader
