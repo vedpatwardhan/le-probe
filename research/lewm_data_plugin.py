@@ -10,7 +10,7 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
     """
 
     def __init__(self, repo_id, keys_to_load, num_steps=1, transform=None):
-        self.dataset = LeRobotDataset(repo_id)
+        self.dataset = LeRobotDataset(repo_id, video_backend="pyav")
         self.keys_to_load = keys_to_load
         self.num_steps = num_steps
         self.transform = transform
@@ -52,7 +52,15 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             # Pull the sequence [idx : idx + num_steps]
             seq = []
             for i in range(idx, idx + self.num_steps):
-                val = self.dataset[i][source_key]
+                try:
+                    val = self.dataset[i][source_key]
+                except Exception as e:
+                    # If a frame fails to load (e.g. video corruption),
+                    # fallback to the current index a few steps back
+                    print(
+                        f"⚠️ Warning: Failed to decode frame {i}, falling back to {idx}. Error: {e}"
+                    )
+                    val = self.dataset[idx][source_key]
 
                 # SPECIAL RANGE CONVERSION: Rescale pixels 0-1 -> 0-255
                 if target_key == "pixels":

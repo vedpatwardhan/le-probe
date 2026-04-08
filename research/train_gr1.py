@@ -103,7 +103,11 @@ def run(cfg):
         train_set, **cfg.loader, shuffle=True, drop_last=True, generator=rnd_gen
     )
     val = torch.utils.data.DataLoader(
-        val_set, **cfg.loader, shuffle=False, drop_last=False
+        val_set,
+        batch_size=cfg.loader.batch_size,
+        num_workers=2,
+        shuffle=False,
+        drop_last=False,
     )
 
     ##############################
@@ -195,13 +199,14 @@ def run(cfg):
         epoch_interval=1,
     )
 
-    metrics_callback = MetricsCallback(log_every_n_steps=50)
+    metrics_callback = MetricsCallback(log_every_n_steps=1)
 
     trainer = pl.Trainer(
         **cfg.trainer,
         callbacks=[object_dump_callback, metrics_callback],
         num_sanity_val_steps=1,
         logger=logger,
+        log_every_n_steps=1,
         enable_checkpointing=True,
     )
 
