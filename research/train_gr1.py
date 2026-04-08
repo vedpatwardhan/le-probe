@@ -268,11 +268,20 @@ def run(cfg):
         state_dict = torch.load(weights_path, map_location="cpu")
 
         print("🧠 Loading weights into World Model (warm-start)...")
-        # We load into world_model.model (the JEPA instance)
-        # using strict=False to bypass the 25 vs 32 action_dim mismatch.
-        msg = world_model.model.load_state_dict(state_dict, strict=False)
+        # CLIP SHAPE MISMATCHES: PyTorch strict=False only handles missing keys,
+        # not size mismatches. We filter for name AND shape compatibility.
+        model_dict = world_model.model.state_dict()
+        filtered_dict = {
+            k: v
+            for k, v in state_dict.items()
+            if k in model_dict and v.shape == model_dict[k].shape
+        }
+
+        # Load into world_model.model (the JEPA instance)
+        msg = world_model.model.load_state_dict(filtered_dict, strict=False)
         print(
-            f"✅ Pretrained weights loaded. Mismatched/Missing keys: {len(msg.missing_keys)} (expected for action_encoder)"
+            f"✅ Pretrained weights loaded. Transferred: {len(filtered_dict)} layers. "
+            f"Skipped: {len(state_dict) - len(filtered_dict)} layers (due to robot mismatch)."
         )
 
     print("🚀 Launching GR-1 Official Training Loop...")
