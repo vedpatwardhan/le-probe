@@ -27,7 +27,11 @@ def lejepa_forward(self, batch, stage, cfg):
     """encode observations, predict next states, compute losses."""
     ctx_len = cfg.wm.history_size
     n_preds = cfg.wm.num_preds
-    lambd = cfg.loss.sigreg.weight
+
+    # NORMALIZATION: The SIGReg class in le_wm multiplies by B.
+    # We divide by B here to make the config weight batch-size invariant.
+    batch_size = batch["action"].shape[0]
+    lambd = cfg.loss.sigreg.weight / batch_size
 
     # Replace NaN values with 0
     batch["action"] = torch.nan_to_num(batch["action"], 0.0)

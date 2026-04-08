@@ -50,11 +50,21 @@ class MetricsCallback(pl.Callback):
         try:
             # SVD on the latent batch (B, D)
             singular_values = torch.linalg.svdvals(z.detach())
-            singular_values = singular_values / (singular_values.sum() + 1e-10)
-            entropy = -torch.sum(singular_values * torch.log(singular_values + 1e-10))
-            return torch.exp(entropy).item()
+
+            # Avoid division by zero if all latents are identical/zero
+            s_sum = singular_values.sum()
+            if s_sum < 1e-10:
+                return 1.0  # Mathematically, rank is at least 1 if any value exists,
+                # but we report 1.0 to indicate total collapse.
+
+            singular_values = singular_values / s_sum
+            # Entropy calculation with numerical stability
+            dist = singular_values + 1e-10
+            entropy = -torch.sum(dist * torch.log(dist))
+
+            return torch.max(torch.tensor(1.0), torch.exp(entropy)).item()
         except Exception as e:
-            return 0.0
+            return 1.0  # Fallback to rank 1 (total collapse) instead of 0
 
     def compute_path_straightening(self, emb):
         """
@@ -75,8 +85,8 @@ class MetricsCallback(pl.Callback):
     def log_pca_to_wandb(self, z, epoch, step):
         """Generates and logs a 2D PCA cloud of the latents."""
         z_np = z.detach().cpu().float().numpy()
-        if z_np.shape[0] < 5:
-            return  # Skip if batch too small
+        if z_np.shape[0] < 2:
+            return  # Need at least 2 points to plot/compare
 
         pca = PCA(n_components=2)
         z_2d = pca.fit_transform(z_np)
