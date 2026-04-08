@@ -265,7 +265,7 @@ class GR1MuJoCoBase:
 
     def render_and_record(self, action_32):
         views = {}
-        rr.set_time_sequence("sim_step", self.render_step_idx)
+        rr.set_time("sim_step", sequence=self.render_step_idx)
 
         for name in self.cam_names:
             self.renderer.update_scene(self.data, camera=name)

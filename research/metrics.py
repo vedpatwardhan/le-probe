@@ -45,11 +45,11 @@ class MetricsCallback(pl.Callback):
         if batch_idx % (self.log_every_n_steps * 4) == 0:
             self.log_pca_to_wandb(z, trainer.current_epoch, batch_idx)
 
-    def compute_soft_rank(self, z):
+    @staticmethod
+    def compute_soft_rank(z):
         """Computes the Effective Rank (SoftRank) of a latent batch."""
         try:
             # Center the latents: Remove the "mean shift" (DC offset)
-            # This ensures we measure the dimensionality of the spread, not distance from origin.
             z_centered = z.detach() - z.detach().mean(dim=0, keepdim=True)
 
             # SVD on the centered latent batch (B, D)
@@ -59,15 +59,17 @@ class MetricsCallback(pl.Callback):
             s_sum = singular_values.sum()
             if s_sum < 1e-12:
                 return 1.0
-            # Entropy calculation with numerical stability
-            dist = singular_values + 1e-10
-            entropy = -torch.sum(dist * torch.log(dist))
+
+            # Normalize to form a probability distribution (Spectral Entropy)
+            p = singular_values / s_sum
+            entropy = -torch.sum(p * torch.log(p + 1e-10))
 
             return torch.max(torch.tensor(1.0), torch.exp(entropy)).item()
         except Exception as e:
-            return 1.0  # Fallback to rank 1 (total collapse) instead of 0
+            return 1.0  # Fallback to rank 1 (total collapse)
 
-    def compute_path_straightening(self, emb):
+    @staticmethod
+    def compute_path_straightening(emb):
         """
         Calculates the average cosine similarity between consecutive
         latent displacement vectors: (z_t - z_t-1) and (z_t+1 - z_t).
