@@ -62,10 +62,6 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
                     )
                     val = self.dataset[idx][source_key]
 
-                # SPECIAL RANGE CONVERSION: Rescale pixels 0-1 -> 0-255
-                if target_key == "pixels":
-                    val = val * 255.0
-
                 seq.append(val)
 
             # Stack into (T, ...)

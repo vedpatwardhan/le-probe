@@ -203,6 +203,15 @@ def run(cfg):
         epoch_interval=1,
     )
 
+    # AUTO-BALANCE VALIDATION: If we are in a debug run (limited train batches),
+    # automatically limit validation batches to prevent long hangs.
+    with open_dict(cfg):
+        if cfg.trainer.get("limit_train_batches"):
+            # Set val batches to 1/2 of train batches, but at least 2
+            balanced_val = max(2, int(cfg.trainer.limit_train_batches * 0.5))
+            cfg.trainer.limit_val_batches = balanced_val
+            print(f"⚖️  Auto-balanced validation to {balanced_val} batches.")
+
     metrics_callback = MetricsCallback(log_every_n_steps=1)
 
     trainer = pl.Trainer(
