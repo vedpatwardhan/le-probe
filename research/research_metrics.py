@@ -74,7 +74,7 @@ class ResearchMetricsCallback(pl.Callback):
 
     def log_pca_to_wandb(self, z, epoch, step):
         """Generates and logs a 2D PCA cloud of the latents."""
-        z_np = z.detach().cpu().numpy()
+        z_np = z.detach().cpu().float().numpy()
         if z_np.shape[0] < 5:
             return  # Skip if batch too small
 
