@@ -220,10 +220,15 @@ def run(cfg):
     # automatically limit validation batches to prevent long hangs.
     with open_dict(cfg):
         if cfg.trainer.get("limit_train_batches"):
-            # Set val batches to 1/2 of train batches, but at least 2
+            # Debug Mode: Set val batches to 1/2 of train batches
             balanced_val = max(2, int(cfg.trainer.limit_train_batches * 0.5))
-            cfg.trainer.limit_val_batches = balanced_val
-            print(f"⚖️  Auto-balanced validation to {balanced_val} batches.")
+        else:
+            # Full Run Mode: Use a safety cap of 50 batches unless overridden in config
+            # This prevents validation from taking 10x longer than training.
+            balanced_val = cfg.trainer.get("limit_val_batches", 50)
+
+        cfg.trainer.limit_val_batches = balanced_val
+        print(f"⚖️  Validation capped at {balanced_val} batches per epoch.")
 
     metrics_callback = MetricsCallback(log_every_n_steps=1)
 
