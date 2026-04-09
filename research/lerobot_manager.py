@@ -156,7 +156,7 @@ class LeRobotManager:
             f"Recording NEW episode for task: '{task_instruction}'"
         )
 
-    def add_frame(self, views, state_32, action_32):
+    def add_frame(self, views, state_32, action_32, reachability=None):
         """Remaps 32-dim simulation protocol to 64-dim Rosetta for the Hub."""
         if self.dataset is None:
             return
@@ -170,6 +170,11 @@ class LeRobotManager:
         for old_idx, new_idx in ROSETTA_MAP.items():
             state_64[new_idx] = state_32[old_idx]
             action_64[new_idx] = action_32[old_idx]
+
+        # Grounding: Inject Reachability Volumes into unused state slots (62, 63)
+        if reachability:
+            state_64[62] = reachability.get("reachability/left_hand_volume", 0.0)
+            state_64[63] = reachability.get("reachability/right_hand_volume", 0.0)
 
         # Add to LeRobot dataset features
         frame_data = {
