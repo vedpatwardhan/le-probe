@@ -72,6 +72,17 @@ def lejepa_forward(self, batch, stage, cfg):
     output["sigreg_loss"] = self.sigreg(emb.transpose(0, 1))
     output["loss"] = output["pred_loss"] + lambd * output["sigreg_loss"]
 
+    # --- Step 0 Fail-Safe Diagnostic ---
+    if getattr(self, "global_step", 0) == 0 and stage == "train":
+        with torch.no_grad():
+            act_mag = batch["action"].abs().mean().item()
+            emb_mag = ctx_emb.abs().mean().item()
+            print(f"\n📊 --- [STEP 0 DIAGNOSTIC] ---")
+            print(f"  Actions (mean-abs):   {act_mag:.6f}")
+            print(f"  Embeddings (mean-abs): {emb_mag:.6f}")
+            print(f"  Signal Ratio:         {act_mag/emb_mag:.4f}")
+            print(f"---------------------------\n")
+
     losses_dict = {f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k}
     self.log_dict(losses_dict, on_step=True, sync_dist=True)
     return output

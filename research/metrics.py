@@ -29,11 +29,15 @@ class MetricsCallback(pl.Callback):
         if not isinstance(outputs, dict) or "emb" not in outputs:
             return
 
-        # 1. SoftRank (Effective Rank)
+        # 1. Latent Diagnostics (Rank and Variance)
         # emb shape: (B, T, D)
-        z = outputs["emb"][:, 0, :]  # Use first timestep for rank analysis
-        soft_rank = self.compute_soft_rank(z)
-        pl_module.log("research/soft_rank", soft_rank)
+        z = outputs["emb"][:, 0, :]  # Use first timestep for analysis
+        diagnostics = self.compute_latent_diagnostics(z)
+
+        pl_module.log("research/soft_rank", diagnostics["soft_rank"])
+        pl_module.log(
+            "research/participation_ratio", diagnostics["participation_ratio"]
+        )
 
         # 2. Path Straightening (Trajectory Linearity)
         # Measures if z_t+1 is 'aligning' in a predictable way
@@ -46,27 +50,42 @@ class MetricsCallback(pl.Callback):
             self.log_pca_to_wandb(z, trainer.current_epoch, batch_idx)
 
     @staticmethod
-    def compute_soft_rank(z):
-        """Computes the Effective Rank (SoftRank) of a latent batch."""
+    def compute_latent_diagnostics(z):
+        """
+        Performs a single SVD and returns both SoftRank (Entropy)
+        and Participation Ratio in a dictionary.
+        """
         try:
-            # Center the latents: Remove the "mean shift" (DC offset)
+            # emb: (B, D)
+            if z.shape[0] < 2:
+                return {"soft_rank": 1.0, "participation_ratio": 1.0}
+
+            # Center the latents
             z_centered = z.detach() - z.detach().mean(dim=0, keepdim=True)
 
             # SVD on the centered latent batch (B, D)
             singular_values = torch.linalg.svdvals(z_centered)
 
-            # Avoid division by zero if all latents are identical/zero
+            # Avoid division by zero
             s_sum = singular_values.sum()
-            if s_sum < 1e-12:
-                return 1.0
+            if s_sum < 1e-16:
+                return {"soft_rank": 1.0, "participation_ratio": 1.0}
 
-            # Normalize to form a probability distribution (Spectral Entropy)
+            # 1. Spectral Entropy Rank (Diversity focused)
             p = singular_values / s_sum
-            entropy = -torch.sum(p * torch.log(p + 1e-10))
+            entropy = -torch.sum(p * torch.log(p + 1e-12))
+            soft_rank = torch.exp(entropy).item()
 
-            return torch.max(torch.tensor(1.0), torch.exp(entropy)).item()
+            # 2. Participation Ratio Rank (Variance focused)
+            lambdas = singular_values**2
+            pr_rank = (lambdas.sum() ** 2) / (lambdas**2).sum()
+
+            return {
+                "soft_rank": max(1.0, soft_rank),
+                "participation_ratio": max(1.0, pr_rank.item()),
+            }
         except Exception as e:
-            return 1.0  # Fallback to rank 1 (total collapse)
+            return {"soft_rank": 1.0, "participation_ratio": 1.0}
 
     @staticmethod
     def compute_path_straightening(emb):
