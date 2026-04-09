@@ -164,8 +164,9 @@ class MetricsCallback(pl.Callback):
                     "singular_values": [0.0] * 10,
                 }
 
-            # Center the latents
-            z_centered = z.detach() - z.detach().mean(dim=0, keepdim=True)
+            # Center the latents (Force float32 for SVD stability)
+            z_f32 = z.detach().float()
+            z_centered = z_f32 - z_f32.mean(dim=0, keepdim=True)
 
             # SVD on the centered latent batch (B, D)
             singular_values = torch.linalg.svdvals(z_centered)
