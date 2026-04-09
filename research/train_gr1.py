@@ -30,16 +30,36 @@ def lejepa_forward(self, batch, stage, cfg):
     ctx_len = cfg.wm.history_size
     n_preds = cfg.wm.num_preds
 
-    # NORMALIZATION: The SIGReg class in le_wm multiplies by B.
-    # We divide by B here to make the config weight batch-size invariant.
-    batch_size = batch["action"].shape[0]
+    # --- ENHANCED DIAGNOSTIC PROBE ---
+    if self.trainer.global_step == 0:
+        raw_px = batch["pixels"]
+        print(f"\n🩺 [STEP 0] DATA HEALTH CHECK:")
+        print(f"  - Pixel Shape:    {raw_px.shape}")
+        print(f"  - Pixel Range:    [{raw_px.min():.2f}, {raw_px.max():.2f}]")
+        print(f"  - Pixel Mean/Var: {raw_px.mean():.4f} / {raw_px.var():.8f}")
+        print(f"  - Action Var:     {batch['action'].var():.8f}")
+
+    # NORMALIZATION
+    pixels = self.img_preprocessor(batch["pixels"])
+    actions = torch.nan_to_num(batch["action"], 0.0)
+
+    # Forward pass through model
+    info = {"pixels": pixels, "action": actions}
+    output = self.model.encode(info)
+    emb = output["emb"]  # (B, T, D)
+    self.last_z = emb.detach()
+
+    if self.trainer.global_step == 0:
+        print(f"  - Norm Pixel Range: [{pixels.min():.2f}, {pixels.max():.2f}]")
+        print(f"  - Latent Variance:  {emb.var():.8f}")
+        if emb.var() < 1e-7:
+            print("🚨 ALERT: Latents are still COLLAPSED after normalization.")
+        print("---------------------------------\n")
+
+    # SIGReg weight balancing
+    batch_size = actions.shape[0]
     lambd = cfg.loss.sigreg.weight / batch_size
 
-    # Replace NaN values with 0
-    batch["action"] = torch.nan_to_num(batch["action"], 0.0)
-
-    output = self.model.encode(batch)
-    emb = output["emb"]  # (B, T, D)
     act_emb = output["act_emb"]
 
     ctx_emb = emb[:, :ctx_len]
