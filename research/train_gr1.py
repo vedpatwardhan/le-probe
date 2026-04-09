@@ -11,6 +11,7 @@ import torch
 from huggingface_hub import hf_hub_download
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
+from stable_pretraining.optim.lr_scheduler import LinearWarmupCosineAnnealingLR
 
 # Ensure we can import from the le_wm submodule
 LEWM_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../le_wm"))
@@ -199,10 +200,18 @@ def run(cfg):
         "model_opt": {
             "modules": "model",
             "optimizer": dict(cfg.optimizer),
-            "scheduler": {
-                "type": "LinearWarmupCosineAnnealingLR",
-                "warmup_start_lr": 1e-5,
-            },
+            "scheduler": lambda optimizer, module: LinearWarmupCosineAnnealingLR(
+                optimizer,
+                warmup_steps=max(
+                    1,
+                    int(
+                        0.01
+                        * getattr(module.trainer, "estimated_stepping_batches", 100)
+                    ),
+                ),
+                max_steps=getattr(module.trainer, "estimated_stepping_batches", 1000),
+                warmup_start_lr=1e-5,
+            ),
             "interval": "epoch",
         },
     }
