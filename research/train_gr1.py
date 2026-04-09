@@ -32,15 +32,16 @@ def lejepa_forward(self, batch, stage, cfg):
 
     # --- ENHANCED DIAGNOSTIC PROBE ---
     if self.trainer.global_step == 0:
-        raw_px = batch["pixels"]
+        px = batch["pixels"]
         print(f"\n🩺 [STEP 0] DATA HEALTH CHECK:")
-        print(f"  - Pixel Shape:    {raw_px.shape}")
-        print(f"  - Pixel Range:    [{raw_px.min():.2f}, {raw_px.max():.2f}]")
-        print(f"  - Pixel Mean/Var: {raw_px.mean():.4f} / {raw_px.var():.8f}")
+        print(f"  - Pixel Shape:    {px.shape}")
+        print(f"  - Pixel Range:    [{px.min():.2f}, {px.max():.2f}]")
+        print(f"  - Pixel Mean/Var: {px.mean():.4f} / {px.var():.8f}")
         print(f"  - Action Var:     {batch['action'].var():.8f}")
 
-    # NORMALIZATION
-    pixels = self.img_preprocessor(batch["pixels"])
+    # PREPARATION
+    # Pixels are already normalized by the dataloader transforms [0, 1] -> ImageNet norm
+    pixels = batch["pixels"]
     actions = torch.nan_to_num(batch["action"], 0.0)
 
     # Forward pass through model
@@ -50,10 +51,9 @@ def lejepa_forward(self, batch, stage, cfg):
     self.last_z = emb.detach()
 
     if self.trainer.global_step == 0:
-        print(f"  - Norm Pixel Range: [{pixels.min():.2f}, {pixels.max():.2f}]")
         print(f"  - Latent Variance:  {emb.var():.8f}")
         if emb.var() < 1e-7:
-            print("🚨 ALERT: Latents are still COLLAPSED after normalization.")
+            print("🚨 ALERT: Latents are still COLLAPSED. Investigation required.")
         print("---------------------------------\n")
 
     # SIGReg weight balancing
