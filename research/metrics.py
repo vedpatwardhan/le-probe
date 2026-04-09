@@ -121,7 +121,31 @@ class MetricsCallback(pl.Callback):
         }
         self.log_to_csv(csv_data)
 
-        # 5. PCA Visualization (Cloud Geometry)
+        # 5. Console Health Check (Immediate Feedback)
+        if trainer.global_step == 1:
+            print("\n" + "=" * 50)
+            print("🩺 LEWM INITIAL HEALTH CHECK (STEP 1)")
+            print(f"  - SoftRank:        {diagnostics['soft_rank']:.4f}")
+            print(f"  - Participation:   {diagnostics['participation_ratio']:.4f}")
+            print(f"  - Action Magnitude: {act_mag:.6f}")
+            print(f"  - Embedding Mag:   {emb_mag:.6f}")
+            print(f"  - Signal Ratio:    {sig_ratio:.4f}")
+            print(
+                f"  - Spectral Gap (S0/S1): {diagnostics['singular_values'][0]/(diagnostics['singular_values'][1]+1e-8):.2f}"
+            )
+
+            if (
+                diagnostics["soft_rank"] < 1.05
+                and diagnostics["singular_values"][1] < 1e-6
+            ):
+                print(
+                    "🚨 ALERT: Model is CURRENTLY COLLAPSED. Monitor SigReg gradients."
+                )
+            else:
+                print("✅ MANIFOLD IS BREATHING: Non-zero variance detected.")
+            print("=" * 50 + "\n")
+
+        # 6. PCA Visualization (Cloud Geometry)
         if batch_idx % (self.log_every_n_steps * 4) == 0:
             self.log_pca_to_wandb(z, trainer.current_epoch, batch_idx)
 

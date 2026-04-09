@@ -18,7 +18,8 @@ sys.path.append(LEWM_ROOT)
 
 # Import official LeWM components
 from jepa import JEPA
-from module import ARPredictor, Embedder, MLP, SIGReg
+from module import ARPredictor, SIGReg
+from gr1_modules import GR1Embedder, GR1MLP
 from utils import get_column_normalizer, get_img_preprocessor, ModelObjectCallBack
 from lewm_data_plugin import LEWMDataPlugin
 from metrics import MetricsCallback
@@ -139,20 +140,18 @@ def run(cfg):
         **cfg.predictor,
     )
 
-    action_encoder = Embedder(input_dim=effective_act_dim, emb_dim=embed_dim)
+    action_encoder = GR1Embedder(input_dim=effective_act_dim, emb_dim=embed_dim)
 
-    projector = MLP(
+    projector = GR1MLP(
         input_dim=hidden_dim,
         output_dim=embed_dim,
         hidden_dim=2048,
-        norm_fn=torch.nn.BatchNorm1d,
     )
 
-    predictor_proj = MLP(
+    predictor_proj = GR1MLP(
         input_dim=hidden_dim,
         output_dim=embed_dim,
         hidden_dim=2048,
-        norm_fn=torch.nn.BatchNorm1d,
     )
 
     world_model = JEPA(
@@ -245,22 +244,39 @@ def run(cfg):
         )
         state_dict = torch.load(weights_path, map_location="cpu")
 
-        print("🧠 Loading weights into World Model (warm-start)...")
-        # CLIP SHAPE MISMATCHES: PyTorch strict=False only handles missing keys,
-        # not size mismatches. We filter for name AND shape compatibility.
+        print("🧠 Loading weights into World Model (Warm-start)...")
         model_dict = world_model.model.state_dict()
+
+        # STRICT VERIFICATION: We must load the Vision Encoder Patch Embeddings.
+        # If this fails, the model is effectively blind.
+        patch_key = "encoder.embeddings.patch_embeddings.projection.weight"
+        if (
+            patch_key in state_dict
+            and state_dict[patch_key].shape != model_dict[patch_key].shape
+        ):
+            raise RuntimeError(
+                f"🚨 FATAL: Vision Encoder Patch Size Mismatch! "
+                f"Hub: {state_dict[patch_key].shape} Local: {model_dict[patch_key].shape}. "
+                f"Ensure patch_size is correctly aligned in config."
+            )
+
         filtered_dict = {
             k: v
             for k, v in state_dict.items()
             if k in model_dict and v.shape == model_dict[k].shape
         }
 
-        # Load into world_model.model (the JEPA instance)
+        # Load into world_model.model
         msg = world_model.model.load_state_dict(filtered_dict, strict=False)
         print(
-            f"✅ Pretrained weights loaded. Transferred: {len(filtered_dict)} layers. "
-            f"Skipped: {len(state_dict) - len(filtered_dict)} layers (due to robot mismatch)."
+            f"✅ Weights loaded. Transferred: {len(filtered_dict)} layers. "
+            f"Skipped: {len(state_dict) - len(filtered_dict)} (due to configuration mismatch)."
         )
+
+        if len(msg.missing_keys) > 200:
+            print(
+                f"⚠️ WARNING: High number of missing keys ({len(msg.missing_keys)}). Check compatibility!"
+            )
 
     print("🚀 Launching GR-1 Official Training Loop...")
     manager()
