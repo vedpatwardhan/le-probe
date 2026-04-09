@@ -24,26 +24,6 @@ from lewm_data_plugin import LEWMDataPlugin
 from metrics import MetricsCallback
 
 
-class ColabLoggingCallback(pl.Callback):
-    """Minimalist logger for Colab to prevent console flicker."""
-
-    def on_train_epoch_start(self, trainer, pl_module):
-        # trainer.num_training_batches contains the length of the loader
-        steps = trainer.num_training_batches
-        print(
-            f"🚀 [Epoch {trainer.current_epoch + 1}/{trainer.max_epochs}] Training ({steps} steps)..."
-        )
-
-    def on_validation_epoch_start(self, trainer, pl_module):
-        if not trainer.sanity_checking:
-            # trainer.num_val_batches can be an int or a list depending on context
-            v_batches = trainer.num_val_batches
-            steps = v_batches[0] if isinstance(v_batches, list) else v_batches
-            print(
-                f"🔍 [Epoch {trainer.current_epoch + 1}] Validating ({steps} steps)..."
-            )
-
-
 def lejepa_forward(self, batch, stage, cfg):
     """encode observations, predict next states, compute losses."""
     ctx_len = cfg.wm.history_size
@@ -253,13 +233,11 @@ def run(cfg):
 
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[object_dump_callback, metrics_callback, ColabLoggingCallback()],
+        callbacks=[object_dump_callback, metrics_callback],
         num_sanity_val_steps=1,
         logger=logger,
         log_every_n_steps=1,
         enable_checkpointing=True,
-        enable_progress_bar=False,
-        enable_model_summary=False,
     )
 
     manager = spt.Manager(
