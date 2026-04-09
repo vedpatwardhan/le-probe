@@ -37,7 +37,16 @@ def lejepa_forward(self, batch, stage, cfg):
         print(f"  - Pixel Shape:    {px.shape}")
         print(f"  - Pixel Range:    [{px.min():.2f}, {px.max():.2f}]")
         print(f"  - Pixel Mean/Var: {px.mean():.4f} / {px.var():.8f}")
-        print(f"  - Action Var:     {batch['action'].var():.8f}")
+
+        # BATCH UNIQUENESS CHECK
+        if px.shape[0] > 1:
+            px_diff = (px[0] - px[1]).abs().var()
+            act_diff = (batch["action"][0] - batch["action"][1]).abs().var()
+            print(f"  - Batch Variance (Sample 0 vs 1):")
+            print(f"    - Pixel Diff Var:  {px_diff:.8f}")
+            print(f"    - Action Diff Var: {act_diff:.8f}")
+            if px_diff < 1e-8:
+                print("🚨 CRITICAL: BATCH IS CLONED! Sample 0 and 1 are identical.")
 
     # PREPARATION
     # Pixels are already normalized by the dataloader transforms [0, 1] -> ImageNet norm
@@ -51,9 +60,11 @@ def lejepa_forward(self, batch, stage, cfg):
     self.last_z = emb.detach()
 
     if self.trainer.global_step == 0:
+        emb_diff = (emb[0] - emb[1]).abs().var() if emb.shape[0] > 1 else 0.0
         print(f"  - Latent Variance:  {emb.var():.8f}")
-        if emb.var() < 1e-7:
-            print("🚨 ALERT: Latents are still COLLAPSED. Investigation required.")
+        print(f"  - Latent Diff Var:  {emb_diff:.8f}")
+        if emb_diff < 1e-8:
+            print("🚨 ALERT: Latent manifold has zero batch variance.")
         print("---------------------------------\n")
 
     # SIGReg weight balancing
