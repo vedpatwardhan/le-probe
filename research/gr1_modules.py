@@ -47,28 +47,21 @@ class GR1Embedder(nn.Module):
 
 class GR1MLP(nn.Module):
     """
-    GR-1 Specific MLP with LayerNorm instead of BatchNorm.
-    LayerNorm is instance-wise, preventing the 'Symmetry Trap' where
-    BatchNorm centers zero-variance batches, hiding collapse from SIGReg.
+    Standard MLP for GR-1 Projector.
+    Matches the quentinll/lewm-cube architecture (Linear -> BN -> GELU -> Linear).
     """
 
-    def __init__(
-        self,
-        input_dim,
-        hidden_dim,
-        output_dim=None,
-        act_fn=nn.GELU,
-    ):
+    def __init__(self, input_dim, output_dim, hidden_dim=2048):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            act_fn(),
-            nn.Linear(hidden_dim, output_dim or input_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, output_dim),
         )
 
     def forward(self, x):
         """
-        x: (B*T, D)
+        x: (B*T, D) or (B, D)
         """
         return self.net(x)

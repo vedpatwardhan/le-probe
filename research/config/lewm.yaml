@@ -44,7 +44,7 @@ wandb:
 
 wm:
   type: lewm
-  history_size: 1
+  history_size: 3
   num_preds: 1
   embed_dim: 192
 
