@@ -58,7 +58,7 @@ predictor:
 
 loss:
   sigreg:
-    weight: 15.0
+    weight: 30.0
     kwargs:
       knots: 17
       num_proj: 1024
