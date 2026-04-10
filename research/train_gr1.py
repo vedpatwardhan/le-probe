@@ -205,13 +205,18 @@ def run(cfg):
         dataset, lengths=[cfg.train_split, 1 - cfg.train_split], generator=rnd_gen
     )
 
+    # Configure loaders robustly for Colab (handle num_workers=0 case)
+    loader_kwargs = dict(cfg.loader)
+    if loader_kwargs.get("num_workers", 0) == 0:
+        loader_kwargs.pop("prefetch_factor", None)
+
     train = torch.utils.data.DataLoader(
-        train_set, **cfg.loader, shuffle=True, drop_last=True, generator=rnd_gen
+        train_set, **loader_kwargs, shuffle=True, drop_last=True, generator=rnd_gen
     )
     val = torch.utils.data.DataLoader(
         val_set,
-        batch_size=cfg.loader.batch_size,
-        num_workers=2,
+        batch_size=loader_kwargs.get("batch_size", 1),
+        num_workers=loader_kwargs.get("num_workers", 0),
         shuffle=False,
         drop_last=False,
     )
