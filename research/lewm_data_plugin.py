@@ -61,6 +61,17 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             d[parts[-1]] = v
         return nested_dict
 
+    @staticmethod
+    def flatten_dict(nested_dict, parent_key="", sep="."):
+        items = []
+        for k, v in nested_dict.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(LEWMDataPlugin.flatten_dict(v, new_key, sep=sep).items())
+            else:
+                items.append((new_key, v))
+        return dict(items)
+
     def __len__(self):
         # We need an extra frame to compute the delta for the last action in a sequence if not native
         buffer = 1 if (self.use_virtual_actions and not self.has_native_actions) else 0
@@ -142,7 +153,18 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         if self.transform:
             nested_batch = self.transform(nested_batch)
 
-        return nested_batch
+        # 4. Standardize for the Model: Flatten back and add Aliases
+        # The transforms need nesting, but the model code expects flat keys like 'pixels'.
+        final_batch = self.flatten_dict(nested_batch)
+
+        # Ensure standard aliases exist for the forward pass in train_gr1.py
+        if "observation.images.world_center" in final_batch:
+            final_batch["pixels"] = final_batch["observation.images.world_center"]
+        if "observation.state" in final_batch:
+            final_batch["state"] = final_batch["observation.state"]
+            final_batch["proprio"] = final_batch["observation.state"]
+
+        return final_batch
 
     def get_col_data(self, col_name):
         """Used by LeWM's get_column_normalizer to compute offline stats."""
