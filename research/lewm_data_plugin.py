@@ -116,38 +116,23 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
                 state_seq.append(self.dataset[i][state_key])
             state_seq = torch.stack(state_seq)
 
+        # Load all requested keys directly from the dataset
         for target_key in self.keys_to_load:
-            if (
-                target_key == "action"
-                and self.use_virtual_actions
-                and not self.has_native_actions
-            ):
-                # COMPUTE VIRTUAL ACTIONS ON THE FLY: a_t = s_{t+1} - s_t
-                # Slice to 32 to match GR-1 joint DoF and checkpoint size
-                batch["action"] = (state_seq[1:] - state_seq[:-1])[..., :32]
-                continue
-
-            if (target_key in ["observation.state", "state", "proprio"]) and len(
-                state_seq
-            ) > 0:
-                # Serve from pre-fetched sequence
-                batch[target_key] = state_seq[: self.num_steps]
-                continue
-
-            # Standard sequence loading for other keys (pixels, or native action)
             source_key = self.key_map.get(target_key, target_key)
             seq = []
             for i in range(idx, idx + self.num_steps):
                 try:
                     val = self.dataset[i][source_key]
                 except Exception as e:
-                    print(f"⚠️ Warning: Failed to decode frame {i}. Error: {e}")
+                    print(
+                        f"⚠️ Warning: Failed to decode frame {i} for key {target_key}. Error: {e}"
+                    )
                     val = self.dataset[idx][source_key]
                 seq.append(val)
 
             batch[target_key] = torch.stack(seq)
 
-        # 3. Apply LeWM transforms
+        # 3. Apply LeWM transforms (expects nested structure)
         batch = {k: v for k, v in batch.items() if k in self.keys_to_load}
         nested_batch = self.nest_dict(batch)
         if self.transform:
@@ -158,11 +143,13 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         final_batch = self.flatten_dict(nested_batch)
 
         # Ensure standard aliases exist for the forward pass in train_gr1.py
-        if "observation.images.world_center" in final_batch:
-            final_batch["pixels"] = final_batch["observation.images.world_center"]
-        if "observation.state" in final_batch:
-            final_batch["state"] = final_batch["observation.state"]
-            final_batch["proprio"] = final_batch["observation.state"]
+        # We search for the full path in case it was renamed/nested further
+        for k, v in final_batch.items():
+            if "world_center" in k:
+                final_batch["pixels"] = v
+            if "observation.state" in k or (k == "state"):
+                final_batch["state"] = v
+                final_batch["proprio"] = v
 
         return final_batch
 
@@ -185,8 +172,8 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             for i in range(0, sample_size - 1, max(1, sample_size // 1000)):
                 s0 = self.dataset[i][state_key]
                 s1 = self.dataset[i + 1][state_key]
-                # Slice to 32 to match GR-1 joint DoF
-                data_list.append((s1 - s0)[:32].numpy())
+                # Use full dimensionality from the dataset
+                data_list.append((s1 - s0).numpy())
         else:
             # Standard path for scalar columns or native actions
             for i in range(0, sample_size, max(1, sample_size // 1000)):
@@ -197,8 +184,7 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
 
     def get_dim(self, col_name):
         """Returns the dimensionality of the feature."""
-        if col_name == "action" and self.use_virtual_actions:
-            return 32
+        # Remove hardcoded 32-dim return. Let the dynamic check below handle it.
 
         source_key = self.key_map.get(col_name, col_name)
         # Pull a single frame to check shape

@@ -330,13 +330,46 @@ def run(cfg):
 
     metrics_callback = MetricsCallback(log_every_n_steps=1)
 
-    # 💾 CHECKPOINT PERSISTENCE LOGIC
-    # 1. Sanitize the checkpoint path
+    # 💾 CHECKPOINT PERSISTENCE & SAFE TRANSFER LOGIC
     ckpt_path_str = cfg.get("ckpt_path")
     if ckpt_path_str:
         ckpt_path_str = ckpt_path_str.strip("\"'")
         checkpoint_dir = str(Path(ckpt_path_str).parent)
-        print(f"📊 PERSISTENCE: Saving subsequent checkpoints to: {checkpoint_dir}")
+        print(f"📊 PERSISTENCE: Checkpoints will be saved to: {checkpoint_dir}")
+
+        # --- SAFE TRANSFER (Check for Shape Mismatches) ---
+        print(f"🧬 SAFE TRANSFER: Loading weights from {ckpt_path_str}...")
+        try:
+            checkpoint = torch.load(ckpt_path_str, map_location="cpu")
+            # PyTorch Lightning stores weights in "state_dict", naked models store them directly
+            state_dict = checkpoint.get("state_dict", checkpoint)
+
+            # Remove "model." prefix if it exists (common in Lightning checkpoints)
+            new_sd = {}
+            for k, v in state_dict.items():
+                new_key = k.replace("model.", "") if k.startswith("model.") else k
+                new_sd[new_key] = v
+
+            model_dict = world_model.model.state_dict()
+            filtered_dict = {
+                k: v
+                for k, v in new_sd.items()
+                if k in model_dict and v.shape == model_dict[k].shape
+            }
+
+            msg = world_model.model.load_state_dict(filtered_dict, strict=False)
+            print(f"✅ Safe Transfer Results: Loaded {len(filtered_dict)} layers.")
+            if msg.missing_keys:
+                print(
+                    f"⚠️ Re-initialized layers (Mismatched/Missing): {[k for k in msg.missing_keys if 'action_encoder' in k]}"
+                )
+
+            # Since we have manually loaded the weights (partial load),
+            # we tell Lightning to start a FRESH run from this state
+            # rather than a strict resume (which would fail on shape mismatch).
+            ckpt_path_str = None
+        except Exception as e:
+            print(f"❌ Safe Transfer Failed: {e}. Falling back to standard resume.")
     else:
         checkpoint_dir = str(run_dir / "checkpoints")
 
