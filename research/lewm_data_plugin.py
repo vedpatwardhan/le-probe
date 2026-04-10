@@ -136,10 +136,10 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
 
                 # Fetch the entire sequence in ONE call
                 seq_indices = list(range(frame_idx, frame_idx + self.num_steps))
-                # Torchcodec returns (T, C, H, W) float32 [0, 1]
+                # Torchcodec returns a FrameBatch object. Use .data to get the (T, C, H, W) tensor.
                 frames = decoder.get_frames_at(indices=seq_indices)
                 # Convert to [0, 255] uint8 to match HDF5Dataset expectations
-                batch[target_key] = (frames * 255).byte()
+                batch[target_key] = (frames.data * 255).byte()
 
         # 4. Standard Plugin Post-Processing (Nesting/Transforms)
         nested_batch = self.nest_dict(batch)
