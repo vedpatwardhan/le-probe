@@ -5,43 +5,45 @@ import os
 import time
 from datetime import datetime
 
+
 # --- GLOBAL CONSOLE INSTRUMENTATION ---
-# This block must remain at the very top to catch early imports
+# Consolidated stateful stream wrapper to ensure exactly one timestamp per line
+class TimestampedStream:
+    def __init__(self, original_stream):
+        self.stream = original_stream
+        self.at_start_of_line = True
+
+    def write(self, text):
+        if not text:
+            return
+
+        # If we are starting a new line, add the timestamp
+        if (
+            self.at_start_of_line
+            and text.strip()
+            and not text.startswith("[")
+            and not text.startswith("\r")
+        ):
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            self.stream.write(f"[{ts}] ")
+
+        self.stream.write(text)
+        self.at_start_of_line = text.endswith("\n")
+
+    def flush(self):
+        self.stream.flush()
+
+
+# Apply to both stdout and stderr for total coverage
+sys.stdout = TimestampedStream(sys.stdout)
+sys.stderr = TimestampedStream(sys.stderr)
+
+# Disable basicConfig's own timestamp to avoid duplication with our global wrapper
 logging.basicConfig(
-    format="[%(asctime)s] %(levelname)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    format="%(levelname)s: %(message)s",
     level=logging.INFO,
     force=True,
 )
-
-_original_stdout_write = sys.stdout.write
-_original_print = builtins.print
-
-
-def timestamped_write(text):
-    if text.strip() and not text.startswith("[") and not text.startswith("\r"):
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        return _original_stdout_write(f"[{ts}] {text}")
-    return _original_stdout_write(text)
-
-
-def timestamped_print(*args, **kwargs):
-    if kwargs.get("end", "\n") != "\n" or not args:
-        return _original_print(*args, **kwargs)
-
-    if (
-        args
-        and isinstance(args[0], str)
-        and (args[0].startswith("\r") or args[0].startswith("["))
-    ):
-        return _original_print(*args, **kwargs)
-
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-    return _original_print(f"[{ts}]", *args, **kwargs)
-
-
-sys.stdout.write = timestamped_write
-builtins.print = timestamped_print
 # --------------------------------------
 
 from functools import partial
@@ -159,9 +161,13 @@ def run(cfg):
     repo_id = "vedpatwardhan/gr1_pickup_processed"
     print(f"📦 Initializing Data Plugin for: {repo_id}")
 
+    # Standard keys to load if not specified in config
+    default_keys = ["observation.state", "observation.images.world_center"]
+    keys_to_load = cfg.data.get("keys_to_load") or default_keys
+
     dataset = LEWMDataPlugin(
         repo_id=repo_id,
-        keys_to_load=cfg.data.keys_to_load,
+        keys_to_load=keys_to_load,
         num_steps=cfg.wm.history_size + cfg.wm.num_preds,
         use_virtual_actions=cfg.data.get("use_virtual_actions", True),
     )
@@ -173,7 +179,7 @@ def run(cfg):
 
     # 3. Standardize States/Actions (Z-Score)
     with open_dict(cfg):
-        for col in cfg.data.keys_to_load:
+        for col in keys_to_load:
             if col.startswith("pixels"):
                 continue
 
