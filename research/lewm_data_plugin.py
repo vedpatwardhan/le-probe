@@ -18,12 +18,7 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         transform=None,
         use_virtual_actions=True,
     ):
-        try:
-            self.dataset = LeRobotDataset(repo_id, video_backend="torchcodec")
-            print("⚡ High-speed decoding enabled: Using TorchCodec backend.")
-        except Exception:
-            self.dataset = LeRobotDataset(repo_id, video_backend="pyav")
-            print("⚠️ TorchCodec not available. Falling back to PyAV backend.")
+        self.repo_id = repo_id
         self.keys_to_load = keys_to_load
         self.num_steps = num_steps
         self.transform = transform
@@ -35,7 +30,6 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             "observation.state": "observation.state",
             "action": "action",
         }
-        # Backward compatibility for legacy aliases
         self.key_map.update(
             {
                 "pixels": "observation.images.world_center",
@@ -44,8 +38,9 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             }
         )
 
-        self.repo_id = repo_id
-        self.keys_to_load = keys_to_load or list(self.key_map.keys())
+        # Base dataset initialization (no video backend yet to avoid fork issues)
+        self.dataset = LeRobotDataset(repo_id)
+        self._backend_initialized = False
 
         # Optimization: Check if 'action' is already native to the dataset
         self.has_native_actions = "action" in self.dataset.hf_dataset.column_names
@@ -53,6 +48,23 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             print(
                 "⚡ Detected pre-calculated actions in dataset. Using native action column."
             )
+
+        if self.keys_to_load is None:
+            self.keys_to_load = list(self.key_map.keys())
+
+    def _maybe_init_backend(self):
+        """Worker-side initialization of the high-speed backend."""
+        if self._backend_initialized:
+            return
+
+        try:
+            import torchcodec
+
+            self.dataset.video_backend = "torchcodec"
+        except ImportError:
+            self.dataset.video_backend = "pyav"
+
+        self._backend_initialized = True
 
     @staticmethod
     def nest_dict(flat_dict):
@@ -85,6 +97,7 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         """Returns a sequence of frames of length self.num_steps."""
+        self._maybe_init_backend()
 
         # 1. Handle Episode Boundaries: ensure T+1 steps are in the same episode
         # (Need T+1 frames to compute T deltas ONLY if not native)
@@ -101,49 +114,53 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
                 idx = 0
 
         # 2. Extract and slice keys
+        # We fetch each index ONCE and pluck all required keys to avoid redundant video seeks.
+        fetch_len = self.num_steps
+        needs_plus_one_state = self.use_virtual_actions and not self.has_native_actions
+        if needs_plus_one_state:
+            fetch_len = self.num_steps + 1
+
+        # Pre-fetch all samples in the sequence range
+        samples = []
+        for i in range(idx, idx + fetch_len):
+            # Robust tiered retry for video decoding contention
+            retry_attempts = 3
+            sample_val = None
+            for attempt in range(retry_attempts):
+                try:
+                    sample_val = self.dataset[i]
+                    break
+                except Exception as e:
+                    if attempt < retry_attempts - 1:
+                        wait_time = 0.05 * (2**attempt)
+                        time.sleep(wait_time)
+                        continue
+                    raise e
+            samples.append(sample_val)
+
+        # Distribute keys from pre-fetched samples
         batch = {}
 
-        # We fetch T+1 states specifically if we need virtual actions ON THE FLY
-        state_seq = []
+        # Handle state specifically for virtual actions (T+1)
         if (
-            (self.use_virtual_actions and not self.has_native_actions)
+            needs_plus_one_state
             or "observation.state" in self.keys_to_load
             or "state" in self.keys_to_load
             or "proprio" in self.keys_to_load
         ):
             state_key = self.key_map["observation.state"]
-            # Fetch T+1 if we need to compute deltas
-            fetch_len = (
-                self.num_steps + 1
-                if (self.use_virtual_actions and not self.has_native_actions)
-                else self.num_steps
-            )
-            for i in range(idx, idx + fetch_len):
-                try:
-                    # Tier 1: Direct fetch
-                    state_seq.append(self.dataset[i][state_key])
-                except Exception:
-                    # Tier 2: Retry once with a fresh attempt (fixes transient resource errors)
-                    time.sleep(0.01)
-                    state_seq.append(self.dataset[i][state_key])
+            state_seq = torch.stack([s[state_key] for s in samples[:fetch_len]])
+            # We'll handle slicing for virtual actions later in the existing logic if needed
+            # but for now we put the full sequence in a temp place or handle batch directly.
+            # Local logic below handles state_seq usage.
 
-            state_seq = torch.stack(state_seq)
-
-        # Load all requested keys directly from the dataset
+        # Load all requested keys
         for target_key in self.keys_to_load:
             source_key = self.key_map.get(target_key, target_key)
-            seq = []
-            for i in range(idx, idx + self.num_steps):
-                try:
-                    # Tier 1: Direct fetch
-                    val = self.dataset[i][source_key]
-                except Exception:
-                    # Tier 2: Retry once (fixes transient resource errors)
-                    time.sleep(0.01)
-                    val = self.dataset[i][source_key]
-                seq.append(val)
-
-            batch[target_key] = torch.stack(seq)
+            # Take only the first num_steps if the key doesn't need the T+1 state
+            seq_len = self.num_steps
+            # Special case: virtual actions need T+1 states specifically
+            batch[target_key] = torch.stack([s[source_key] for s in samples[:seq_len]])
 
         # 3. Apply LeWM transforms (expects nested structure)
         batch = {k: v for k, v in batch.items() if k in self.keys_to_load}
