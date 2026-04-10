@@ -10,6 +10,7 @@ import stable_worldmodel as swm
 import torch
 from huggingface_hub import hf_hub_download
 from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
 from omegaconf import OmegaConf, open_dict
 from stable_pretraining.optim.lr_scheduler import LinearWarmupCosineAnnealingLR
 
@@ -264,13 +265,32 @@ def run(cfg):
 
     metrics_callback = MetricsCallback(log_every_n_steps=1)
 
+    # 💾 CHECKPOINT PERSISTENCE LOGIC
+    # If resuming, we save to the parent of the checkpoint path (e.g., Drive)
+    # with a versioned filename template to avoid the "overwrite bug".
+    ckpt_path_str = cfg.get("ckpt_path")
+    if ckpt_path_str:
+        checkpoint_dir = str(Path(ckpt_path_str).parent)
+        print(f"📊 PERSISTENCE: Saving subsequent checkpoints to: {checkpoint_dir}")
+    else:
+        checkpoint_dir = Path(run_dir / "checkpoints")
+
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=checkpoint_dir,
+        filename="gr1-epoch={epoch:02d}-step={step:06d}",
+        save_top_k=-1,  # Research mode: Keep all checkpoints
+        every_n_epochs=1,
+        save_on_train_epoch_end=True,
+        auto_insert_metric_name=False,
+    )
+
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[object_dump_callback, metrics_callback],
+        callbacks=[object_dump_callback, metrics_callback, checkpoint_callback],
         num_sanity_val_steps=1,
         logger=logger,
         log_every_n_steps=1,
-        enable_checkpointing=True,
+        enable_checkpointing=False,  # Managed by our explicit callback
     )
 
     manager = spt.Manager(
