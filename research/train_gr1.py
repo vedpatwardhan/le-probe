@@ -173,14 +173,17 @@ def run(cfg):
     )
 
     # 2. Rescale & Normalize Pixels
-    transforms = [
-        get_img_preprocessor(source="pixels", target="pixels", img_size=cfg.img_size)
-    ]
+    transforms = []
+    for col in keys_to_load:
+        if "pixels" in col or "images" in col:
+            transforms.append(
+                get_img_preprocessor(source=col, target=col, img_size=cfg.img_size)
+            )
 
     # 3. Standardize States/Actions (Z-Score)
     with open_dict(cfg):
         for col in keys_to_load:
-            if col.startswith("pixels"):
+            if "pixels" in col or "images" in col:
                 continue
 
             normalizer = get_column_normalizer(dataset, col, col)
