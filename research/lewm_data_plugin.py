@@ -118,7 +118,12 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
                 else self.num_steps
             )
             for i in range(idx, idx + fetch_len):
-                state_seq.append(self.dataset[i][state_key])
+                try:
+                    state_seq.append(self.dataset[i][state_key])
+                except Exception as e:
+                    print(f"⚠️ Warning: Failed to fetch state at index {i}. Error: {e}")
+                    # Fallback to the first index of the sequence if we can't get this one
+                    state_seq.append(self.dataset[idx][state_key])
             state_seq = torch.stack(state_seq)
 
         # Load all requested keys directly from the dataset
