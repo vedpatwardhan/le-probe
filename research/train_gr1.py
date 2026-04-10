@@ -153,26 +153,27 @@ def run(cfg):
     ##       dataset       ##
     #########################
 
-    # Inject GR1DataPlugin if repo_id is present in the config
-    if "repo_id" in cfg.data.dataset:
-        print(f"📦 Using LEWMDataPlugin for repository: {cfg.data.dataset.repo_id}")
-        dataset = LEWMDataPlugin(
-            repo_id=cfg.data.dataset.repo_id,
-            keys_to_load=cfg.data.dataset.keys_to_load,
-            num_steps=cfg.data.dataset.num_steps,
-        )
-    else:
-        # Fallback to official dataset loader
-        dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
+    # 1. Initialize the Data Plugin (LeRobot -> LeWorldModel Shim)
+    # We prioritize the 'processed' dataset for significant training speedups.
+    # Note: Even if a checkpoint reloads an old repo_id, we override it here for performance.
+    repo_id = "vedpatwardhan/gr1_pickup_processed"
+    print(f"📦 Initializing Data Plugin for: {repo_id}")
 
-    # 1. Rescale & Normalize Pixels
+    dataset = LEWMDataPlugin(
+        repo_id=repo_id,
+        keys_to_load=cfg.data.keys_to_load,
+        num_steps=cfg.wm.history_size + cfg.wm.num_preds,
+        use_virtual_actions=cfg.data.get("use_virtual_actions", True),
+    )
+
+    # 2. Rescale & Normalize Pixels
     transforms = [
         get_img_preprocessor(source="pixels", target="pixels", img_size=cfg.img_size)
     ]
 
-    # 2. Standardize States/Actions (Z-Score)
+    # 3. Standardize States/Actions (Z-Score)
     with open_dict(cfg):
-        for col in cfg.data.dataset.keys_to_load:
+        for col in cfg.data.keys_to_load:
             if col.startswith("pixels"):
                 continue
 

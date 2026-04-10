@@ -31,20 +31,31 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             "proprio": "observation.state",
         }
 
+        # Optimization: Check if 'action' is already native to the dataset
+        self.has_native_actions = "action" in self.dataset.hf_dataset.column_names
+        if self.has_native_actions:
+            print(
+                "⚡ Detected pre-calculated actions in dataset. Using native action column."
+            )
+
     def __len__(self):
-        # We need an extra frame to compute the delta for the last action in a sequence
-        return len(self.dataset) - (self.num_steps + 1)
+        # We need an extra frame to compute the delta for the last action in a sequence if not native
+        buffer = 1 if (self.use_virtual_actions and not self.has_native_actions) else 0
+        return len(self.dataset) - (self.num_steps + buffer)
 
     def __getitem__(self, idx):
         """Returns a sequence of frames of length self.num_steps."""
 
         # 1. Handle Episode Boundaries: ensure T+1 steps are in the same episode
-        # (Need T+1 frames to compute T deltas)
+        # (Need T+1 frames to compute T deltas ONLY if not native)
+        buffer = 1 if (self.use_virtual_actions and not self.has_native_actions) else 0
         curr_episode = self.dataset.hf_dataset[idx]["episode_index"]
-        last_episode = self.dataset.hf_dataset[idx + self.num_steps]["episode_index"]
+        last_episode = self.dataset.hf_dataset[idx + self.num_steps + buffer - 1][
+            "episode_index"
+        ]
 
         if curr_episode != last_episode:
-            # Shift the window back so the entire T+1 sequence is within the same episode
+            # Shift the window back so the entire sequence is within the same episode
             idx = idx - self.num_steps
             if idx < 0:
                 idx = 0
@@ -52,35 +63,49 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         # 2. Extract and slice keys
         batch = {}
 
-        # We fetch T+1 states specifically if we need virtual actions
+        # We fetch T+1 states specifically if we need virtual actions ON THE FLY
         state_seq = []
         if (
-            self.use_virtual_actions
+            (self.use_virtual_actions and not self.has_native_actions)
             or "state" in self.keys_to_load
             or "proprio" in self.keys_to_load
         ):
             state_key = self.key_map["state"]
-            for i in range(idx, idx + self.num_steps + 1):
+            # Fetch T+1 if we need to compute deltas
+            fetch_len = (
+                self.num_steps + 1
+                if (self.use_virtual_actions and not self.has_native_actions)
+                else self.num_steps
+            )
+            for i in range(idx, idx + fetch_len):
                 state_seq.append(self.dataset[i][state_key])
             state_seq = torch.stack(state_seq)
 
         for target_key in self.keys_to_load:
-            if target_key == "action" and self.use_virtual_actions:
-                # COMPUTE VIRTUAL ACTIONS: a_t = s_{t+1} - s_t
-                # This ensures the action perfectly explains the visual transition.
+            if (
+                target_key == "action"
+                and self.use_virtual_actions
+                and not self.has_native_actions
+            ):
+                # COMPUTE VIRTUAL ACTIONS ON THE FLY: a_t = s_{t+1} - s_t
                 batch["action"] = state_seq[1:] - state_seq[:-1]
                 continue
 
-            # Standard sequence loading for other keys (pixels, state, etc.)
+            if (target_key == "state" or target_key == "proprio") and len(
+                state_seq
+            ) > 0:
+                # Serve from pre-fetched sequence
+                batch[target_key] = state_seq[: self.num_steps]
+                continue
+
+            # Standard sequence loading for other keys (pixels, or native action)
             source_key = self.key_map.get(target_key, target_key)
             seq = []
             for i in range(idx, idx + self.num_steps):
                 try:
                     val = self.dataset[i][source_key]
                 except Exception as e:
-                    print(
-                        f"⚠️ Warning: Failed to decode frame {i}, falling back to {idx}. Error: {e}"
-                    )
+                    print(f"⚠️ Warning: Failed to decode frame {i}. Error: {e}")
                     val = self.dataset[idx][source_key]
                 seq.append(val)
 
@@ -101,14 +126,19 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         sample_size = min(5000, len(self.dataset))
         data_list = []
 
-        # If computing stats for virtual actions, we must use deltas
-        if col_name == "action" and self.use_virtual_actions:
+        # If computing stats for virtual actions, we must use deltas ONLY IF NOT NATIVE
+        if (
+            col_name == "action"
+            and self.use_virtual_actions
+            and not self.has_native_actions
+        ):
             state_key = self.key_map["state"]
             for i in range(0, sample_size - 1, max(1, sample_size // 1000)):
                 s0 = self.dataset[i][state_key]
                 s1 = self.dataset[i + 1][state_key]
                 data_list.append((s1 - s0).numpy())
         else:
+            # Standard path for scalar columns or native actions
             for i in range(0, sample_size, max(1, sample_size // 1000)):
                 val = self.dataset[i][source_key]
                 data_list.append(val.numpy())
