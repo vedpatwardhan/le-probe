@@ -88,7 +88,8 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
                 and not self.has_native_actions
             ):
                 # COMPUTE VIRTUAL ACTIONS ON THE FLY: a_t = s_{t+1} - s_t
-                batch["action"] = state_seq[1:] - state_seq[:-1]
+                # Slice to 32 to match GR-1 joint DoF and checkpoint size
+                batch["action"] = (state_seq[1:] - state_seq[:-1])[..., :32]
                 continue
 
             if (target_key == "state" or target_key == "proprio") and len(
@@ -136,7 +137,8 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             for i in range(0, sample_size - 1, max(1, sample_size // 1000)):
                 s0 = self.dataset[i][state_key]
                 s1 = self.dataset[i + 1][state_key]
-                data_list.append((s1 - s0).numpy())
+                # Slice to 32 to match GR-1 joint DoF
+                data_list.append((s1 - s0)[:32].numpy())
         else:
             # Standard path for scalar columns or native actions
             for i in range(0, sample_size, max(1, sample_size // 1000)):
@@ -147,6 +149,9 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
 
     def get_dim(self, col_name):
         """Returns the dimensionality of the feature."""
+        if col_name == "action" and self.use_virtual_actions:
+            return 32
+
         source_key = self.key_map.get(col_name, col_name)
         # Pull a single frame to check shape
         sample = self.dataset[0][source_key]
