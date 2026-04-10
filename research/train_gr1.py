@@ -209,6 +209,7 @@ def run(cfg):
     loader_kwargs = dict(cfg.loader)
     if loader_kwargs.get("num_workers", 0) == 0:
         loader_kwargs.pop("prefetch_factor", None)
+        loader_kwargs.pop("persistent_workers", None)
 
     train = torch.utils.data.DataLoader(
         train_set, **loader_kwargs, shuffle=True, drop_last=True, generator=rnd_gen
