@@ -246,8 +246,10 @@ def run(cfg):
     ##       training       ##
     ##########################
 
+    # 📁 LOCAL PERSISTENCE: We save to ./outputs instead of the system cache
+    # to ensure checkpoints are visible in the user's workspace.
     run_id = cfg.get("subdir") or "gr1_official"
-    run_dir = Path(swm.data.utils.get_cache_dir(), run_id)
+    run_dir = Path("./outputs", run_id)
 
     logger = None
     if cfg.wandb.enabled:
@@ -263,7 +265,7 @@ def run(cfg):
     object_dump_callback = ModelObjectCallBack(
         dirpath=run_dir,
         filename=cfg.output_model_name,
-        epoch_interval=1,
+        epoch_interval=cfg.get("save_interval", 1),
     )
 
     # AUTO-BALANCE VALIDATION: If we are in a debug run (limited train batches),
@@ -330,7 +332,7 @@ def run(cfg):
         dirpath=checkpoint_dir,
         filename="gr1-epoch={epoch:02d}-step={step:06d}",
         save_top_k=-1,  # Research mode: Keep all historical saves
-        every_n_epochs=1,
+        every_n_epochs=cfg.get("save_interval", 1),
         save_on_train_epoch_end=True,
         auto_insert_metric_name=False,
     )
