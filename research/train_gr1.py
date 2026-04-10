@@ -1,54 +1,8 @@
-import builtins
-import logging
-import sys
 import os
+import sys
 import time
-from datetime import datetime
-
-
-# --- GLOBAL CONSOLE INSTRUMENTATION ---
-# Consolidated stateful stream wrapper to ensure exactly one timestamp per line
-class TimestampedStream:
-    def __init__(self, original_stream):
-        self.stream = original_stream
-        self.at_start_of_line = True
-
-    def write(self, text):
-        if not text:
-            return
-
-        # If we are starting a new line, add the timestamp
-        if (
-            self.at_start_of_line
-            and text.strip()
-            and not text.startswith("[")
-            and not text.startswith("\r")
-        ):
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            self.stream.write(f"[{ts}] ")
-
-        self.stream.write(text)
-        self.at_start_of_line = text.endswith("\n")
-
-    def flush(self):
-        self.stream.flush()
-
-
-# Apply to both stdout and stderr for total coverage
-sys.stdout = TimestampedStream(sys.stdout)
-sys.stderr = TimestampedStream(sys.stderr)
-
-# Disable basicConfig's own timestamp to avoid duplication with our global wrapper
-logging.basicConfig(
-    format="%(levelname)s: %(message)s",
-    level=logging.INFO,
-    force=True,
-)
-# --------------------------------------
-
 from functools import partial
 from pathlib import Path
-
 import hydra
 import lightning as pl
 import stable_pretraining as spt
@@ -76,33 +30,10 @@ from metrics import MetricsCallback
 
 def lejepa_forward(self, batch, stage, cfg):
     """encode observations, predict next states, compute losses."""
-    t0 = time.time()
-    if hasattr(self, "_step_end_time"):
-        wait_time = t0 - self._step_end_time
-        print(f"📦 Batch received! (Wait Time: {wait_time:.4f}s)")
-    else:
-        print(f"📦 Batch received (First Step)")
     ctx_len = cfg.wm.history_size
     n_preds = cfg.wm.num_preds
 
     # --- ENHANCED DIAGNOSTIC PROBE ---
-    if self.trainer.global_step == 0:
-        px = batch["pixels"]
-        print(f"\n🩺 [STEP 0] DATA HEALTH CHECK:")
-        print(f"  - Pixel Shape:    {px.shape}")
-        print(f"  - Pixel Range:    [{px.min():.2f}, {px.max():.2f}]")
-        print(f"  - Pixel Mean/Var: {px.mean():.4f} / {px.var():.8f}")
-
-        # BATCH UNIQUENESS CHECK
-        if px.shape[0] > 1:
-            px_diff = (px[0] - px[1]).abs().var()
-            act_diff = (batch["action"][0] - batch["action"][1]).abs().var()
-            print(f"  - Batch Variance (Sample 0 vs 1):")
-            print(f"    - Pixel Diff Var:  {px_diff:.8f}")
-            print(f"    - Action Diff Var: {act_diff:.8f}")
-            if px_diff < 1e-8:
-                print("🚨 CRITICAL: BATCH IS CLONED! Sample 0 and 1 are identical.")
-
     # PREPARATION
     # Pixels are already normalized by the dataloader transforms [0, 1] -> ImageNet norm
     pixels = batch["pixels"]
@@ -115,6 +46,21 @@ def lejepa_forward(self, batch, stage, cfg):
     self.last_z = emb.detach()
 
     if self.trainer.global_step == 0:
+        print(f"\n🩺 [STEP 0] DATA HEALTH CHECK:")
+        print(f"  - Pixel Shape:    {pixels.shape}")
+        print(f"  - Pixel Range:    [{pixels.min():.2f}, {pixels.max():.2f}]")
+        print(f"  - Pixel Mean/Var: {pixels.mean():.4f} / {pixels.var():.8f}")
+
+        # BATCH UNIQUENESS CHECK
+        if pixels.shape[0] > 1:
+            px_diff = (pixels[0] - pixels[1]).abs().var()
+            act_diff = (batch["action"][0] - batch["action"][1]).abs().var()
+            print(f"  - Batch Variance (Sample 0 vs 1):")
+            print(f"    - Pixel Diff Var:  {px_diff:.8f}")
+            print(f"    - Action Diff Var: {act_diff:.8f}")
+            if px_diff < 1e-8:
+                print("🚨 CRITICAL: BATCH IS CLONED! Sample 0 and 1 are identical.")
+
         emb_diff = (emb[0] - emb[1]).abs().var() if emb.shape[0] > 1 else 0.0
         print(f"  - Latent Variance:  {emb.var():.8f}")
         print(f"  - Latent Diff Var:  {emb_diff:.8f}")
