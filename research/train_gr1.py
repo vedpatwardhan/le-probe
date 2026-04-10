@@ -162,7 +162,7 @@ def run(cfg):
     print(f"📦 Initializing Data Plugin for: {repo_id}")
 
     # Standard keys to load if not specified in config
-    default_keys = ["observation.state", "observation.images.world_center"]
+    default_keys = ["observation.state", "observation.images.world_center", "action"]
     keys_to_load = cfg.data.get("keys_to_load") or default_keys
 
     dataset = LEWMDataPlugin(
@@ -191,8 +191,11 @@ def run(cfg):
 
             # Update WM dims for the predictor
             col_dim = dataset.get_dim(col)
-            setattr(cfg.wm, f"{col}_dim", col_dim)
-            print(f"📊 Auto-detected {col} dimension: {col_dim}")
+
+            # Clean name for the config: observation.state -> state_dim, action -> action_dim
+            clean_name = col.split(".")[-1]
+            setattr(cfg.wm, f"{clean_name}_dim", col_dim)
+            print(f"📊 Auto-detected {col} dimension ({clean_name}_dim): {col_dim}")
 
     transform = spt.data.transforms.Compose(*transforms)
     dataset.transform = transform
