@@ -23,12 +23,7 @@ sys.path.append(LEWM_ROOT)
 from jepa import JEPA
 from module import ARPredictor, SIGReg
 from gr1_modules import GR1Embedder, GR1MLP
-from utils import (
-    get_column_normalizer,
-    get_img_preprocessor,
-    ModelObjectCallBack,
-    PerformanceProfilerCallback,
-)
+from utils import get_column_normalizer, get_img_preprocessor, ModelObjectCallBack
 from lewm_data_plugin import LEWMDataPlugin
 from metrics import MetricsCallback
 
@@ -270,7 +265,6 @@ def run(cfg):
         print(f"⚖️  Validation capped at {balanced_val} batches per epoch.")
 
     metrics_callback = MetricsCallback(log_every_n_steps=1)
-    profiler_callback = PerformanceProfilerCallback(log_every_n_steps=10)
 
     # 💾 CHECKPOINT PERSISTENCE LOGIC
     # 1. Sanitize the checkpoint path
@@ -309,7 +303,6 @@ def run(cfg):
     all_callbacks = spt_callbacks + [
         object_dump_callback,
         metrics_callback,
-        profiler_callback,
         checkpoint_callback,
     ]
 
