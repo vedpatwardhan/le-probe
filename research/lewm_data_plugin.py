@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import time
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 
@@ -119,11 +120,13 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             )
             for i in range(idx, idx + fetch_len):
                 try:
+                    # Tier 1: Direct fetch
                     state_seq.append(self.dataset[i][state_key])
-                except Exception as e:
-                    print(f"⚠️ Warning: Failed to fetch state at index {i}. Error: {e}")
-                    # Fallback to the first index of the sequence if we can't get this one
-                    state_seq.append(self.dataset[idx][state_key])
+                except Exception:
+                    # Tier 2: Retry once with a fresh attempt (fixes transient resource errors)
+                    time.sleep(0.01)
+                    state_seq.append(self.dataset[i][state_key])
+
             state_seq = torch.stack(state_seq)
 
         # Load all requested keys directly from the dataset
@@ -132,12 +135,12 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             seq = []
             for i in range(idx, idx + self.num_steps):
                 try:
+                    # Tier 1: Direct fetch
                     val = self.dataset[i][source_key]
-                except Exception as e:
-                    print(
-                        f"⚠️ Warning: Failed to decode frame {i} for key {target_key}. Error: {e}"
-                    )
-                    val = self.dataset[idx][source_key]
+                except Exception:
+                    # Tier 2: Retry once (fixes transient resource errors)
+                    time.sleep(0.01)
+                    val = self.dataset[i][source_key]
                 seq.append(val)
 
             batch[target_key] = torch.stack(seq)
