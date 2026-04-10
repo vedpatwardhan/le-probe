@@ -25,11 +25,21 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
 
         # Mapping LeRobot keys to LeWM expected keys
         self.key_map = {
-            "pixels": "observation.images.world_center",
+            "observation.images.world_center": "observation.images.world_center",
+            "observation.state": "observation.state",
             "action": "action",
-            "state": "observation.state",
-            "proprio": "observation.state",
         }
+        # Backward compatibility for legacy aliases
+        self.key_map.update(
+            {
+                "pixels": "observation.images.world_center",
+                "state": "observation.state",
+                "proprio": "observation.state",
+            }
+        )
+
+        self.repo_id = repo_id
+        self.keys_to_load = keys_to_load or list(self.key_map.keys())
 
         # Optimization: Check if 'action' is already native to the dataset
         self.has_native_actions = "action" in self.dataset.hf_dataset.column_names
@@ -37,6 +47,19 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             print(
                 "⚡ Detected pre-calculated actions in dataset. Using native action column."
             )
+
+    @staticmethod
+    def nest_dict(flat_dict):
+        nested_dict = {}
+        for k, v in flat_dict.items():
+            parts = k.split(".")
+            d = nested_dict
+            for part in parts[:-1]:
+                if part not in d:
+                    d[part] = {}
+                d = d[part]
+            d[parts[-1]] = v
+        return nested_dict
 
     def __len__(self):
         # We need an extra frame to compute the delta for the last action in a sequence if not native
@@ -67,10 +90,11 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         state_seq = []
         if (
             (self.use_virtual_actions and not self.has_native_actions)
+            or "observation.state" in self.keys_to_load
             or "state" in self.keys_to_load
             or "proprio" in self.keys_to_load
         ):
-            state_key = self.key_map["state"]
+            state_key = self.key_map["observation.state"]
             # Fetch T+1 if we need to compute deltas
             fetch_len = (
                 self.num_steps + 1
@@ -92,7 +116,7 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
                 batch["action"] = (state_seq[1:] - state_seq[:-1])[..., :32]
                 continue
 
-            if (target_key == "state" or target_key == "proprio") and len(
+            if (target_key in ["observation.state", "state", "proprio"]) and len(
                 state_seq
             ) > 0:
                 # Serve from pre-fetched sequence
@@ -113,10 +137,12 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             batch[target_key] = torch.stack(seq)
 
         # 3. Apply LeWM transforms
+        batch = {k: v for k, v in batch.items() if k in self.keys_to_load}
+        nested_batch = self.nest_dict(batch)
         if self.transform:
-            batch = self.transform(batch)
+            nested_batch = self.transform(nested_batch)
 
-        return batch
+        return nested_batch
 
     def get_col_data(self, col_name):
         """Used by LeWM's get_column_normalizer to compute offline stats."""
