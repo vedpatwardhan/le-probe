@@ -148,13 +148,16 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         final_batch = self.flatten_dict(nested_batch)
 
         # Ensure standard aliases exist for the forward pass in train_gr1.py
-        # We search for the full path in case it was renamed/nested further
+        # We collect aliases in a separate dict to avoid "dictionary changed size during iteration" error.
+        aliases = {}
         for k, v in final_batch.items():
             if "world_center" in k:
-                final_batch["pixels"] = v
+                aliases["pixels"] = v
             if "observation.state" in k or (k == "state"):
-                final_batch["state"] = v
-                final_batch["proprio"] = v
+                aliases["state"] = v
+                aliases["proprio"] = v
+
+        final_batch.update(aliases)
 
         return final_batch
 
