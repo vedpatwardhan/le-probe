@@ -266,7 +266,7 @@ def run(cfg):
     metrics_callback = MetricsCallback(log_every_n_steps=1)
 
     # 💾 CHECKPOINT PERSISTENCE LOGIC
-    # 1. Sanitize the checkpoint path (strip hidden quotes from Hydra/Terminal)
+    # 1. Sanitize the checkpoint path
     ckpt_path_str = cfg.get("ckpt_path")
     if ckpt_path_str:
         ckpt_path_str = ckpt_path_str.strip("\"'")
@@ -285,23 +285,40 @@ def run(cfg):
         auto_insert_metric_name=False,
     )
 
-    # 3. Inject our manual callbacks and settings into the config.
-    # Passing the config dict to Manager allows it to automatically load
-    # the 10+ entry-point callbacks (WandbCheckpoint, CPUOffload, etc.)
-    with open_dict(cfg):
-        cfg.trainer.enable_checkpointing = True
-        cfg.trainer.num_sanity_val_steps = 1
-        cfg.trainer.log_every_n_steps = 1
-        # Manager will combine these with its entry-point callbacks
-        cfg.trainer.callbacks = [
-            object_dump_callback,
-            metrics_callback,
-            checkpoint_callback,
-        ]
-        cfg.trainer.logger = logger  # Ensure our WandB logger is used
+    # 3. 🔍 RESTORE RESEARCH FEATURES
+    # We manually load the 10+ research callbacks that spt.Manager usually adds.
+    # This ensures WandB resumption and CPU offloading work correctly.
+    import pkg_resources
+
+    spt_callbacks = []
+    print("🔖 Research Features: Loading library callbacks...")
+    for entry_point in pkg_resources.iter_entry_points("stablepretraining_callbacks"):
+        try:
+            cb_cls = entry_point.load()
+            spt_callbacks.append(cb_cls())
+            print(f"  ✓ Attached: {entry_point.name}")
+        except Exception as e:
+            print(f"  ❌ Failed to load {entry_point.name}: {e}")
+
+    # Combine Library Callbacks + Our Custom Callbacks
+    all_callbacks = spt_callbacks + [
+        object_dump_callback,
+        metrics_callback,
+        checkpoint_callback,
+    ]
+
+    # 4. Instantiate Trainer directly (Safest way to avoid OmegaConf errors)
+    trainer = pl.Trainer(
+        **cfg.trainer,
+        callbacks=all_callbacks,
+        num_sanity_val_steps=1,
+        logger=logger,
+        log_every_n_steps=1,
+        enable_checkpointing=True,
+    )
 
     manager = spt.Manager(
-        trainer=cfg.trainer,
+        trainer=trainer,
         module=world_model,
         data=data_module,
         ckpt_path=ckpt_path_str,
