@@ -1,5 +1,7 @@
 import os
 import sys
+import time
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
@@ -30,6 +32,12 @@ from metrics import MetricsCallback
 
 def lejepa_forward(self, batch, stage, cfg):
     """encode observations, predict next states, compute losses."""
+    t0 = time.time()
+    if hasattr(self, "_step_end_time"):
+        wait_time = t0 - self._step_end_time
+        print(f"📦 [{datetime.now()}] Batch received! (Wait Time: {wait_time:.4f}s)")
+    else:
+        print(f"📦 [{datetime.now()}] Batch received (First Step)")
     ctx_len = cfg.wm.history_size
     n_preds = cfg.wm.num_preds
 
@@ -91,6 +99,7 @@ def lejepa_forward(self, batch, stage, cfg):
 
     losses_dict = {f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k}
     self.log_dict(losses_dict, on_step=True, sync_dist=True)
+    self._step_end_time = time.time()
     return output
 
 
