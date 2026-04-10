@@ -118,7 +118,11 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             state_seq = self.cached_states[idx : idx + fetch_len]
             batch["observation.state"] = state_seq[: self.num_steps]
             if self.use_virtual_actions and not self.has_native_actions:
-                batch["action"] = state_seq[1:] - state_seq[:-1]
+                # Filter NaNs if any exist in the state signal
+                diff = state_seq[1:] - state_seq[:-1]
+                batch["action"] = torch.where(
+                    torch.isnan(diff), torch.zeros_like(diff), diff
+                )
 
         # Native Actions
         if self.has_native_actions:

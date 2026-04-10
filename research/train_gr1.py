@@ -246,10 +246,21 @@ def run(cfg):
     ##       training       ##
     ##########################
 
+    # 0. Global Seeding
+    pl.seed_everything(cfg.get("seed", 42), workers=True)
+
     # 📁 LOCAL PERSISTENCE: We save to ./outputs instead of the system cache
     # to ensure checkpoints are visible in the user's workspace.
     run_id = cfg.get("subdir") or "gr1_official"
-    run_dir = Path("./outputs", run_id)
+    # Force absolute paths to prevent libraries from re-routing to /root/.stable_worldmodel
+    run_dir = Path("./outputs", run_id).absolute()
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_dir = run_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"📁 Run Directory: {run_dir}")
+    print(f"💾 Checkpoint Directory: {checkpoint_dir}")
 
     logger = None
     if cfg.wandb.enabled:
@@ -258,7 +269,6 @@ def run(cfg):
         logger = WandbLogger(**cfg.wandb.config)
         logger.log_hyperparams(OmegaConf.to_container(cfg))
 
-    run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / "config.yaml", "w") as f:
         OmegaConf.save(cfg, f)
 
@@ -341,14 +351,26 @@ def run(cfg):
     # We manually load the 10+ research callbacks that spt.Manager usually adds.
     # This ensures WandB resumption and CPU offloading work correctly.
     spt_callbacks = []
-    print("🔖 Research Features: Loading library callbacks...")
+    # Selective Filtering: We only keep the metadata and logging callbacks.
+    # We discard SklearnCheckpoint, WandbCheckpoint, and CPUOffloadCallback to stop disk spam and -v1 duplicates.
+    print("🔖 Research Features: Loading essential library callbacks...")
     for entry_point in pkg_resources.iter_entry_points("stablepretraining_callbacks"):
-        try:
-            cb_cls = entry_point.load()
-            spt_callbacks.append(cb_cls())
-            print(f"  ✓ Attached: {entry_point.name}")
-        except Exception as e:
-            print(f"  ❌ Failed to load {entry_point.name}: {e}")
+        if entry_point.name in [
+            "ModuleRegistryCallback",
+            "LoggingCallback",
+            "EnvironmentDumpCallback",
+            "TrainerInfo",
+            "ModuleSummary",
+            "LogUnusedParametersOnce",
+        ]:
+            try:
+                cb_cls = entry_point.load()
+                spt_callbacks.append(cb_cls())
+                print(f"  ✓ Attached (Essential): {entry_point.name}")
+            except Exception:
+                pass
+        else:
+            print(f"  ○ Skipping (Redundant/Aggressive): {entry_point.name}")
 
     # Combine Library Callbacks + Our Custom Callbacks
     all_callbacks = spt_callbacks + [
@@ -360,6 +382,7 @@ def run(cfg):
     # 4. Instantiate Trainer directly (Safest way to avoid OmegaConf errors)
     trainer = pl.Trainer(
         **cfg.trainer,
+        default_root_dir=run_dir,
         callbacks=all_callbacks,
         num_sanity_val_steps=1,
         logger=logger,
@@ -367,10 +390,15 @@ def run(cfg):
         enable_checkpointing=True,
     )
 
-    manager = spt.Manager(
-        trainer=trainer,
-        module=world_model,
-        data=data_module,
+    print(
+        f"📣 Ready to start training. Resuming from: {ckpt_path_str or 'FRESH START'}"
+    )
+
+    # We use the standard Trainer.fit() instead of the library's Manager
+    # to maintain full control over the training loop and checkpoint frequency.
+    trainer.fit(
+        model=world_model,
+        datamodule=data_module,
         ckpt_path=ckpt_path_str,
     )
 

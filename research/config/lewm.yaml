@@ -4,6 +4,7 @@ defaults:
 
 output_model_name: lewm
 subdir: ${hydra:job.id}
+save_interval: 10
 
 num_workers: 8
 train_split: 0.9
@@ -58,7 +59,7 @@ predictor:
 
 loss:
   sigreg:
-    weight: 30.0
+    weight: 1.0
     kwargs:
       knots: 17
       num_proj: 1024
