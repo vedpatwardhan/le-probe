@@ -17,7 +17,12 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         transform=None,
         use_virtual_actions=True,
     ):
-        self.dataset = LeRobotDataset(repo_id, video_backend="pyav")
+        try:
+            self.dataset = LeRobotDataset(repo_id, video_backend="torchcodec")
+            print("⚡ High-speed decoding enabled: Using TorchCodec backend.")
+        except Exception:
+            self.dataset = LeRobotDataset(repo_id, video_backend="pyav")
+            print("⚠️ TorchCodec not available. Falling back to PyAV backend.")
         self.keys_to_load = keys_to_load
         self.num_steps = num_steps
         self.transform = transform
