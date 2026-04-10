@@ -277,12 +277,14 @@ def run(cfg):
         trainer=trainer,
         module=world_model,
         data=data_module,
+        ckpt_path=cfg.get("ckpt_path"),
     )
 
     # 🔗 Warm-start from Pretrained Weights (HF: quentinll/lewm-cube)
     # This seeds the Vision Encoder and Predictor with manipulation "common sense"
     # while allowing the action_encoder to re-initialize for the 32-DoF GR-1.
-    if cfg.get("use_pretrained_cube"):
+    # SKIPPED if resuming from a checkpoint to avoid overwriting robot-specific weights.
+    if cfg.get("use_pretrained_cube") and not cfg.get("ckpt_path"):
         print("📥 Downloading pretrained cube manipulation weights from HF...")
         weights_path = hf_hub_download(
             repo_id="quentinll/lewm-cube", filename="weights.pt"
