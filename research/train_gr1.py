@@ -266,38 +266,45 @@ def run(cfg):
     metrics_callback = MetricsCallback(log_every_n_steps=1)
 
     # 💾 CHECKPOINT PERSISTENCE LOGIC
-    # If resuming, we save to the parent of the checkpoint path (e.g., Drive)
-    # with a versioned filename template to avoid the "overwrite bug".
+    # 1. Sanitize the checkpoint path (strip hidden quotes from Hydra/Terminal)
     ckpt_path_str = cfg.get("ckpt_path")
     if ckpt_path_str:
+        ckpt_path_str = ckpt_path_str.strip("\"'")
         checkpoint_dir = str(Path(ckpt_path_str).parent)
         print(f"📊 PERSISTENCE: Saving subsequent checkpoints to: {checkpoint_dir}")
     else:
-        checkpoint_dir = Path(run_dir / "checkpoints")
+        checkpoint_dir = str(run_dir / "checkpoints")
 
+    # 2. Configure versioned checkpointing
     checkpoint_callback = ModelCheckpoint(
         dirpath=checkpoint_dir,
         filename="gr1-epoch={epoch:02d}-step={step:06d}",
-        save_top_k=-1,  # Research mode: Keep all checkpoints
+        save_top_k=-1,  # Research mode: Keep all historical saves
         every_n_epochs=1,
         save_on_train_epoch_end=True,
         auto_insert_metric_name=False,
     )
 
-    trainer = pl.Trainer(
-        **cfg.trainer,
-        callbacks=[object_dump_callback, metrics_callback, checkpoint_callback],
-        num_sanity_val_steps=1,
-        logger=logger,
-        log_every_n_steps=1,
-        enable_checkpointing=False,  # Managed by our explicit callback
-    )
+    # 3. Inject our manual callbacks and settings into the config.
+    # Passing the config dict to Manager allows it to automatically load
+    # the 10+ entry-point callbacks (WandbCheckpoint, CPUOffload, etc.)
+    with open_dict(cfg):
+        cfg.trainer.enable_checkpointing = True
+        cfg.trainer.num_sanity_val_steps = 1
+        cfg.trainer.log_every_n_steps = 1
+        # Manager will combine these with its entry-point callbacks
+        cfg.trainer.callbacks = [
+            object_dump_callback,
+            metrics_callback,
+            checkpoint_callback,
+        ]
+        cfg.trainer.logger = logger  # Ensure our WandB logger is used
 
     manager = spt.Manager(
-        trainer=trainer,
+        trainer=cfg.trainer,
         module=world_model,
         data=data_module,
-        ckpt_path=cfg.get("ckpt_path"),
+        ckpt_path=ckpt_path_str,
     )
 
     # 🔗 Warm-start from Pretrained Weights (HF: quentinll/lewm-cube)
