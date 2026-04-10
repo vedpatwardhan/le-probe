@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 import lightning as pl
-from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import numpy as np
 import wandb
 import csv
 import os
+import time
 from datetime import datetime
 
 
@@ -121,7 +121,15 @@ class MetricsCallback(pl.Callback):
         }
         self.log_to_csv(csv_data)
 
-        # 5. Console Health Check (Immediate Feedback)
+        # 5. PCA Visualization (Cloud Geometry)
+        if batch_idx % (self.log_every_n_steps * 4) == 0:
+            pca_start = time.time()
+            self.log_pca_to_wandb(z, trainer.current_epoch, batch_idx)
+            pca_duration = time.time() - pca_start
+            if pca_duration > 0.5:
+                print(f"  ⚠️  PCA Plotting took {pca_duration:.3f}s (Blocking GPU!)")
+
+        # 6. Console Health Check (Immediate Feedback)
         if trainer.global_step == 1:
             print("\n" + "=" * 50)
             print("🩺 LEWM INITIAL HEALTH CHECK (STEP 1)")
@@ -144,10 +152,6 @@ class MetricsCallback(pl.Callback):
             else:
                 print("✅ MANIFOLD IS BREATHING: Non-zero variance detected.")
             print("=" * 50 + "\n")
-
-        # 6. PCA Visualization (Cloud Geometry)
-        if batch_idx % (self.log_every_n_steps * 4) == 0:
-            self.log_pca_to_wandb(z, trainer.current_epoch, batch_idx)
 
     @staticmethod
     def compute_latent_diagnostics(z):
@@ -219,19 +223,51 @@ class MetricsCallback(pl.Callback):
         return cos_sim.mean().item()
 
     def log_pca_to_wandb(self, z, epoch, step):
-        """Generates and logs a 2D PCA cloud of the latents."""
-        z_np = z.detach().cpu().float().numpy()
-        if z_np.shape[0] < 2:
-            return  # Need at least 2 points to plot/compare
+        """
+        Generates and logs a 2D PCA cloud of the latents.
+        Uses GPU-accelerated PCA to avoid CPU/Bus bottlenecks.
+        """
+        # z shape: (B, D)
+        if z.shape[0] < 2:
+            return
 
-        pca = PCA(n_components=2)
-        z_2d = pca.fit_transform(z_np)
+        with torch.no_grad():
+            # 1. GPU-Native PCA Calculation
+            z_f32 = z.detach().float()
+            # Mean center the data
+            z_centered = z_f32 - z_f32.mean(dim=0, keepdim=True)
 
+            # Use torch's low-rank PCA implementation (Runs on GPU)
+            # q=2 for 2 principal components
+            try:
+                # V is the right-singular vectors (D x 2)
+                # S is the singular values
+                _, S, V = torch.pca_lowrank(z_centered, q=2)
+
+                # Project the data onto the first 2 principal components
+                z_2d_gpu = torch.matmul(z_centered, V[:, :2])
+
+                # 2. Minimum Data Transfer: Only move the 2D coordinates to CPU
+                z_2d = z_2d_gpu.cpu().numpy()
+
+                # Calculate explained variance for the labels
+                total_var = torch.var(z_centered, dim=0).sum()
+                # singular values to variance: s^2 / (n-1)
+                varexp = (S**2) / (z.shape[0] - 1)
+                ratios = varexp / (total_var + 1e-8)
+                ratio_1, ratio_2 = ratios[0].item(), ratios[1].item()
+
+            except Exception as e:
+                print(f"  ⚠️  GPU PCA failed: {e}. Falling back to simple plot.")
+                z_2d = z_f32[:, :2].cpu().numpy()
+                ratio_1, ratio_2 = 0.0, 0.0
+
+        # 3. Local MATPLOTLIB plotting (still on CPU, but input is tiny now)
         plt.figure(figsize=(6, 6))
         plt.scatter(z_2d[:, 0], z_2d[:, 1], alpha=0.6, c="blue")
         plt.title(f"Latent PCA Cloud (Epoch {epoch}, Step {step})")
-        plt.xlabel(f"PC1 (Var: {pca.explained_variance_ratio_[0]:.2%})")
-        plt.ylabel(f"PC2 (Var: {pca.explained_variance_ratio_[1]:.2%})")
+        plt.xlabel(f"PC1 (Var: {ratio_1:.2%})")
+        plt.ylabel(f"PC2 (Var: {ratio_2:.2%})")
         plt.grid(True)
 
         wandb.log({"visuals/latent_pca": wandb.Image(plt)})

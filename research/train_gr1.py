@@ -13,6 +13,7 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 from omegaconf import OmegaConf, open_dict
 from stable_pretraining.optim.lr_scheduler import LinearWarmupCosineAnnealingLR
+import pkg_resources
 
 # Ensure we can import from the le_wm submodule
 LEWM_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../le_wm"))
@@ -22,7 +23,12 @@ sys.path.append(LEWM_ROOT)
 from jepa import JEPA
 from module import ARPredictor, SIGReg
 from gr1_modules import GR1Embedder, GR1MLP
-from utils import get_column_normalizer, get_img_preprocessor, ModelObjectCallBack
+from utils import (
+    get_column_normalizer,
+    get_img_preprocessor,
+    ModelObjectCallBack,
+    PerformanceProfilerCallback,
+)
 from lewm_data_plugin import LEWMDataPlugin
 from metrics import MetricsCallback
 
@@ -264,6 +270,7 @@ def run(cfg):
         print(f"⚖️  Validation capped at {balanced_val} batches per epoch.")
 
     metrics_callback = MetricsCallback(log_every_n_steps=1)
+    profiler_callback = PerformanceProfilerCallback(log_every_n_steps=10)
 
     # 💾 CHECKPOINT PERSISTENCE LOGIC
     # 1. Sanitize the checkpoint path
@@ -288,8 +295,6 @@ def run(cfg):
     # 3. 🔍 RESTORE RESEARCH FEATURES
     # We manually load the 10+ research callbacks that spt.Manager usually adds.
     # This ensures WandB resumption and CPU offloading work correctly.
-    import pkg_resources
-
     spt_callbacks = []
     print("🔖 Research Features: Loading library callbacks...")
     for entry_point in pkg_resources.iter_entry_points("stablepretraining_callbacks"):
@@ -304,6 +309,7 @@ def run(cfg):
     all_callbacks = spt_callbacks + [
         object_dump_callback,
         metrics_callback,
+        profiler_callback,
         checkpoint_callback,
     ]
 
