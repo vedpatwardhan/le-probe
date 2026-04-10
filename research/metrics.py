@@ -84,10 +84,8 @@ class MetricsCallback(pl.Callback):
 
         # 1. Latent Diagnostics (Rank and Variance)
         # emb shape: (B, T, D)
-        print("Computing latent diagnostics", datetime.now())
         z = outputs["emb"][:, 0, :]  # Use first timestep for analysis
         diagnostics = self.compute_latent_diagnostics(z)
-        print("Latent diagnostics computed", datetime.now())
 
         pl_module.log("research/soft_rank", diagnostics["soft_rank"])
         pl_module.log(
@@ -95,12 +93,10 @@ class MetricsCallback(pl.Callback):
         )
 
         # 2. Path Straightening (Trajectory Linearity)
-        print("Computing path straightening", datetime.now())
         linearity = 1.0
         if outputs["emb"].shape[1] > 1:
             linearity = self.compute_path_straightening(outputs["emb"])
             pl_module.log("research/path_straightening", linearity)
-        print("Path straightening computed", datetime.now())
 
         # 3. Action Signal Metrics
         # batch['action'] shape: (B, T, 32)
@@ -112,7 +108,6 @@ class MetricsCallback(pl.Callback):
         pl_module.log("research/signal_ratio", sig_ratio)
 
         # 4. Persistent CSV Logging
-        print("Logging to CSV", datetime.now())
         csv_data = {
             "step": trainer.global_step,
             "epoch": trainer.current_epoch,
@@ -125,17 +120,14 @@ class MetricsCallback(pl.Callback):
             "singular_values": diagnostics["singular_values"],
         }
         self.log_to_csv(csv_data)
-        print("Logged to CSV", datetime.now())
 
         # 5. PCA Visualization (Cloud Geometry)
-        print("Computing PCA", datetime.now())
         if batch_idx % (self.log_every_n_steps * 4) == 0:
             pca_start = time.time()
             self.log_pca_to_wandb(z, trainer.current_epoch, batch_idx)
             pca_duration = time.time() - pca_start
             if pca_duration > 0.5:
                 print(f"  ⚠️  PCA Plotting took {pca_duration:.3f}s (Blocking GPU!)")
-        print("PCA computed", datetime.now())
 
         # 6. Console Health Check (Immediate Feedback)
         if trainer.global_step == 1:

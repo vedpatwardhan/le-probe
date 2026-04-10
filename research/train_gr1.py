@@ -1,7 +1,49 @@
-import os
+import builtins
+import logging
 import sys
+import os
 import time
 from datetime import datetime
+
+# --- GLOBAL CONSOLE INSTRUMENTATION ---
+# This block must remain at the very top to catch early imports
+logging.basicConfig(
+    format="[%(asctime)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+    force=True,
+)
+
+_original_stdout_write = sys.stdout.write
+_original_print = builtins.print
+
+
+def timestamped_write(text):
+    if text.strip() and not text.startswith("[") and not text.startswith("\r"):
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        return _original_stdout_write(f"[{ts}] {text}")
+    return _original_stdout_write(text)
+
+
+def timestamped_print(*args, **kwargs):
+    if kwargs.get("end", "\n") != "\n" or not args:
+        return _original_print(*args, **kwargs)
+
+    if (
+        args
+        and isinstance(args[0], str)
+        and (args[0].startswith("\r") or args[0].startswith("["))
+    ):
+        return _original_print(*args, **kwargs)
+
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    return _original_print(f"[{ts}]", *args, **kwargs)
+
+
+sys.stdout.write = timestamped_write
+builtins.print = timestamped_print
+# --------------------------------------
+
 from functools import partial
 from pathlib import Path
 
@@ -35,9 +77,9 @@ def lejepa_forward(self, batch, stage, cfg):
     t0 = time.time()
     if hasattr(self, "_step_end_time"):
         wait_time = t0 - self._step_end_time
-        print(f"📦 [{datetime.now()}] Batch received! (Wait Time: {wait_time:.4f}s)")
+        print(f"📦 Batch received! (Wait Time: {wait_time:.4f}s)")
     else:
-        print(f"📦 [{datetime.now()}] Batch received (First Step)")
+        print(f"📦 Batch received (First Step)")
     ctx_len = cfg.wm.history_size
     n_preds = cfg.wm.num_preds
 

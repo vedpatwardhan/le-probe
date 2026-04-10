@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from datetime import datetime
 
 
 class LEWMDataPlugin(torch.utils.data.Dataset):
@@ -96,9 +95,7 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
     def get_col_data(self, col_name):
         """Used by LeWM's get_column_normalizer to compute offline stats."""
         source_key = self.key_map.get(col_name, col_name)
-        print(
-            f"📊 [{datetime.now()}] START Scanning dataset for column: {col_name} (source: {source_key})"
-        )
+        print(f"📊 Scanning dataset for column: {col_name} (source: {source_key})")
 
         # Pull a large sample to compute stable stats.
         sample_size = min(5000, len(self.dataset))
@@ -116,7 +113,6 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
                 val = self.dataset[i][source_key]
                 data_list.append(val.numpy())
 
-        print(f"📊 [{datetime.now()}] END   Scanning dataset for column: {col_name}")
         return np.stack(data_list)
 
     def get_dim(self, col_name):
