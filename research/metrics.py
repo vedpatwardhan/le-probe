@@ -1,10 +1,13 @@
 import torch
 import torch.nn as nn
 import lightning as pl
-from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import numpy as np
 import wandb
+import csv
+import os
+import time
+from datetime import datetime
 
 
 class MetricsCallback(pl.Callback):
@@ -16,10 +19,60 @@ class MetricsCallback(pl.Callback):
     3. Manifold Geometry (PCA Visuals)
     """
 
-    def __init__(self, log_every_n_steps=50, pca_n_samples=256):
+    def __init__(
+        self,
+        log_every_n_steps=50,
+        pca_n_samples=256,
+        csv_path="manifold_diagnostics.csv",
+    ):
         super().__init__()
         self.log_every_n_steps = log_every_n_steps
         self.pca_n_samples = pca_n_samples
+        self.csv_path = csv_path
+        self._init_csv()
+
+    def _init_csv(self):
+        """Initializes the CSV file with headers if it doesn't exist."""
+        if not os.path.exists(self.csv_path):
+            headers = [
+                "timestamp",
+                "step",
+                "epoch",
+                "soft_rank",
+                "participation_ratio",
+                "action_mag",
+                "emb_mag",
+                "signal_ratio",
+                "path_straightening",
+            ]
+            # Add headers for top 10 singular values
+            headers += [f"s_{i}" for i in range(10)]
+            with open(self.csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+
+    def log_to_csv(self, data_dict):
+        """Appends a row of data to the CSV file."""
+        with open(self.csv_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            # Ensure we follow the header order
+            row = [
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                data_dict.get("step", 0),
+                data_dict.get("epoch", 0),
+                f"{data_dict.get('soft_rank', 0):.4f}",
+                f"{data_dict.get('participation_ratio', 0):.4f}",
+                f"{data_dict.get('action_mag', 0):.6f}",
+                f"{data_dict.get('emb_mag', 0):.6f}",
+                f"{data_dict.get('signal_ratio', 0):.4f}",
+                f"{data_dict.get('path_straightening', 0):.4f}",
+            ]
+            # singular values
+            s_vals = data_dict.get("singular_values", [])
+            for i in range(10):
+                val = s_vals[i] if i < len(s_vals) else 0.0
+                row.append(f"{val:.6f}")
+            writer.writerow(row)
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         if batch_idx % self.log_every_n_steps != 0:
@@ -29,44 +82,128 @@ class MetricsCallback(pl.Callback):
         if not isinstance(outputs, dict) or "emb" not in outputs:
             return
 
-        # 1. SoftRank (Effective Rank)
+        # 1. Latent Diagnostics (Rank and Variance)
         # emb shape: (B, T, D)
-        z = outputs["emb"][:, 0, :]  # Use first timestep for rank analysis
-        soft_rank = self.compute_soft_rank(z)
-        pl_module.log("research/soft_rank", soft_rank)
+        z = outputs["emb"][:, 0, :]  # Use first timestep for analysis
+        diagnostics = self.compute_latent_diagnostics(z)
+
+        pl_module.log("research/soft_rank", diagnostics["soft_rank"])
+        pl_module.log(
+            "research/participation_ratio", diagnostics["participation_ratio"]
+        )
 
         # 2. Path Straightening (Trajectory Linearity)
-        # Measures if z_t+1 is 'aligning' in a predictable way
-        if z.shape[0] > 1:
+        linearity = 1.0
+        if outputs["emb"].shape[1] > 1:
             linearity = self.compute_path_straightening(outputs["emb"])
             pl_module.log("research/path_straightening", linearity)
 
-        # 3. PCA Visualization (Cloud Geometry)
+        # 3. Action Signal Metrics
+        # batch['action'] shape: (B, T, 32)
+        act_mag = batch["action"].abs().mean().item()
+        emb_mag = z.abs().mean().item()
+        sig_ratio = act_mag / (emb_mag + 1e-8)
+
+        pl_module.log("research/action_mag", act_mag)
+        pl_module.log("research/signal_ratio", sig_ratio)
+
+        # 4. Persistent CSV Logging
+        csv_data = {
+            "step": trainer.global_step,
+            "epoch": trainer.current_epoch,
+            "soft_rank": diagnostics["soft_rank"],
+            "participation_ratio": diagnostics["participation_ratio"],
+            "action_mag": act_mag,
+            "emb_mag": emb_mag,
+            "signal_ratio": sig_ratio,
+            "path_straightening": linearity,
+            "singular_values": diagnostics["singular_values"],
+        }
+        self.log_to_csv(csv_data)
+
+        # 5. PCA Visualization (Cloud Geometry)
         if batch_idx % (self.log_every_n_steps * 4) == 0:
+            pca_start = time.time()
             self.log_pca_to_wandb(z, trainer.current_epoch, batch_idx)
+            pca_duration = time.time() - pca_start
+            if pca_duration > 0.5:
+                print(f"  ⚠️  PCA Plotting took {pca_duration:.3f}s (Blocking GPU!)")
+
+        # 6. Console Health Check (Immediate Feedback)
+        if trainer.global_step == 1:
+            print("\n" + "=" * 50)
+            print("🩺 LEWM INITIAL HEALTH CHECK (STEP 1)")
+            print(f"  - SoftRank:        {diagnostics['soft_rank']:.4f}")
+            print(f"  - Participation:   {diagnostics['participation_ratio']:.4f}")
+            print(f"  - Action Magnitude: {act_mag:.6f}")
+            print(f"  - Embedding Mag:   {emb_mag:.6f}")
+            print(f"  - Signal Ratio:    {sig_ratio:.4f}")
+            print(
+                f"  - Spectral Gap (S0/S1): {diagnostics['singular_values'][0]/(diagnostics['singular_values'][1]+1e-8):.2f}"
+            )
+
+            if (
+                diagnostics["soft_rank"] < 1.05
+                and diagnostics["singular_values"][1] < 1e-6
+            ):
+                print(
+                    "🚨 ALERT: Model is CURRENTLY COLLAPSED. Monitor SigReg gradients."
+                )
+            else:
+                print("✅ MANIFOLD IS BREATHING: Non-zero variance detected.")
+            print("=" * 50 + "\n")
 
     @staticmethod
-    def compute_soft_rank(z):
-        """Computes the Effective Rank (SoftRank) of a latent batch."""
+    def compute_latent_diagnostics(z):
+        """
+        Performs a single SVD and returns both SoftRank (Entropy)
+        and Participation Ratio in a dictionary.
+        """
         try:
-            # Center the latents: Remove the "mean shift" (DC offset)
-            z_centered = z.detach() - z.detach().mean(dim=0, keepdim=True)
+            # emb: (B, D)
+            if z.shape[0] < 2:
+                return {
+                    "soft_rank": 1.0,
+                    "participation_ratio": 1.0,
+                    "singular_values": [0.0] * 10,
+                }
+
+            # Center the latents (Force float32 for SVD stability)
+            z_f32 = z.detach().float()
+            z_centered = z_f32 - z_f32.mean(dim=0, keepdim=True)
 
             # SVD on the centered latent batch (B, D)
             singular_values = torch.linalg.svdvals(z_centered)
 
-            # Avoid division by zero if all latents are identical/zero
+            # Avoid division by zero
             s_sum = singular_values.sum()
-            if s_sum < 1e-12:
-                return 1.0
+            if s_sum < 1e-16:
+                return {
+                    "soft_rank": 1.0,
+                    "participation_ratio": 1.0,
+                    "singular_values": [0.0] * 10,
+                }
 
-            # Normalize to form a probability distribution (Spectral Entropy)
+            # 1. Spectral Entropy Rank (Diversity focused)
             p = singular_values / s_sum
-            entropy = -torch.sum(p * torch.log(p + 1e-10))
+            entropy = -torch.sum(p * torch.log(p + 1e-12))
+            soft_rank = torch.exp(entropy).item()
 
-            return torch.max(torch.tensor(1.0), torch.exp(entropy)).item()
+            # 2. Participation Ratio Rank (Variance focused)
+            lambdas = singular_values**2
+            pr_rank = (lambdas.sum() ** 2) / (lambdas**2).sum()
+
+            return {
+                "soft_rank": max(1.0, soft_rank),
+                "participation_ratio": max(1.0, pr_rank.item()),
+                "singular_values": singular_values[:10].tolist(),
+            }
         except Exception as e:
-            return 1.0  # Fallback to rank 1 (total collapse)
+            return {
+                "soft_rank": 1.0,
+                "participation_ratio": 1.0,
+                "singular_values": [0.0] * 10,
+            }
 
     @staticmethod
     def compute_path_straightening(emb):
@@ -86,19 +223,51 @@ class MetricsCallback(pl.Callback):
         return cos_sim.mean().item()
 
     def log_pca_to_wandb(self, z, epoch, step):
-        """Generates and logs a 2D PCA cloud of the latents."""
-        z_np = z.detach().cpu().float().numpy()
-        if z_np.shape[0] < 2:
-            return  # Need at least 2 points to plot/compare
+        """
+        Generates and logs a 2D PCA cloud of the latents.
+        Uses GPU-accelerated PCA to avoid CPU/Bus bottlenecks.
+        """
+        # z shape: (B, D)
+        if z.shape[0] < 2:
+            return
 
-        pca = PCA(n_components=2)
-        z_2d = pca.fit_transform(z_np)
+        with torch.no_grad():
+            # 1. GPU-Native PCA Calculation
+            z_f32 = z.detach().float()
+            # Mean center the data
+            z_centered = z_f32 - z_f32.mean(dim=0, keepdim=True)
 
+            # Use torch's low-rank PCA implementation (Runs on GPU)
+            # q=2 for 2 principal components
+            try:
+                # V is the right-singular vectors (D x 2)
+                # S is the singular values
+                _, S, V = torch.pca_lowrank(z_centered, q=2)
+
+                # Project the data onto the first 2 principal components
+                z_2d_gpu = torch.matmul(z_centered, V[:, :2])
+
+                # 2. Minimum Data Transfer: Only move the 2D coordinates to CPU
+                z_2d = z_2d_gpu.cpu().numpy()
+
+                # Calculate explained variance for the labels
+                total_var = torch.var(z_centered, dim=0).sum()
+                # singular values to variance: s^2 / (n-1)
+                varexp = (S**2) / (z.shape[0] - 1)
+                ratios = varexp / (total_var + 1e-8)
+                ratio_1, ratio_2 = ratios[0].item(), ratios[1].item()
+
+            except Exception as e:
+                print(f"  ⚠️  GPU PCA failed: {e}. Falling back to simple plot.")
+                z_2d = z_f32[:, :2].cpu().numpy()
+                ratio_1, ratio_2 = 0.0, 0.0
+
+        # 3. Local MATPLOTLIB plotting (still on CPU, but input is tiny now)
         plt.figure(figsize=(6, 6))
         plt.scatter(z_2d[:, 0], z_2d[:, 1], alpha=0.6, c="blue")
         plt.title(f"Latent PCA Cloud (Epoch {epoch}, Step {step})")
-        plt.xlabel(f"PC1 (Var: {pca.explained_variance_ratio_[0]:.2%})")
-        plt.ylabel(f"PC2 (Var: {pca.explained_variance_ratio_[1]:.2%})")
+        plt.xlabel(f"PC1 (Var: {ratio_1:.2%})")
+        plt.ylabel(f"PC2 (Var: {ratio_2:.2%})")
         plt.grid(True)
 
         wandb.log({"visuals/latent_pca": wandb.Image(plt)})

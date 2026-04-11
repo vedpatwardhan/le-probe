@@ -4,14 +4,16 @@ defaults:
 
 output_model_name: lewm
 subdir: ${hydra:job.id}
+save_interval: 10
 
-num_workers: 6
+num_workers: 8
 train_split: 0.9
 seed: 3072
 img_size: 224
 patch_size: 14
 encoder_scale: tiny
 dump_object: True
+use_pretrained_cube: True
 
 trainer:
   max_epochs: 100
@@ -29,7 +31,7 @@ loader:
 
 optimizer:
   type: AdamW
-  lr: 5e-5
+  lr: 1e-4
   weight_decay: 1e-3
 
 wandb:
@@ -58,7 +60,7 @@ predictor:
 
 loss:
   sigreg:
-    weight: 5.0
+    weight: 0.1
     kwargs:
       knots: 17
       num_proj: 1024
