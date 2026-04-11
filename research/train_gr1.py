@@ -3,6 +3,7 @@ import sys
 import time
 from functools import partial
 from pathlib import Path
+import numpy as np
 import hydra
 import lightning as pl
 import stable_pretraining as spt
@@ -457,7 +458,6 @@ def run(cfg):
             )
 
     print("🚀 Launching GR-1 Official Training Loop...")
-    manager()
     return
 
 
