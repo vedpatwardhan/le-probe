@@ -404,14 +404,6 @@ def run(cfg):
         f"📣 Ready to start training. Resuming from: {ckpt_path_str or 'FRESH START'}"
     )
 
-    # We use the standard Trainer.fit() instead of the library's Manager
-    # to maintain full control over the training loop and checkpoint frequency.
-    trainer.fit(
-        model=world_model,
-        datamodule=data_module,
-        ckpt_path=ckpt_path_str,
-    )
-
     # 🔗 Warm-start from Pretrained Weights (HF: quentinll/lewm-cube)
     # This seeds the Vision Encoder and Predictor with manipulation "common sense"
     # while allowing the action_encoder to re-initialize for the 32-DoF GR-1.
@@ -458,7 +450,13 @@ def run(cfg):
             )
 
     print("🚀 Launching GR-1 Official Training Loop...")
-    return
+    # We use the standard Trainer.fit() instead of the library's Manager
+    # to maintain full control over the training loop and checkpoint frequency.
+    trainer.fit(
+        model=world_model,
+        datamodule=data_module,
+        ckpt_path=ckpt_path_str,
+    )
 
 
 if __name__ == "__main__":
