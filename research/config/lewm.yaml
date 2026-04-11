@@ -13,6 +13,7 @@ img_size: 224
 patch_size: 14
 encoder_scale: tiny
 dump_object: True
+use_pretrained_cube: True
 
 trainer:
   max_epochs: 100
