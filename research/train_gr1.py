@@ -68,10 +68,6 @@ def lejepa_forward(self, batch, stage, cfg):
             print("🚨 ALERT: Latent manifold has zero batch variance.")
         print("---------------------------------\n")
 
-    # SIGReg weight balancing
-    batch_size = actions.shape[0]
-    lambd = cfg.loss.sigreg.weight / batch_size
-
     act_emb = output["act_emb"]
 
     ctx_emb = emb[:, :ctx_len]
@@ -83,9 +79,9 @@ def lejepa_forward(self, batch, stage, cfg):
     # LeWM loss (Force SIGReg to float32 for SVD stability)
     output["pred_loss"] = (pred_emb - tgt_emb).pow(2).mean()
     output["sigreg_loss"] = self.sigreg(emb.float().transpose(0, 1))
-    output["loss"] = output["pred_loss"] + lambd * output["sigreg_loss"].to(
-        output["pred_loss"].dtype
-    )
+    output["loss"] = output["pred_loss"] + cfg.loss.sigreg.weight * output[
+        "sigreg_loss"
+    ].to(output["pred_loss"].dtype)
 
     losses_dict = {f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k}
     self.log_dict(losses_dict, on_step=True, sync_dist=True)
@@ -132,7 +128,20 @@ def run(cfg):
             if "pixels" in col or "images" in col:
                 continue
 
-            normalizer = get_column_normalizer(dataset, col, col)
+            # SAFE NORMALIZATION (Injected locally to avoid submodule edits)
+            # This fix includes a 1e-8 epsilon to prevent NaNs on stationary joints.
+            col_data = dataset.get_col_data(col)
+            data = torch.from_numpy(np.array(col_data))
+            data = data[~torch.isnan(data).any(dim=1)]
+            mean = data.mean(0, keepdim=True).clone()
+            std = data.std(0, keepdim=True).clone()
+
+            def norm_fn(x, m=mean, s=std):
+                return ((x - m) / (s + 1e-8)).float()
+
+            normalizer = spt.data.transforms.WrapTorchTransform(
+                norm_fn, source=col, target=col
+            )
             transforms.append(normalizer)
 
             # Update WM dims for the predictor
