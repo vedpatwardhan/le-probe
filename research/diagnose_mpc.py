@@ -12,6 +12,10 @@ import os
 import sys
 import argparse
 from pathlib import Path
+from huggingface_hub import snapshot_download
+
+# Project Constants
+REPO_ID = "vedpatwardhan/gr1_pickup_processed"
 
 # Add paths for custom modules
 CORTEX_GR1 = Path("/Users/vedpatwardhan/Desktop/cortex-os/cortex-gr1")
@@ -38,11 +42,15 @@ class MockSpace:
         self.shape = shape
 
 
-def run_diagnostic(model_path, dataset_root):
+def run_diagnostic(model_path):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"🔬 Running Batch MPC Latent Diagnostic on {device}...")
+
+    # Mandatory Dataset Download from Hub
+    print(f"☁️ Synchronizing dataset from Hugging Face Hub: {REPO_ID}...")
+    dataset_root = snapshot_download(repo_id=REPO_ID, repo_type="dataset")
+    print(f"✅ Dataset ready at: {dataset_root}")
     print(f"📁 Weights: {model_path}")
-    print(f"📁 Dataset: {dataset_root}")
 
     # 1. Initialize Planning Agent
     agent = GoalMapper(model_path, dataset_root)
@@ -61,7 +69,6 @@ def run_diagnostic(model_path, dataset_root):
     )
 
     # 3. Batch Tuning Loop
-    # We test a spread of episodes to ensure the tuning is robust
     episodes_to_test = [0, 30, 60, 90, 120, 149]
     batch_improvements = []
 
@@ -105,7 +112,7 @@ def run_diagnostic(model_path, dataset_root):
     print(f"   Episodes Tested: {len(episodes_to_test)}")
     print(f"   Average Latent Improvement: {avg_imp:.4f}")
 
-    if avg_imp > 50:  # Threshold for a "Good Tune"
+    if avg_imp > 50:
         print("🚀 VERDICT: MPC Parameters are robust and ready for simulator!")
     else:
         print(
@@ -121,12 +128,6 @@ if __name__ == "__main__":
         default="/Users/vedpatwardhan/Desktop/cortex-os/lewm_baseline/outputs/gr1_prod_v17/checkpoints/gr1-epoch=99-step=005400.ckpt",
         help="Path to the JEPA Oracle checkpoint",
     )
-    parser.add_argument(
-        "--dataset_root",
-        type=str,
-        default="/Users/vedpatwardhan/Desktop/cortex-os/cortex-gr1/datasets/vedpatwardhan/gr1_pickup_processed",
-        help="Path to the processed dataset root",
-    )
     args = parser.parse_args()
 
-    run_diagnostic(args.model_path, args.dataset_root)
+    run_diagnostic(args.model_path)

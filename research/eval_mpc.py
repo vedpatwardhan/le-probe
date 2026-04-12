@@ -16,7 +16,11 @@ import hydra
 from pathlib import Path
 from collections import deque
 from omegaconf import DictConfig
+from huggingface_hub import snapshot_download
 from torchvision.transforms import v2 as transforms
+
+# Project Constants
+REPO_ID = "vedpatwardhan/gr1_pickup_processed"
 
 # Project paths
 CORTEX_GR1 = Path("/Users/vedpatwardhan/Desktop/cortex-os/cortex-gr1")
@@ -39,8 +43,13 @@ class GR1EvalCommander(GR1MuJoCoBase):
         self.cfg = cfg
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
+        # Mandatory Dataset Download from Hub
+        print(f"☁️ Synchronizing dataset from Hugging Face Hub: {REPO_ID}...")
+        dataset_root = snapshot_download(repo_id=REPO_ID, repo_type="dataset")
+        print(f"✅ Dataset ready at: {dataset_root}")
+
         # 1. Initialize Planning Agent
-        self.agent = GoalMapper(cfg.oracle_path, cfg.dataset_root)
+        self.agent = GoalMapper(cfg.oracle_path, dataset_root)
         self.agent.set_goal(episode_idx=0)
 
         # 2. Initialize Solver (The Tuned "Thinking" engine)
@@ -101,7 +110,6 @@ class GR1EvalCommander(GR1MuJoCoBase):
 
         for step in range(max_steps):
             # 1. Perception
-            # Combine history into (1, T, C, H, W)
             pixels_batch = torch.stack(list(self.history), dim=1)  # (1, 3, 3, 224, 224)
             current_state = self.get_state_32()
 
@@ -116,21 +124,15 @@ class GR1EvalCommander(GR1MuJoCoBase):
             print(f"🧠 Step {step:02d}: Planning move...")
             outputs = self.solver.solve(info_dict, init_action=current_action_seq)
 
-            # Receding Horizon: Take only the first action of the imagined sequence
-            best_action_chunk = outputs[
-                "actions"
-            ]  # (B, Horizon, 64) -> We take (1, 1, 32)?
-            # Note: Solver expects 64-dim in config, but we map to 32 joints.
-            # We'll take the first 32 dims of the first step.
+            # Receding Horizon
+            best_action_chunk = outputs["actions"]
             action_32 = best_action_chunk[0, 0, :32].cpu().numpy()
 
             # 3. Execution (The "Body")
             self.process_target_32(action_32)
-            # Use IK to reach the target configuration
-            # In this simple protocol, process_target_32 updates last_target_q
             self.dispatch_action(action_32, self.last_target_q)
 
-            # 4. Update perception for transition
+            # 4. Update perception
             self.history.append(self.get_observation())
 
         print("🏁 Mission Complete.")
