@@ -10,6 +10,7 @@ This script runs the CEM-MPC logic in a vacuum (no MuJoCo simulation). It is use
 
 import os
 import sys
+import argparse
 from pathlib import Path
 
 # Add paths for custom modules
@@ -37,15 +38,14 @@ class MockSpace:
         self.shape = shape
 
 
-def run_diagnostic():
+def run_diagnostic(model_path, dataset_root):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"🔬 Running Batch MPC Latent Diagnostic on {device}...")
-
-    MODEL_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/lewm_baseline/outputs/gr1_prod_v17/checkpoints/gr1-epoch=99-step=005400.ckpt"
-    ROOT = "/Users/vedpatwardhan/Desktop/cortex-os/cortex-gr1/datasets/vedpatwardhan/gr1_pickup_processed"
+    print(f"📁 Weights: {model_path}")
+    print(f"📁 Dataset: {dataset_root}")
 
     # 1. Initialize Planning Agent
-    agent = GoalMapper(MODEL_PATH, ROOT)
+    agent = GoalMapper(model_path, dataset_root)
 
     # 2. Setup Solver
     solver = CEMSolver(
@@ -96,6 +96,10 @@ def run_diagnostic():
         print(f"✅ Ep {ep_idx} Improvement: {improvement:.4f}")
 
     # 4. Final Verdict
+    if not batch_improvements:
+        print("❌ Error: No episodes were successfully tested.")
+        return
+
     avg_imp = sum(batch_improvements) / len(batch_improvements)
     print(f"\n🏁 BATCH VERDICT:")
     print(f"   Episodes Tested: {len(episodes_to_test)}")
@@ -110,4 +114,19 @@ def run_diagnostic():
 
 
 if __name__ == "__main__":
-    run_diagnostic()
+    parser = argparse.ArgumentParser(description="GR-1 MPC Diagnostic Tuner")
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default="/Users/vedpatwardhan/Desktop/cortex-os/lewm_baseline/outputs/gr1_prod_v17/checkpoints/gr1-epoch=99-step=005400.ckpt",
+        help="Path to the JEPA Oracle checkpoint",
+    )
+    parser.add_argument(
+        "--dataset_root",
+        type=str,
+        default="/Users/vedpatwardhan/Desktop/cortex-os/cortex-gr1/datasets/vedpatwardhan/gr1_pickup_processed",
+        help="Path to the processed dataset root",
+    )
+    args = parser.parse_args()
+
+    run_diagnostic(args.model_path, args.dataset_root)
