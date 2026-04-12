@@ -53,9 +53,7 @@ class GoalMapper:
         )
         self.action_encoder = GR1Embedder(input_dim=64, emb_dim=192)
         self.projector = GR1MLP(input_dim=192, output_dim=192, hidden_dim=2048)
-        self.projector_proj = GR1MLP(
-            input_dim=192, output_dim=192, hidden_dim=2048
-        )  # training uses pred_proj
+        self.projector_proj = GR1MLP(input_dim=192, output_dim=192, hidden_dim=2048)
 
         self.model = (
             JEPA(
@@ -107,9 +105,8 @@ class GoalMapper:
     @torch.no_grad()
     def get_cost(self, obs_dict, actions):
         """
-        FAST-PATH MPC COST (Temporally Aligned)
+        FAST-PATH MPC COST (Temporally Aligned & Shape-Stabilized)
         Calculates the distance to the goal latent by rolling out candidate actions.
-        Maintains a sliding window of exactly 3 tokens for latents and actions.
         """
         assert hasattr(self, "goal_latent"), "Goal not set. Call set_goal() first."
 
@@ -121,37 +118,42 @@ class GoalMapper:
             info = self.model.encode({"pixels": pixels})
         else:
             B = pixels.size(0)
-            S = actions.size(1)  # Assumed from solver context
+            S = actions.size(1)
             info = self.model.encode(obs_dict)
 
         init_emb = info["emb"]  # (N, T_history, D)
-        num_candidates = B * S
+        num_candidates = actions.size(0) * actions.size(1)
 
-        # 2. Prepare Action Stream (History + Plan)
-        # We need the actions that lead to/transition the history frames.
-        # obs_dict['action'] usually contains (B, T_history+offset, action_dim)
+        # 2. Robust History Action Extraction
         hist_actions = obs_dict.get("action", None)
         if hist_actions is None:
-            # Fallback to zero'd history actions if not provided
             hist_actions = torch.zeros(B, init_emb.size(1), actions.size(-1)).to(
                 self.device
             )
 
-        # We only need the first T_history actions for alignment
-        hist_actions = hist_actions[:, : init_emb.size(1), :]  # (B, 3, adim)
-        hist_actions = hist_actions.repeat_interleave(S, dim=0)  # (BS, 3, adim)
+        # Stabilize History Action Shapes (4D or 3D)
+        if hist_actions.ndim == 4:
+            # Matches pixels.ndim == 6 path: (B, S, T, D)
+            hist_B, hist_S, hist_T, hist_D = hist_actions.shape
+            hist_actions = rearrange(hist_actions, "b s t d -> (b s) t d")
+            # Slice the time dimension correctly (dim 1)
+            hist_actions = hist_actions[:, : init_emb.size(1), :]
+        else:
+            # Matches standard 3D path: (B, T, D)
+            hist_actions = hist_actions[:, : init_emb.size(1), :]
+            hist_actions = hist_actions.repeat_interleave(S, dim=0)
+
         hist_actions = hist_actions.to(self.device)
 
-        # Candidate actions from solver: (B, S, T_horizon, adim)
+        # 3. Prepare Plan Actions & Concatenate
         plan_actions = actions.view(num_candidates, -1, actions.size(-1)).to(
             self.device
         )
 
-        # Full action stream for the predictor: (BS, 3 + T_horizon, adim)
+        # Full action stream: (num_candidates, 3 + T_horizon, adim)
         all_actions = torch.cat([hist_actions, plan_actions], dim=1)
 
-        # 3. Sliding Window Rollout
-        # Expand latents to match candidates if needed
+        # 4. Sliding Window Rollout
         if init_emb.size(0) == B:
             curr_emb = init_emb.repeat_interleave(S, dim=0)
         else:
@@ -160,30 +162,21 @@ class GoalMapper:
         curr_emb = curr_emb.to(self.device)
 
         T_horizon = actions.size(2)
-        history_size = init_emb.size(1)  # 3
+        history_size = init_emb.size(1)
 
         for t in range(T_horizon):
-            # Window slicing:
-            # We use the current most recent 3 latents
-            # and the 3 actions leading to their transitions/next states.
-            # Step 0: x is emb[0,1,2], c is act[0,1,2]. Predicts emb[3].
-            # Step 1: x is emb[1,2,3], c is act[1,2,3]. Predicts emb[4].
             emb_window = curr_emb[:, -history_size:, :]
             act_window = all_actions[:, t : t + history_size, :]
 
-            # Embed the actions
             act_emb = self.model.action_encoder(act_window)
-
-            # Predict next latent
             pred_emb = self.model.predict(emb_window, act_emb)
 
-            # Append last prediction: (BS, 1, D)
             last_pred = pred_emb[:, -1:, :]
             curr_emb = torch.cat([curr_emb, last_pred], dim=1)
 
-        # 4. Latent Distance (MSE) to cached goal
-        final_latent = curr_emb[:, -1, :]  # (BS, D)
-        goal_vec = self.goal_latent.view(1, -1)  # (1, D)
-        dist = torch.norm(final_latent - goal_vec, dim=-1)  # (BS,)
+        # 5. Latent Distance (MSE) to cached goal
+        final_latent = curr_emb[:, -1, :]
+        goal_vec = self.goal_latent.view(1, -1)
+        dist = torch.norm(final_latent - goal_vec, dim=-1)
 
-        return dist.view(B, S)
+        return dist.view(actions.size(0), actions.size(1))
