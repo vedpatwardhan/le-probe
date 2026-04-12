@@ -39,7 +39,7 @@ class MockSpace:
 
 def run_diagnostic():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"🔬 Running MPC Latent Diagnostic on {device}...")
+    print(f"🔬 Running Batch MPC Latent Diagnostic on {device}...")
 
     MODEL_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/lewm_baseline/outputs/gr1_prod_v17/checkpoints/gr1-epoch=99-step=005400.ckpt"
     ROOT = "/Users/vedpatwardhan/Desktop/cortex-os/cortex-gr1/datasets/vedpatwardhan/gr1_pickup_processed"
@@ -47,15 +47,9 @@ def run_diagnostic():
     # 1. Initialize Planning Agent
     agent = GoalMapper(MODEL_PATH, ROOT)
 
-    # 2. Set Target (Last frame of success episode)
-    success = agent.set_goal(episode_idx=0)
-    if not success:
-        print("❌ Goal pixels not found.")
-        return
-
-    # 3. Solver Setup (Manual Loop for diagnostic)
+    # 2. Setup Solver
     solver = CEMSolver(
-        model=agent,  # Uses the Agent's .get_cost() and .predict()
+        model=agent,
         num_samples=1500,
         var_scale=1.2,
         n_steps=1,
@@ -66,32 +60,53 @@ def run_diagnostic():
         action_space=MockSpace(shape=(1, 64)), n_envs=1, config=MockConfig(horizon=15)
     )
 
-    print("🎬 Generating diagnostic info...")
-    pixels = torch.randn(1, 3, 3, 224, 224).to(device)
+    # 3. Batch Tuning Loop
+    # We test a spread of episodes to ensure the tuning is robust
+    episodes_to_test = [0, 30, 60, 90, 120, 149]
+    batch_improvements = []
 
-    # Note: info_dict needs pixels for context
-    info_dict = {
-        "pixels": pixels,
-        "action": torch.zeros(1, 4, 64).to(device),
-    }
+    print(
+        f"📊 Auditing planning performance across {len(episodes_to_test)} episodes..."
+    )
 
-    print("🎯 Optimizing action sequence (Manual CEM Loops)...")
+    for ep_idx in episodes_to_test:
+        print(f"\n🎬 Testing Episode {ep_idx:03d}:")
+        success = agent.set_goal(episode_idx=ep_idx)
+        if not success:
+            continue
 
-    current_action = None
-    cost_history = []
+        pixels = torch.randn(1, 3, 3, 224, 224).to(device)
+        info_dict = {"pixels": pixels, "action": torch.zeros(1, 4, 64).to(device)}
 
-    for i in range(10):  # 10 high-level iterations
-        outputs = solver.solve(info_dict, init_action=current_action)
-        current_action = outputs["actions"]
-        cost = outputs["costs"][0]
-        cost_history.append(cost)
-        print(f"  Loop {i:02d}: Average Elite Cost = {cost:.6f}")
+        current_action = None
+        start_cost = None
+        end_cost = None
 
-    if cost_history[-1] < cost_history[0]:
-        print("\n✅ SUCCESS: MPC search successfully reduced latent distance.")
-        print(f"   Improvement: {cost_history[0] - cost_history[-1]:.4f}")
+        for i in range(10):
+            outputs = solver.solve(info_dict, init_action=current_action)
+            current_action = outputs["actions"]
+            cost = outputs["costs"][0]
+            if i == 0:
+                start_cost = cost
+            end_cost = cost
+            print(f"  Loop {i}: Cost = {cost:.4f}")
+
+        improvement = start_cost - end_cost
+        batch_improvements.append(improvement)
+        print(f"✅ Ep {ep_idx} Improvement: {improvement:.4f}")
+
+    # 4. Final Verdict
+    avg_imp = sum(batch_improvements) / len(batch_improvements)
+    print(f"\n🏁 BATCH VERDICT:")
+    print(f"   Episodes Tested: {len(episodes_to_test)}")
+    print(f"   Average Latent Improvement: {avg_imp:.4f}")
+
+    if avg_imp > 50:  # Threshold for a "Good Tune"
+        print("🚀 VERDICT: MPC Parameters are robust and ready for simulator!")
     else:
-        print("\n⚠️ WARNING: MPC failed to improve.")
+        print(
+            "⚠️ VERDICT: Optimization is weak. Consider increasing num_samples or var_scale."
+        )
 
 
 if __name__ == "__main__":
