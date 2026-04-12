@@ -1,0 +1,36 @@
+defaults:
+  - solver: gr1_cem
+  - _self_
+
+world:
+  env_name: swm/MuJoCo-GR1-v1 # Assuming this is the environment name
+  num_envs: 1
+  max_episode_steps: 200
+  history_size: 3 # Matches v17 history
+  frame_skip: 1
+
+dataset:
+  stats: gr1_pickup_processed
+  keys_to_cache:
+    - action
+    - state
+
+seed: 42
+oracle_path: "/Users/vedpatwardhan/Desktop/cortex-os/lewm_baseline/outputs/gr1_prod_v17/checkpoints/gr1-epoch=99-step=005400.ckpt"
+dataset_root: "/Users/vedpatwardhan/Desktop/cortex-os/cortex-gr1/datasets/vedpatwardhan/gr1_pickup_processed"
+
+plan_config:
+  horizon: 15
+  receding_horizon: 1
+  action_block: 1 
+
+# Target for manipulation
+target_xyz: [-0.142, 0.268, 0.091] 
+
+eval:
+  num_eval: 1
+  img_size: 224
+  dataset_name: gr1_pickup_processed
+  
+output:
+  filename: mpc_manip_results.txt

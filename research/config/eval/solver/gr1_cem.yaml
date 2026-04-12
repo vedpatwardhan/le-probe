@@ -1,0 +1,10 @@
+_target_: stable_worldmodel.solver.CEMSolver
+model: ???
+batch_size: 1
+num_samples: 1500
+var_scale: 1.2
+n_steps: 30
+topk: 100
+device: "cuda"
+seed: ${seed}
+action_dim: 64
