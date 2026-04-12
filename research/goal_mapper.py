@@ -9,14 +9,19 @@ This class serves as the primary interface for the CEM Solver. It:
 """
 
 import torch
+import sys
 from pathlib import Path
+from torchvision.transforms import v2 as transforms
+
+# Project paths
+# Note: Root and le_wm paths are added by the calling scripts (diagnose/eval)
+
+# Project-specific imports
 import stable_pretraining as spt
 from jepa import JEPA
 from module import ARPredictor
 from gr1_modules import GR1Embedder, GR1MLP
-
-# Project-specific imports
-from research.goal_utils import get_goal_pixels
+from research.goal_utils import get_goal_pixels, get_episode_video_path
 
 
 class GoalMapper:
@@ -30,7 +35,15 @@ class GoalMapper:
         self.dataset_root = Path(dataset_root)
         self.img_size = img_size
 
-        # Initialize Model
+        # Standard JEPA Transform
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize(size=(img_size, img_size)),
+                transforms.Normalize(**spt.data.dataset_stats.ImageNet),
+            ]
+        )
+
+        # Initialize Model Architecture (v17 Hardcoded Abstractions)
         self.encoder = spt.backbone.utils.vit_hf(
             "tiny", patch_size=14, image_size=224, pretrained=False
         )
@@ -59,6 +72,8 @@ class GoalMapper:
             .eval()
         )
 
+        # Load Weights
+        print(f"🧠 Loading Oracle Weights: {Path(model_path).name}")
         checkpoint = torch.load(model_path, map_location=self.device)
         state_dict = checkpoint.get("state_dict", checkpoint)
         new_sd = {k.replace("model.", ""): v for k, v in state_dict.items()}
@@ -70,11 +85,16 @@ class GoalMapper:
         Fetches the success state (last frame) from the dataset and
         stores its latent embedding internally as the planning target.
         """
-        pixels = get_goal_pixels(self.dataset_root, episode_idx, self.img_size)
+        video_path = get_episode_video_path(self.dataset_root, episode_idx)
+        pixels = get_goal_pixels(video_path)
+
         if pixels is None:
             return False
 
-        pixels = pixels.to(self.device)
+        # Preprocess: (3, H, W) -> (1, 1, 3, 224, 224)
+        pixels = self.transform(pixels).to(self.device)
+        pixels = pixels.unsqueeze(0).unsqueeze(0)
+
         info = self.model.encode({"pixels": pixels})
         self.goal_latent = info["emb"]  # (1, 1, D)
         return True
@@ -92,8 +112,10 @@ class GoalMapper:
 
         with torch.no_grad():
             output = self.predict(obs_dict, actions)
-            # Final state latent: (B, D)
+            # Final state latent: (B, D) or (B, T, D)
             last_latent = output["emb"][:, -1, :]
-            # L2 Distance to internal goal latent
-            dist = torch.norm(last_latent - self.goal_latent, dim=-1)
+
+            # Use L2 Distance to internal goal latent
+            # goal_latent is (1, 1, D) -> squash to (D)
+            dist = torch.norm(last_latent - self.goal_latent.view(-1), dim=-1)
             return dist
