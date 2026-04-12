@@ -5,10 +5,13 @@ from jepa import JEPA
 from module import ARPredictor
 from gr1_modules import GR1Embedder, GR1MLP
 
+# Project-specific imports
+from research.goal_utils import get_goal_pixels
+
 
 class GoalMapper:
     """
-    Utility to map 3D task coordinates to World Model latent embeddings.
+    Utility to map task success (last frame of dataset) to World Model latent embeddings.
     Used for Zero-Shot Goal-Conditioned MPC.
     """
 
@@ -52,11 +55,12 @@ class GoalMapper:
         self.model.load_state_dict(new_sd, strict=False)
 
     @torch.no_grad()
-    def set_goal(self, target_xyz):
-        """Finds and stores the goal latent internally."""
-        from research.goal_utils import find_goal_pixels
-
-        pixels = find_goal_pixels(target_xyz, None, self.dataset_root, self.img_size)
+    def set_goal(self, episode_idx=0):
+        """
+        Fetches the success state (last frame) from the dataset and
+        stores its latent embedding internally as the planning target.
+        """
+        pixels = get_goal_pixels(self.dataset_root, episode_idx, self.img_size)
         if pixels is None:
             return False
 

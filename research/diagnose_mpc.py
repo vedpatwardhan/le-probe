@@ -33,13 +33,12 @@ def run_diagnostic():
 
     MODEL_PATH = "/Users/vedpatwardhan/Desktop/cortex-os/lewm_baseline/outputs/gr1_prod_v17/checkpoints/gr1-epoch=99-step=005400.ckpt"
     ROOT = "/Users/vedpatwardhan/Desktop/cortex-os/cortex-gr1/datasets/vedpatwardhan/gr1_pickup_processed"
-    target_xyz = [-0.142, 0.268, 0.091]
 
     # 1. Initialize Planning Agent
     agent = GoalMapper(MODEL_PATH, ROOT)
 
-    # 2. Set Target
-    success = agent.set_goal(target_xyz)
+    # 2. Set Target (Last frame of success episode)
+    success = agent.set_goal(episode_idx=0)
     if not success:
         print("❌ Goal pixels not found.")
         return

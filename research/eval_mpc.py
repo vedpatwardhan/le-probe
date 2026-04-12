@@ -41,8 +41,8 @@ def main(cfg: DictConfig):
     # This encapsulates the model, memory, and prediction logic
     agent = GoalMapper(cfg.oracle_path, cfg.dataset_root)
 
-    # 2. Set the Planning Target
-    success = agent.set_goal(cfg.target_xyz)
+    # 2. Set the Planning Target (Last frame of success episode)
+    success = agent.set_goal(episode_idx=0)
     if not success:
         print("❌ Could not find goal frame in dataset. Exiting.")
         return
