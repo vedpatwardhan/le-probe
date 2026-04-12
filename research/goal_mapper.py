@@ -11,6 +11,7 @@ This class serves as the primary interface for the CEM Solver. It:
 import torch
 import sys
 from pathlib import Path
+from einops import rearrange
 
 # Project-specific imports
 import stable_pretraining as spt
@@ -106,37 +107,43 @@ class GoalMapper:
         """
         FAST-PATH MPC COST
         Calculates the distance to the goal latent by rolling out the candidate actions.
-        Avoids redundant encoding of the goal and initial state.
         """
         assert hasattr(self, "goal_latent"), "Goal not set. Call set_goal() first."
 
-        # 1. Prepare Initial Latent (Current Robot State)
-        # obs_dict['pixels'] should be (B, T, C, H, W)
-        # We only need to encode it ONCE for all candidates
-        # Many solvers pass B=1 for the observation, but S candidates for actions.
-        info = self.model.encode(obs_dict)
-        init_emb = info["emb"]  # (B, T_history, D)
+        # 1. Robust Initial Encoding
+        # Planner might pass (B, T, C, H, W) or (B, S, T, C, H, W)
+        pixels = obs_dict["pixels"]
+
+        # Flatten S dimension if it exists to satisfy JEPA.encode(Batch, Time, ...)
+        if pixels.ndim == 6:
+            B, S, T, C, H, W = pixels.shape
+            pixels = rearrange(pixels, "b s t c h w -> (b s) t c h w")
+            encode_dict = {"pixels": pixels}
+        else:
+            encode_dict = {"pixels": pixels}
+
+        info = self.model.encode(encode_dict)
+        init_emb = info["emb"]  # (N, T_history, D) where N is (B) or (B*S)
 
         # 2. Vectorized Rollout (Fast Path)
-        # actions: (B, S, T_horizon, action_dim)
-        # But le_wm predict expects (B, T, action_dim)
-        # We flatten B and S to process all candidates at once
         B, S, T_horizon, a_dim = actions.shape
-        curr_emb = init_emb.repeat_interleave(S, dim=0)  # (B*S, T_history, D)
-        flat_actions = actions.view(B * S, T_horizon, a_dim)
+        num_candidates = B * S
 
-        # Move inputs to device
+        # If we encoded B samples, we need to expand to S candidates
+        if init_emb.size(0) == B:
+            curr_emb = init_emb.repeat_interleave(S, dim=0)
+        else:
+            curr_emb = init_emb  # Already (B*S, T_history, D)
+
+        flat_actions = actions.view(num_candidates, T_horizon, a_dim)
+
+        # Ensure everything is on the correct device
         curr_emb = curr_emb.to(self.device)
         flat_actions = flat_actions.to(self.device)
 
-        # Autoregressive Prediction Loop (v17 handover logic)
+        # Autoregressive Prediction Loop
         history_size = init_emb.size(1)
         for t in range(T_horizon):
-            # Encode only the action for this step
-            # Note: predictor expects history slice
-            # act_emb needs to be (BS, T, D) for the predictor view
-            # but training uses a simplified single-step prediction for loss.
-            # We follow the standard le_wm rollout pattern:
             act_slice = flat_actions[:, : t + 1, :]
             act_emb = self.model.action_encoder(act_slice)
 
@@ -150,14 +157,10 @@ class GoalMapper:
             curr_emb = torch.cat([curr_emb, last_pred], dim=1)
 
         # 3. Latent Distance (MSE) to cached goal
-        # Comparing the VERY LAST state of the imagined trajectory
-        final_latent = curr_emb[:, -1, :]  # (B*S, D)
+        final_latent = curr_emb[:, -1, :]  # (BS, D)
 
-        # Compute L2 distance to stored goal latent
-        # goal_latent is (1, 1, D) -> rescaled to match BS
+        # goal_latent is (1, 1, D)
         goal_vec = self.goal_latent.view(1, -1)  # (1, D)
+        dist = torch.norm(final_latent - goal_vec, dim=-1)  # (BS,)
 
-        dist = torch.norm(final_latent - goal_vec, dim=-1)  # (B*S,)
-
-        # Reshape cost back to (B, S) for the CEM solver
         return dist.view(B, S)
