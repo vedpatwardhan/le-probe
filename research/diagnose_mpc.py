@@ -59,8 +59,8 @@ def run_diagnostic(model_path):
     # 2. Setup Solver
     solver = CEMSolver(
         model=agent,
-        num_samples=4000,
-        var_scale=2.5,
+        num_samples=8000,
+        var_scale=3.0,
         n_steps=1,
         topk=100,
         device=device,
