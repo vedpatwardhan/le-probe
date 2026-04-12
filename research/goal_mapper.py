@@ -5,7 +5,7 @@ Role: Wrapper for the Oracle World Model and Planning Cost Logic.
 This class serves as the primary interface for the CEM Solver. It:
 1. Loads the v17 Oracle weights and maintains the JEPA model instance.
 2. Manages the "Goal Memory" (encoding success frames once).
-3. Implements high-performance latent rollouts for the MPC cost loop.
+3. Implements high-performance windowed rollouts for the MPC cost loop.
 """
 
 import torch
@@ -53,7 +53,9 @@ class GoalMapper:
         )
         self.action_encoder = GR1Embedder(input_dim=64, emb_dim=192)
         self.projector = GR1MLP(input_dim=192, output_dim=192, hidden_dim=2048)
-        self.predictor_proj = GR1MLP(input_dim=192, output_dim=192, hidden_dim=2048)
+        self.projector_proj = GR1MLP(
+            input_dim=192, output_dim=192, hidden_dim=2048
+        )  # training uses pred_proj
 
         self.model = (
             JEPA(
@@ -61,7 +63,7 @@ class GoalMapper:
                 predictor=self.predictor,
                 action_encoder=self.action_encoder,
                 projector=self.projector,
-                pred_proj=self.predictor_proj,
+                pred_proj=self.projector_proj,
             )
             .to(self.device)
             .eval()
@@ -105,61 +107,82 @@ class GoalMapper:
     @torch.no_grad()
     def get_cost(self, obs_dict, actions):
         """
-        FAST-PATH MPC COST
-        Calculates the distance to the goal latent by rolling out the candidate actions.
+        FAST-PATH MPC COST (Temporally Aligned)
+        Calculates the distance to the goal latent by rolling out candidate actions.
+        Maintains a sliding window of exactly 3 tokens for latents and actions.
         """
         assert hasattr(self, "goal_latent"), "Goal not set. Call set_goal() first."
 
-        # 1. Robust Initial Encoding
-        # Planner might pass (B, T, C, H, W) or (B, S, T, C, H, W)
+        # 1. Robust Observation Encoding
         pixels = obs_dict["pixels"]
-
-        # Flatten S dimension if it exists to satisfy JEPA.encode(Batch, Time, ...)
         if pixels.ndim == 6:
             B, S, T, C, H, W = pixels.shape
             pixels = rearrange(pixels, "b s t c h w -> (b s) t c h w")
-            encode_dict = {"pixels": pixels}
+            info = self.model.encode({"pixels": pixels})
         else:
-            encode_dict = {"pixels": pixels}
+            B = pixels.size(0)
+            S = actions.size(1)  # Assumed from solver context
+            info = self.model.encode(obs_dict)
 
-        info = self.model.encode(encode_dict)
-        init_emb = info["emb"]  # (N, T_history, D) where N is (B) or (B*S)
-
-        # 2. Vectorized Rollout (Fast Path)
-        B, S, T_horizon, a_dim = actions.shape
+        init_emb = info["emb"]  # (N, T_history, D)
         num_candidates = B * S
 
-        # If we encoded B samples, we need to expand to S candidates
+        # 2. Prepare Action Stream (History + Plan)
+        # We need the actions that lead to/transition the history frames.
+        # obs_dict['action'] usually contains (B, T_history+offset, action_dim)
+        hist_actions = obs_dict.get("action", None)
+        if hist_actions is None:
+            # Fallback to zero'd history actions if not provided
+            hist_actions = torch.zeros(B, init_emb.size(1), actions.size(-1)).to(
+                self.device
+            )
+
+        # We only need the first T_history actions for alignment
+        hist_actions = hist_actions[:, : init_emb.size(1), :]  # (B, 3, adim)
+        hist_actions = hist_actions.repeat_interleave(S, dim=0)  # (BS, 3, adim)
+        hist_actions = hist_actions.to(self.device)
+
+        # Candidate actions from solver: (B, S, T_horizon, adim)
+        plan_actions = actions.view(num_candidates, -1, actions.size(-1)).to(
+            self.device
+        )
+
+        # Full action stream for the predictor: (BS, 3 + T_horizon, adim)
+        all_actions = torch.cat([hist_actions, plan_actions], dim=1)
+
+        # 3. Sliding Window Rollout
+        # Expand latents to match candidates if needed
         if init_emb.size(0) == B:
             curr_emb = init_emb.repeat_interleave(S, dim=0)
         else:
-            curr_emb = init_emb  # Already (B*S, T_history, D)
+            curr_emb = init_emb
 
-        flat_actions = actions.view(num_candidates, T_horizon, a_dim)
-
-        # Ensure everything is on the correct device
         curr_emb = curr_emb.to(self.device)
-        flat_actions = flat_actions.to(self.device)
 
-        # Autoregressive Prediction Loop
-        history_size = init_emb.size(1)
+        T_horizon = actions.size(2)
+        history_size = init_emb.size(1)  # 3
+
         for t in range(T_horizon):
-            act_slice = flat_actions[:, : t + 1, :]
-            act_emb = self.model.action_encoder(act_slice)
+            # Window slicing:
+            # We use the current most recent 3 latents
+            # and the 3 actions leading to their transitions/next states.
+            # Step 0: x is emb[0,1,2], c is act[0,1,2]. Predicts emb[3].
+            # Step 1: x is emb[1,2,3], c is act[1,2,3]. Predicts emb[4].
+            emb_window = curr_emb[:, -history_size:, :]
+            act_window = all_actions[:, t : t + history_size, :]
+
+            # Embed the actions
+            act_emb = self.model.action_encoder(act_window)
 
             # Predict next latent
-            pred_emb = self.model.predict(
-                curr_emb[:, -history_size:], act_emb[:, -history_size:]
-            )
+            pred_emb = self.model.predict(emb_window, act_emb)
 
-            # Extract last prediction and append to simulation "memory"
+            # Append last prediction: (BS, 1, D)
             last_pred = pred_emb[:, -1:, :]
             curr_emb = torch.cat([curr_emb, last_pred], dim=1)
 
-        # 3. Latent Distance (MSE) to cached goal
+        # 4. Latent Distance (MSE) to cached goal
         final_latent = curr_emb[:, -1, :]  # (BS, D)
-
-        # goal_latent is (1, 1, D)
         goal_vec = self.goal_latent.view(1, -1)  # (1, D)
         dist = torch.norm(final_latent - goal_vec, dim=-1)  # (BS,)
 
