@@ -6,6 +6,7 @@ Key Features:
 1. Internal History Buffering (maintains the 3-frame sliding window).
 2. Rosetta Mapping (32-dim simulator joints <-> 64-dim dataset manifold).
 3. Calibrated Search (8k samples, 3.0 variance, 10x cost pressure).
+4. Goal Gallery Support (Uses 115KB cache instead of 100GB dataset).
 """
 
 import zmq
@@ -25,16 +26,32 @@ from stable_worldmodel.solver.cem import CEMSolver
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 PORT = 5555
 REPO_ID = "vedpatwardhan/gr1_pickup_processed"
+DEFAULT_GALLERY = "goal_gallery.pth"
 
 
 class LEWMInferenceServer:
-    def __init__(self, model_path, dataset_root=None):
+    def __init__(self, model_path, dataset_root=None, gallery_path=DEFAULT_GALLERY):
         print("--- Initializing Oracle MPC Server ---")
 
-        # 0. Sync Dataset if needed
-        if dataset_root is None or not Path(dataset_root).exists():
-            print(f"☁️ Synchronizing dataset from Hub: {REPO_ID}...")
-            dataset_root = snapshot_download(repo_id=REPO_ID, repo_type="dataset")
+        self.gallery = None
+        gallery_file = Path(gallery_path)
+
+        # 0. Load Goal Gallery (The Optimized Path 🚀)
+        if gallery_file.exists():
+            print(f"💎 Loading Goal Gallery from: {gallery_file}")
+            self.gallery = torch.load(gallery_file, map_location=DEVICE)
+            print(f"✅ Success: {len(self.gallery)} goal latents cached.")
+
+            # If we have a gallery, we don't need the dataset root!
+            if dataset_root is None:
+                dataset_root = "."  # Dummy path to satisfy GoalMapper init
+        else:
+            # 0b. Sync Dataset only if gallery is missing (The Legacy Path ☁️)
+            if dataset_root is None or not Path(dataset_root).exists():
+                print(
+                    f"⚠️ Gallery not found. Fallback: Syncing dataset from Hub: {REPO_ID}..."
+                )
+                dataset_root = snapshot_download(repo_id=REPO_ID, repo_type="dataset")
 
         # 1. Initialize the Tuned Brain
         self.agent = GoalMapper(model_path, dataset_root)
@@ -70,7 +87,6 @@ class LEWMInferenceServer:
 
     def map_model_to_sim_actions(self, actions_64):
         """Translates 64-dim manifold actions back to 32-dim sim joints."""
-        # actions_64: (Horizon, 64)
         horizon = actions_64.shape[0]
         actions_32 = np.zeros((horizon, 32), dtype=np.float32)
 
@@ -93,9 +109,20 @@ class LEWMInferenceServer:
                 message = socket.recv()
                 req = msgpack.unpackb(message, raw=False)
 
+                # Goal Setting Logic
                 if not self.goal_set:
-                    self.agent.set_goal(episode_idx=0)
-                    self.goal_set = True
+                    if self.gallery is not None:
+                        print(
+                            "🎯 Mission Start: Loading goal latent from Gallery [Ep 000]..."
+                        )
+                        self.agent.goal_latent = self.gallery[0].to(DEVICE)
+                        self.goal_set = True
+                    else:
+                        print(
+                            "🎯 Mission Start: Encoding goal frame from Dataset [Ep 000]..."
+                        )
+                        self.agent.set_goal(episode_idx=0)
+                        self.goal_set = True
 
                 def unpack_np(d):
                     return np.frombuffer(d["data"], dtype=d["dtype"]).reshape(
@@ -134,10 +161,9 @@ class LEWMInferenceServer:
                 with torch.inference_mode():
                     planned_actions = self.solver.solve(info_dict)
 
-                best_plan_64 = planned_actions[0].cpu().numpy()  # (15, 64)
+                best_plan_64 = planned_actions[0].cpu().numpy()
                 plan_time = time.time() - start_time
 
-                # Map back to 32-dim for the simulator
                 best_plan_32 = self.map_model_to_sim_actions(best_plan_64)
 
                 self.history["actions"].append(best_plan_64[0])
@@ -163,7 +189,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--dataset", type=str, default=None)
+    parser.add_argument("--gallery", type=str, default=DEFAULT_GALLERY)
     args = parser.parse_args()
 
-    server = LEWMInferenceServer(args.model, args.dataset)
+    server = LEWMInferenceServer(args.model, args.dataset, args.gallery)
     server.run()
