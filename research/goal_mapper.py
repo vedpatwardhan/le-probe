@@ -55,19 +55,34 @@ class GoalMapper:
         self.model.load_state_dict(new_sd, strict=False)
 
     @torch.no_grad()
-    def find_goal_latent(self, target_xyz):
-        """
-        1. Find a frame in the dataset where the cube is at target_xyz.
-        2. Encode that frame to get the goal latent z_goal.
-        """
+    def set_goal(self, target_xyz):
+        """Finds and stores the goal latent internally."""
         from research.goal_utils import find_goal_pixels
 
         pixels = find_goal_pixels(target_xyz, None, self.dataset_root, self.img_size)
         if pixels is None:
-            return None
+            return False
 
         pixels = pixels.to(self.device)
-        # JEPA.encode expects dict with 'pixels'
-        # shape (B, T, C, H, W) -> (1, 1, 3, 224, 224)
         info = self.model.encode({"pixels": pixels})
-        return info["emb"]  # (1, 1, D)
+        self.goal_latent = info["emb"]  # (1, 1, D)
+        return True
+
+    def predict(self, *args, **kwargs):
+        """Proxy to the internal World Model's prediction logic."""
+        return self.model.predict(*args, **kwargs)
+
+    def get_cost(self, obs_dict, actions):
+        """
+        Calculates the latent distance between the final state of an imagined
+        trajectory and the stored goal.
+        """
+        assert hasattr(self, "goal_latent"), "Goal not set. Call set_goal() first."
+
+        with torch.no_grad():
+            output = self.predict(obs_dict, actions)
+            # Final state latent: (B, D)
+            last_latent = output["emb"][:, -1, :]
+            # L2 Distance to internal goal latent
+            dist = torch.norm(last_latent - self.goal_latent, dim=-1)
+            return dist
