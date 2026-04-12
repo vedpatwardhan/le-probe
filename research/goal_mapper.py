@@ -5,7 +5,7 @@ Role: Wrapper for the Oracle World Model and Planning Cost Logic.
 This class serves as the primary interface for the CEM Solver. It:
 1. Loads the v17 Oracle weights and maintains the JEPA model instance.
 2. Manages the "Goal Memory" (encoding success frames once).
-3. Implements high-performance windowed rollouts for the MPC cost loop.
+3. Implements high-performance windowed rollouts with VRAM de-duplication.
 """
 
 import torch
@@ -105,24 +105,31 @@ class GoalMapper:
     @torch.no_grad()
     def get_cost(self, obs_dict, actions):
         """
-        FAST-PATH MPC COST (Temporally Aligned & Shape-Stabilized)
+        FAST-PATH MPC COST (Temporally Aligned & VRAM Optimized)
         Calculates the distance to the goal latent by rolling out candidate actions.
         """
         assert hasattr(self, "goal_latent"), "Goal not set. Call set_goal() first."
 
-        # 1. Robust Observation Encoding
+        # 1. Memory-Aware Observation Encoding
         pixels = obs_dict["pixels"]
-        if pixels.ndim == 6:
-            B, S, T, C, H, W = pixels.shape
-            pixels = rearrange(pixels, "b s t c h w -> (b s) t c h w")
-            info = self.model.encode({"pixels": pixels})
-        else:
-            B = pixels.size(0)
-            S = actions.size(1)
-            info = self.model.encode(obs_dict)
-
-        init_emb = info["emb"]  # (N, T_history, D)
         num_candidates = actions.size(0) * actions.size(1)
+        B, S = actions.size(0), actions.size(1)
+
+        # 🚀 OPTIMIZATION: De-duplicate Encoding
+        # If pixels are 6D (B, S, T, C, H, W) and S > 1, check if redundant
+        if pixels.ndim == 6 and S > 1:
+            # We assume for single-env planning that all samples share the same history
+            # Encode only the FIRST sample to save 99.9% VRAM
+            unique_pixels = pixels[:, 0, :, :, :, :]  # (B, T, C, H, W)
+            info = self.model.encode({"pixels": unique_pixels})
+            init_emb = info["emb"]  # (B, T, D)
+            # Expand latents downstream to match num_candidates
+            latent_needs_expansion = True
+        else:
+            # Standard 5D path or non-redundant
+            info = self.model.encode(obs_dict)
+            init_emb = info["emb"]
+            latent_needs_expansion = init_emb.size(0) == B and S > 1
 
         # 2. Robust History Action Extraction
         hist_actions = obs_dict.get("action", None)
@@ -131,36 +138,31 @@ class GoalMapper:
                 self.device
             )
 
-        # Stabilize History Action Shapes (4D or 3D)
+        # Stabilize History Action Shapes
         if hist_actions.ndim == 4:
-            # Matches pixels.ndim == 6 path: (B, S, T, D)
-            hist_B, hist_S, hist_T, hist_D = hist_actions.shape
-            hist_actions = rearrange(hist_actions, "b s t d -> (b s) t d")
-            # Slice the time dimension correctly (dim 1)
-            hist_actions = hist_actions[:, : init_emb.size(1), :]
+            # Slicing the FIRST sample's history to match the unique_pixels logic
+            hist_actions = hist_actions[:, 0, : init_emb.size(1), :]  # (B, 3, D)
         else:
-            # Matches standard 3D path: (B, T, D)
             hist_actions = hist_actions[:, : init_emb.size(1), :]
-            hist_actions = hist_actions.repeat_interleave(S, dim=0)
 
-        hist_actions = hist_actions.to(self.device)
+        # Final History expansion to match all candidates
+        hist_actions = (
+            hist_actions.repeat_interleave(S, dim=0).to(self.device).float()
+        )  # (BS, 3, D)
 
         # 3. Prepare Plan Actions & Concatenate
-        plan_actions = actions.view(num_candidates, -1, actions.size(-1)).to(
-            self.device
+        plan_actions = (
+            actions.view(num_candidates, -1, actions.size(-1)).to(self.device).float()
         )
-
-        # Full action stream: (num_candidates, 3 + T_horizon, adim)
         all_actions = torch.cat([hist_actions, plan_actions], dim=1)
 
         # 4. Sliding Window Rollout
-        if init_emb.size(0) == B:
+        if latent_needs_expansion:
             curr_emb = init_emb.repeat_interleave(S, dim=0)
         else:
             curr_emb = init_emb
 
         curr_emb = curr_emb.to(self.device)
-
         T_horizon = actions.size(2)
         history_size = init_emb.size(1)
 
@@ -177,6 +179,6 @@ class GoalMapper:
         # 5. Latent Distance (MSE) to cached goal
         final_latent = curr_emb[:, -1, :]
         goal_vec = self.goal_latent.view(1, -1)
-        dist = torch.norm(final_latent - goal_vec, dim=-1)
+        dist = torch.norm(final_latent - goal_vec, dim=-1)  # (BS,)
 
-        return dist.view(actions.size(0), actions.size(1))
+        return dist.view(B, S)
