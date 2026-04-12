@@ -21,6 +21,17 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 PORT = 5555
 
 
+class MockConfig:
+    def __init__(self, horizon):
+        self.horizon = horizon
+        self.action_block = 1
+
+
+class MockSpace:
+    def __init__(self, shape):
+        self.shape = shape
+
+
 class LEWMInferenceServer:
     def __init__(self, model_path, gallery_path="goal_gallery.pth"):
         print("--- Initializing Oracle MPC Server (Gallery Only) ---")
@@ -48,7 +59,9 @@ class LEWMInferenceServer:
             topk=100,
             device=DEVICE,
         )
-        self.solver.configure(horizon=15)
+        self.solver.configure(
+            action_space=MockSpace(shape=(1, 64)), n_envs=1, config=MockConfig(horizon=15)
+        )
 
         # 4. State Buffering
         self.history = {"pixels": [], "actions": []}

@@ -24,6 +24,7 @@ from stable_worldmodel.solver import CEMSolver
 class MockConfig:
     def __init__(self, horizon):
         self.horizon = horizon
+        self.action_block = 1
 
 
 class MockSpace:
