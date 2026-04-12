@@ -9,7 +9,9 @@ import sys
 import argparse
 import torch
 import time
+import numpy as np
 from pathlib import Path
+from tqdm import tqdm
 
 # Project paths
 RESEARCH_DIR = Path(__file__).parent.absolute()
@@ -32,7 +34,7 @@ class MockSpace:
         self.shape = shape
 
 
-def run_diagnostic(model_path, gallery_path="goal_gallery.pth"):
+def run_diagnostic(model_path, gallery_path="goal_gallery.pth", batch_size=10):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"🔬 Running Full-Spectrum Diagnostic on {device}...")
 
@@ -41,67 +43,87 @@ def run_diagnostic(model_path, gallery_path="goal_gallery.pth"):
         print(
             "💡 Please run 'python research/harvest_goals.py' first to generate the artifact."
         )
-        return
+    print(f"🔬 Running Vectorized Audit on {device}...")
 
-    # 1. Load Universal Gallery
-    print(f"💎 Loading Gallery: {gallery_path}")
+    # 1. Load Gallery
     gallery = torch.load(gallery_path, map_location=device)
-    episodes_to_test = sorted(list(gallery["goals"].keys()))
-    print(f"📈 Found {len(episodes_to_test)} episodes. Starting full sweep...")
+    goal_ids = list(gallery["diagnostics"].keys())
+    num_episodes = len(goal_ids)
+    print(f"📈 Found {num_episodes} episodes. Auditing in batches of {batch_size}...")
 
-    # 2. Initialize Planning Agent (Gallery Mode)
-    # We use a dummy dataset root because the gallery has everything
-    agent = GoalMapper(model_path, dataset_root=".")
-
-    # 3. Setup Solver (8k/3.0 Config)
+    # 2. Setup Vectorized Agent & Solver
+    mapper = GoalMapper(model_path, dataset_root=".")
     solver = CEMSolver(
-        model=agent, num_samples=8000, var_scale=3.0, n_steps=1, topk=100, device=device
+        model=mapper,
+        num_samples=8000,
+        var_scale=3.0,
+        n_steps=1,
+        topk=100,
+        device=device,
     )
     solver.configure(
-        action_space=MockSpace(shape=(1, 64)), n_envs=1, config=MockConfig(horizon=15)
+        action_space=MockSpace(shape=(1, 64)),
+        n_envs=batch_size,
+        config=MockConfig(horizon=15),
     )
 
-    batch_improvements = []
+    improvements = []
 
-    # 4. Sequential Audit (All episodes)
-    for ep_idx in episodes_to_test:
-        print(f"\n🎬 Testing Episode {ep_idx:03d}/{len(episodes_to_test)-1}:")
+    # 3. Batch Audit Loop
+    for i in tqdm(range(0, num_episodes, batch_size), desc="Audit Batches"):
+        batch_ids = goal_ids[i : i + batch_size]
+        actual_batch_size = len(batch_ids)
 
-        # Load Cached Test Case
-        agent.goal_latent = gallery["goals"][ep_idx].to(device)
-        pixels = gallery["diagnostics"][ep_idx]["pixels"].to(device).unsqueeze(0)
-        actions = gallery["diagnostics"][ep_idx]["action"].to(device).unsqueeze(0)
+        if actual_batch_size != batch_size:
+            solver.configure(
+                action_space=MockSpace(shape=(1, 64)),
+                n_envs=actual_batch_size,
+                config=MockConfig(horizon=15),
+            )
 
-        info_dict = {"pixels": pixels, "action": actions}
-        current_action = None
-        start_cost, end_cost = None, None
+        # A. Prepare Observation Batch
+        pixel_list = []
+        latent_list = []
+        for eid in batch_ids:
+            pixel_list.append(gallery["diagnostics"][eid]["pixels"])
+            latent_list.append(gallery["goals"][eid])
 
-        for i in range(10):
-            outputs = solver.solve(info_dict, init_action=current_action)
-            current_action = outputs["actions"]
-            cost = outputs["costs"][0]
-            if i == 0:
-                start_cost = cost
-            end_cost = cost
-            print(f"  Loop {i}: Cost = {cost:.4f}")
+        # Pixels: (B, 3, 3, 224, 224), Latents: (B, 1, 192)
+        info_dict = {"pixels": torch.stack(pixel_list).to(device)}
+        mapper.goal_latent = torch.stack(latent_list).to(device)
 
-        improvement = start_cost - end_cost
-        batch_improvements.append(improvement)
-        print(f"✅ Ep {ep_idx} Improvement: {improvement:.4f}")
+        # B. Initial Cost (Current observations vs Goal)
+        with torch.no_grad():
+            initial_cost = mapper.get_cost(
+                info_dict, torch.zeros(actual_batch_size, 1, 15, 64).to(device)
+            )
 
-    # 5. Global Verdict
-    avg_imp = sum(batch_improvements) / len(batch_improvements)
-    print(f"\n🏁 FINAL SWEEP VERDICT (n={len(episodes_to_test)}):")
-    print(f"   Average Latent Improvement: {avg_imp:.4f}")
+        # C. Vectorized Planning
+        outputs = solver.solve(info_dict, init_action=None)
+        final_cost = torch.tensor(outputs["costs"]).to(device)
+
+        # D. Improvement (B, S) -> (B,)
+        imp = (initial_cost.view(-1) - final_cost.view(-1)).cpu().numpy()
+        improvements.extend(imp.tolist())
+
+    # 4. Final Verdict
+    avg_imp = np.mean(improvements)
+    print(f"\n🏁 FULL SWEEP VERDICT:")
+    print(f"   Episodes Audited: {len(improvements)}")
+    print(f"   Avg Latent Improvement: {avg_imp:.4f}")
+
     if avg_imp > 50.0:
-        print("🚀 VERDICT: MPC Parameters are robust across the entire dataset!")
+        print("🚀 VERDICT: MPC Parameters are robust and ready for simulator!")
+    elif avg_imp > 20.0:
+        print("⚠️ VERDICT: MPC is functional but cost sharpening may be needed.")
     else:
-        print("⚠️ VERDICT: Weak optimization detected in the global average.")
+        print("❌ VERDICT: Planning failed to improve over initial state.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--gallery", type=str, default="goal_gallery.pth")
+    parser.add_argument("--batch", type=int, default=10)
     args = parser.parse_args()
-    run_diagnostic(args.model, args.gallery)
+    run_diagnostic(args.model, args.gallery, args.batch)

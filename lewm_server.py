@@ -50,7 +50,14 @@ class LEWMInferenceServer:
         # 2. Initialize Brain (Gallery doesn't need data root)
         self.agent = GoalMapper(model_path, dataset_root=".")
 
-        # 3. Setup Calibrated Solver (8k Samples)
+        # 3. Load Entire Gallery into Brain (Omni-Goal mode)
+        goal_list = [
+            self.gallery["goals"][eid] for eid in sorted(self.gallery["goals"].keys())
+        ]
+        self.agent.goal_latent = torch.stack(goal_list).to(DEVICE)
+        print(f"🚀 Brain Prime: Loaded all {len(goal_list)} goals for Omni-MPC.")
+
+        # 4. Setup Calibrated Solver (8k Samples)
         self.solver = CEMSolver(
             model=self.agent,
             num_samples=8000,
@@ -60,12 +67,13 @@ class LEWMInferenceServer:
             device=DEVICE,
         )
         self.solver.configure(
-            action_space=MockSpace(shape=(1, 64)), n_envs=1, config=MockConfig(horizon=15)
+            action_space=MockSpace(shape=(1, 64)),
+            n_envs=1,
+            config=MockConfig(horizon=15),
         )
 
-        # 4. State Buffering
+        # 5. State Buffering
         self.history = {"pixels": [], "actions": []}
-        self.goal_set = False
 
     def map_sim_to_model_state(self, state_32):
         state_full = np.zeros(64, dtype=np.float32)
@@ -98,17 +106,6 @@ class LEWMInferenceServer:
             try:
                 message = socket.recv()
                 req = msgpack.unpackb(message, raw=False)
-
-                # Set Goal from Gallery
-                if not self.goal_set:
-                    # In this version, we default to Ep 000.
-                    # You can easily update this to take an 'episode_idx' from the 'req'.
-                    target_id = req.get("goal_id", 0)
-                    print(
-                        f"🎯 Mission Start: Loading Goal from Gallery [Ep {target_id}]..."
-                    )
-                    self.agent.goal_latent = self.gallery["goals"][target_id].to(DEVICE)
-                    self.goal_set = True
 
                 def unpack_np(d):
                     return np.frombuffer(d["data"], dtype=d["dtype"]).reshape(

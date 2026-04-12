@@ -47,8 +47,8 @@ class GR1LEWMClient(GR1MuJoCoBase):
             "world_center": pack_np(img),
         }
 
-    def run(self, instruction="Pick up the red cube", max_steps=100):
-        print(f"🚀 Starting MPC Mission: '{instruction}'")
+    def run(self, instruction="Pick up the red cube", max_steps=1000):
+        print(f"🚀 Starting Omni-MPC Autonomous Mission: '{instruction}'")
 
         step_idx = 0
         while step_idx < max_steps:
@@ -56,7 +56,9 @@ class GR1LEWMClient(GR1MuJoCoBase):
             obs_payload = self.capture_observation(instruction)
 
             # 2. Planning (Requesting the next optimized chunk)
-            print(f"[{time.strftime('%H:%M:%S')}] 🧠 Requesting MPC Plan...")
+            print(
+                f"[{time.strftime('%H:%M:%S')}] 🧠 Requesting MPC Plan (Universal Gallery)..."
+            )
             try:
                 self.client.send(msgpack.packb(obs_payload, use_bin_type=True))
                 resp = msgpack.unpackb(self.client.recv(), raw=False)

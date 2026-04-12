@@ -174,10 +174,27 @@ class GoalMapper:
             last_pred = pred_emb[:, -1:, :]
             curr_emb = torch.cat([curr_emb, last_pred], dim=1)
 
-        # 5. Latent Distance (MSE) to cached goal
-        final_latent = curr_emb[:, -1, :]
-        goal_vec = self.goal_latent.view(1, -1)
-        dist = torch.norm(final_latent - goal_vec, dim=-1)  # (BS,)
+        # 5. Latent Distance (MSE) to Gallery
+        final_latent = curr_emb[:, -1, :]  # (BS, D)
+        D = self.goal_latent.size(-1)
+        goal_latents = self.goal_latent.view(-1, D)  # (G, D)
+        num_goals = goal_latents.size(0)
+
+        if num_goals > 1 and B == 1:
+            # 🚀 OMNI-GOAL MODE (Production Utility)
+            # Calculate distance to ALL goals and take the minimum (BS, G) -> (BS,)
+            # BS is num_candidates here
+            diff = final_latent.unsqueeze(1) - goal_latents.unsqueeze(0)  # (BS, G, D)
+            dist = torch.norm(diff, dim=-1).min(dim=-1).values  # (BS,)
+        elif num_goals == B and B > 1:
+            # 🎯 TARGETED BATCH MODE (Vectorized Audit)
+            # Expand (B, D) -> (BS, D) for 1-to-1 mapping
+            goal_vec = goal_latents.repeat_interleave(S, dim=0)
+            dist = torch.norm(final_latent - goal_vec, dim=-1)
+        else:
+            # SINGLE-GOAL MODE (Standard MPC fallback)
+            goal_vec = goal_latents[0:1]  # Use first available goal
+            dist = torch.norm(final_latent - goal_vec, dim=-1)  # (BS,)
 
         # 🎯 CALIBRATION: Scale cost to satisfy diagnostic pressure
         return dist.view(B, S) * 10.0
