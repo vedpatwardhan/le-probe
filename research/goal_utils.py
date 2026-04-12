@@ -9,8 +9,6 @@ This script handles the 'Visual Memory' of the agent. It:
 """
 
 from pathlib import Path
-import torch
-from torchvision.transforms import v2 as transforms
 
 # Try to import torchcodec for high-performance AV1 decoding
 try:

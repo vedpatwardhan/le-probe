@@ -9,9 +9,7 @@ This class serves as the primary interface for the CEM Solver. It:
 """
 
 import torch
-import sys
 from pathlib import Path
-from einops import rearrange
 
 # Project-specific imports
 import stable_pretraining as spt
