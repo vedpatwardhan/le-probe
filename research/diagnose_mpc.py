@@ -17,10 +17,11 @@ from huggingface_hub import snapshot_download
 # Project Constants
 REPO_ID = "vedpatwardhan/gr1_pickup_processed"
 
-# Add paths for custom modules
-CORTEX_GR1 = Path("/Users/vedpatwardhan/Desktop/cortex-os/cortex-gr1")
+# Resolve project paths dynamically
+RESEARCH_DIR = Path(__file__).parent.absolute()
+CORTEX_GR1 = RESEARCH_DIR.parent
+sys.path.append(str(CORTEX_GR1))
 sys.path.append(str(CORTEX_GR1 / "le_wm"))
-sys.path.append(str(CORTEX_GR1 / "research"))
 
 # Setup headless MuJoCo
 os.environ["MUJOCO_GL"] = "egl"
