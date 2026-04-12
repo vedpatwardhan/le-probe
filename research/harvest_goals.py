@@ -1,7 +1,7 @@
 """
-GOAL & DIAGNOSTIC HARVESTER
-Role: Pre-calculates latent embeddings and diagnostic test cases.
-Output: goal_gallery.pth (~5-10 MB with pixels)
+FULL SPECTRUM HARVESTER
+Role: Distills the entire dataset (150+ episodes) into a single Diagnostic Gallery.
+Output: goal_gallery.pth (~350MB)
 """
 
 import torch
@@ -10,66 +10,55 @@ import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 
-# Local imports
 from research.goal_mapper import GoalMapper
 from research.goal_utils import get_episode_video_path, extract_frame_at_index
-
-DIAGNOSTIC_EPISODES = [0, 30, 60, 90, 120, 149]
 
 
 def harvest(model_path, dataset_root, output_path):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"🎬 Starting Comprehensive Harvest on {device}...")
+    print(f"🎬 Starting Full Spectrum Harvest (All Episodes) on {device}...")
 
     mapper = GoalMapper(model_path, dataset_root)
     gallery = {
         "goals": {},  # {id: goal_latent}
-        "diagnostics": {},  # {id: {pixels: T,3,H,W, action: T,ADIM}}
+        "diagnostics": {},  # {id: {pixels: 3,3,224,224, action: 4,64}}
     }
 
-    for i in tqdm(range(500), desc="Harvesting Episodes"):
+    # Iterate through every episode in the dataset
+    for i in tqdm(range(2000), desc="Harvesting Dataset Context"):
         try:
-            # 1. Always Harvest the Goal Latent
+            # 1. Capture the Goal State
             success = mapper.set_goal(episode_idx=i)
             if not success:
-                print(f"\n⏹️ Reached end of dataset at episode {i}")
+                print(f"\n⏹️ End of dataset reached at index {i}")
                 break
-
             gallery["goals"][i] = mapper.goal_latent.cpu()
 
-            # 2. If it's a diagnostic episode, harvest the starting context
-            if i in DIAGNOSTIC_EPISODES:
-                video_path = get_episode_video_path(dataset_root, i)
+            # 2. Capture the Start State (Frames 0, 1, 2)
+            video_path = get_episode_video_path(dataset_root, i)
+            start_frames = []
+            for frame_idx in range(3):
+                frame_np = extract_frame_at_index(video_path, frame_idx)
+                transformed = mapper.transform({"pixels": frame_np})["pixels"]
+                start_frames.append(transformed)
 
-                # Extract frames 0, 1, 2 for the 3-frame history window
-                start_frames = []
-                for frame_idx in range(3):
-                    frame_np = extract_frame_at_index(video_path, frame_idx)
-                    # Transform to model space (3, 224, 224)
-                    transformed = mapper.transform({"pixels": frame_np})["pixels"]
-                    start_frames.append(transformed)
+            # 3. Store full context
+            gallery["diagnostics"][i] = {
+                "pixels": torch.stack(start_frames).cpu(),
+                "action": torch.zeros(4, 64),
+            }
 
-                pixels_t = torch.stack(start_frames).cpu()  # (3, 3, 224, 224)
-
-                # For basic diagnostic, we can use zero action history or harvest actuals
-                # We'll use zeros for now as per the original diagnose_mpc.py logic
-                action_hist = torch.zeros(4, 64)
-
-                gallery["diagnostics"][i] = {"pixels": pixels_t, "action": action_hist}
-
-        except Exception as e:
-            print(f"\n⚠️ Skipping episode {i} due to error: {e}")
+        except Exception:
             break
 
-    # 3. Save the Packed Gallery
+    # 4. Save the Final Artifact
     if gallery["goals"]:
         torch.save(gallery, output_path)
-        print(f"✅ Enhanced Gallery saved to: {output_path}")
         print(
-            f"📈 Contains {len(gallery['goals'])} goals and {len(gallery['diagnostics'])} diagnostic test cases."
+            f"✅ Full Spectrum Gallery saved: {output_path} ({len(gallery['goals'])} episodes)"
         )
     else:
-        print("❌ Harvest failed.")
+        print("❌ Dataset harvest failed.")
 
 
 if __name__ == "__main__":
@@ -78,5 +67,4 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--output", type=str, default="goal_gallery.pth")
     args = parser.parse_args()
-
     harvest(args.model, args.dataset, args.output)

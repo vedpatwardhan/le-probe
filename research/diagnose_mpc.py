@@ -1,6 +1,7 @@
 """
-DIAGNOSTIC MPC TUNER (The "Lab Experiment")
-Role: Offline validation and hyperparameter tuning of the CEM planner.
+FULL SPECTRUM DIAGNOSTIC SWEEP
+Role: Audits the MPC planner across the entire 150-episode distilled gallery.
+Mandatory: Requires goal_gallery.pth
 """
 
 import os
@@ -9,7 +10,6 @@ import argparse
 import torch
 import time
 from pathlib import Path
-from huggingface_hub import snapshot_download
 
 # Project paths
 RESEARCH_DIR = Path(__file__).parent.absolute()
@@ -33,23 +33,26 @@ class MockSpace:
 
 def run_diagnostic(model_path, gallery_path="goal_gallery.pth"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"🔬 Running MPC Latent Diagnostic on {device}...")
+    print(f"🔬 Running Full-Spectrum Diagnostic on {device}...")
 
-    gallery = None
-    if Path(gallery_path).exists():
-        print(f"💎 Loading Diagnostic Gallery from: {gallery_path}")
-        gallery = torch.load(gallery_path, map_location=device)
-        dataset_root = "."  # Dummy
-    else:
-        print(f"☁️ Gallery not found. Fallback: Syncing dataset from Hub...")
-        dataset_root = snapshot_download(
-            repo_id="vedpatwardhan/gr1_pickup_processed", repo_type="dataset"
+    if not Path(gallery_path).exists():
+        print(f"❌ Error: Gallery not found at {gallery_path}")
+        print(
+            "💡 Please run 'python research/harvest_goals.py' first to generate the artifact."
         )
+        return
 
-    # 1. Initialize Planning Agent
-    agent = GoalMapper(model_path, dataset_root)
+    # 1. Load Universal Gallery
+    print(f"💎 Loading Gallery: {gallery_path}")
+    gallery = torch.load(gallery_path, map_location=device)
+    episodes_to_test = sorted(list(gallery["goals"].keys()))
+    print(f"📈 Found {len(episodes_to_test)} episodes. Starting full sweep...")
 
-    # 2. Setup Solver
+    # 2. Initialize Planning Agent (Gallery Mode)
+    # We use a dummy dataset root because the gallery has everything
+    agent = GoalMapper(model_path, dataset_root=".")
+
+    # 3. Setup Solver (8k/3.0 Config)
     solver = CEMSolver(
         model=agent, num_samples=8000, var_scale=3.0, n_steps=1, topk=100, device=device
     )
@@ -57,30 +60,16 @@ def run_diagnostic(model_path, gallery_path="goal_gallery.pth"):
         action_space=MockSpace(shape=(1, 64)), n_envs=1, config=MockConfig(horizon=15)
     )
 
-    # 3. Batch Tuning Loop
-    episodes_to_test = [0, 30, 60, 90, 120, 149]
     batch_improvements = []
 
+    # 4. Sequential Audit (All episodes)
     for ep_idx in episodes_to_test:
-        print(f"\n🎬 Testing Episode {ep_idx:03d}:")
+        print(f"\n🎬 Testing Episode {ep_idx:03d}/{len(episodes_to_test)-1}:")
 
-        # Pull Goal & Start Frames
-        if gallery and ep_idx in gallery["goals"]:
-            agent.goal_latent = gallery["goals"][ep_idx].to(device)
-            pixels = (
-                gallery["diagnostics"][ep_idx]["pixels"].to(device).unsqueeze(0)
-            )  # (1, 3, 3, 224, 224)
-            actions = (
-                gallery["diagnostics"][ep_idx]["action"].to(device).unsqueeze(0)
-            )  # (1, 4, 64)
-            print("   ✅ Loaded Goal & Start Frames from Gallery")
-        else:
-            success = agent.set_goal(episode_idx=ep_idx)
-            if not success:
-                continue
-            pixels = torch.randn(1, 3, 3, 224, 224).to(device)
-            actions = torch.zeros(1, 4, 64).to(device)
-            print("   ⚠️ No cached test case. Using noise start.")
+        # Load Cached Test Case
+        agent.goal_latent = gallery["goals"][ep_idx].to(device)
+        pixels = gallery["diagnostics"][ep_idx]["pixels"].to(device).unsqueeze(0)
+        actions = gallery["diagnostics"][ep_idx]["action"].to(device).unsqueeze(0)
 
         info_dict = {"pixels": pixels, "action": actions}
         current_action = None
@@ -99,14 +88,14 @@ def run_diagnostic(model_path, gallery_path="goal_gallery.pth"):
         batch_improvements.append(improvement)
         print(f"✅ Ep {ep_idx} Improvement: {improvement:.4f}")
 
-    # 4. Final Verdict
-    if batch_improvements:
-        avg_imp = sum(batch_improvements) / len(batch_improvements)
-        print(f"\n🏁 BATCH VERDICT:\n   Average Latent Improvement: {avg_imp:.4f}")
-        if avg_imp > 50.0:
-            print("🚀 VERDICT: MPC Parameters are robust and ready for simulator!")
-        else:
-            print("⚠️ VERDICT: Optimization is weak. Consider increasing num_samples.")
+    # 5. Global Verdict
+    avg_imp = sum(batch_improvements) / len(batch_improvements)
+    print(f"\n🏁 FINAL SWEEP VERDICT (n={len(episodes_to_test)}):")
+    print(f"   Average Latent Improvement: {avg_imp:.4f}")
+    if avg_imp > 50.0:
+        print("🚀 VERDICT: MPC Parameters are robust across the entire dataset!")
+    else:
+        print("⚠️ VERDICT: Weak optimization detected in the global average.")
 
 
 if __name__ == "__main__":

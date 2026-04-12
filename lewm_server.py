@@ -1,12 +1,7 @@
 """
-ORACLE MPC INFERENCE SERVER
+ORACLE MPC INFERENCE SERVER (Gallery Edition)
 Role: Standalone ZMQ server hosting the JEPA world model and CEM solver.
-
-Key Features:
-1. Internal History Buffering (maintains the 3-frame sliding window).
-2. Rosetta Mapping (32-dim simulator joints <-> 64-dim dataset manifold).
-3. Calibrated Search (8k samples, 3.0 variance, 10x cost pressure).
-4. Goal Gallery Support (Uses 115KB cache instead of 100GB dataset).
+Mandatory: Requires goal_gallery.pth
 """
 
 import zmq
@@ -16,47 +11,35 @@ import numpy as np
 import time
 import argparse
 from pathlib import Path
-from huggingface_hub import snapshot_download
 
-# Local imports from the research layer
+# Local imports
 from research.goal_mapper import GoalMapper
 from stable_worldmodel.solver.cem import CEMSolver
 
-# Configuration Constants
+# Configuration
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 PORT = 5555
-REPO_ID = "vedpatwardhan/gr1_pickup_processed"
-DEFAULT_GALLERY = "goal_gallery.pth"
 
 
 class LEWMInferenceServer:
-    def __init__(self, model_path, dataset_root=None, gallery_path=DEFAULT_GALLERY):
-        print("--- Initializing Oracle MPC Server ---")
+    def __init__(self, model_path, gallery_path="goal_gallery.pth"):
+        print("--- Initializing Oracle MPC Server (Gallery Only) ---")
 
-        self.gallery = None
         gallery_file = Path(gallery_path)
+        if not gallery_file.exists():
+            print(f"❌ Error: Gallery not found at {gallery_file}")
+            print("💡 Run 'python research/harvest_goals.py' first.")
+            exit(1)
 
-        # 0. Load Goal Gallery (The Optimized Path 🚀)
-        if gallery_file.exists():
-            print(f"💎 Loading Goal Gallery from: {gallery_file}")
-            self.gallery = torch.load(gallery_file, map_location=DEVICE)
-            print(f"✅ Success: {len(self.gallery)} goal latents cached.")
+        # 1. Load the Universal Gallery
+        print(f"💎 Loading Gallery: {gallery_file}")
+        self.gallery = torch.load(gallery_file, map_location=DEVICE)
+        print(f"✅ Success: {len(self.gallery['goals'])} goal latents ready.")
 
-            # If we have a gallery, we don't need the dataset root!
-            if dataset_root is None:
-                dataset_root = "."  # Dummy path to satisfy GoalMapper init
-        else:
-            # 0b. Sync Dataset only if gallery is missing (The Legacy Path ☁️)
-            if dataset_root is None or not Path(dataset_root).exists():
-                print(
-                    f"⚠️ Gallery not found. Fallback: Syncing dataset from Hub: {REPO_ID}..."
-                )
-                dataset_root = snapshot_download(repo_id=REPO_ID, repo_type="dataset")
+        # 2. Initialize Brain (Gallery doesn't need data root)
+        self.agent = GoalMapper(model_path, dataset_root=".")
 
-        # 1. Initialize the Tuned Brain
-        self.agent = GoalMapper(model_path, dataset_root)
-
-        # 2. Initialize the Calibrated Solver
+        # 3. Setup Calibrated Solver (8k Samples)
         self.solver = CEMSolver(
             model=self.agent,
             num_samples=8000,
@@ -67,62 +50,52 @@ class LEWMInferenceServer:
         )
         self.solver.configure(horizon=15)
 
-        # 3. State/History Buffering
-        self.history = {
-            "pixels": [],
-            "actions": [],
-        }
+        # 4. State Buffering
+        self.history = {"pixels": [], "actions": []}
         self.goal_set = False
 
     def map_sim_to_model_state(self, state_32):
-        """Translates 32-dim sim joints to 64-dim manifold."""
         state_full = np.zeros(64, dtype=np.float32)
-        state_full[0:7] = state_32[0:7]  # Left Arm
-        state_full[7:13] = state_32[7:13]  # Left Hand
-        state_full[19:22] = state_32[13:16]  # Neck/Head
-        state_full[22:29] = state_32[16:23]  # Right Arm
-        state_full[29:35] = state_32[23:29]  # Right Hand
-        state_full[41:44] = state_32[29:32]  # Waist
+        state_full[0:7] = state_32[0:7]
+        state_full[7:13] = state_32[7:13]
+        state_full[19:22] = state_32[13:16]
+        state_full[22:29] = state_32[16:23]
+        state_full[29:35] = state_32[23:29]
+        state_full[41:44] = state_32[29:32]
         return state_full
 
     def map_model_to_sim_actions(self, actions_64):
-        """Translates 64-dim manifold actions back to 32-dim sim joints."""
         horizon = actions_64.shape[0]
         actions_32 = np.zeros((horizon, 32), dtype=np.float32)
-
-        actions_32[:, 0:7] = actions_64[:, 0:7]  # Left Arm
-        actions_32[:, 7:13] = actions_64[:, 7:13]  # Left Hand
-        actions_32[:, 13:16] = actions_64[:, 19:22]  # Neck/Head
-        actions_32[:, 16:23] = actions_64[:, 22:29]  # Right Arm
-        actions_32[:, 23:29] = actions_64[:, 29:35]  # Right Hand
-        actions_32[:, 29:32] = actions_64[:, 41:44]  # Waist
+        actions_32[:, 0:7] = actions_64[:, 0:7]
+        actions_32[:, 7:13] = actions_64[:, 7:13]
+        actions_32[:, 13:16] = actions_64[:, 19:22]
+        actions_32[:, 16:23] = actions_64[:, 22:29]
+        actions_32[:, 23:29] = actions_64[:, 29:35]
+        actions_32[:, 29:32] = actions_64[:, 41:44]
         return actions_32
 
     def run(self, host="0.0.0.0"):
         context = zmq.Context()
         socket = context.socket(zmq.REP)
         socket.bind(f"tcp://{host}:{PORT}")
-        print(f"🚀 LEWM MPC Server listening on port {PORT}...")
+        print(f"🚀 LEWM Server LISTENING on port {PORT}...")
 
         while True:
             try:
                 message = socket.recv()
                 req = msgpack.unpackb(message, raw=False)
 
-                # Goal Setting Logic
+                # Set Goal from Gallery
                 if not self.goal_set:
-                    if self.gallery is not None:
-                        print(
-                            "🎯 Mission Start: Loading goal latent from Gallery [Ep 000]..."
-                        )
-                        self.agent.goal_latent = self.gallery[0].to(DEVICE)
-                        self.goal_set = True
-                    else:
-                        print(
-                            "🎯 Mission Start: Encoding goal frame from Dataset [Ep 000]..."
-                        )
-                        self.agent.set_goal(episode_idx=0)
-                        self.goal_set = True
+                    # In this version, we default to Ep 000.
+                    # You can easily update this to take an 'episode_idx' from the 'req'.
+                    target_id = req.get("goal_id", 0)
+                    print(
+                        f"🎯 Mission Start: Loading Goal from Gallery [Ep {target_id}]..."
+                    )
+                    self.agent.goal_latent = self.gallery["goals"][target_id].to(DEVICE)
+                    self.goal_set = True
 
                 def unpack_np(d):
                     return np.frombuffer(d["data"], dtype=d["dtype"]).reshape(
@@ -139,8 +112,6 @@ class LEWMInferenceServer:
                 if len(self.history["pixels"]) > 3:
                     self.history["pixels"].pop(0)
 
-                curr_model_state = self.map_sim_to_model_state(sim_state)
-
                 while len(self.history["actions"]) < 3:
                     self.history["actions"].append(np.zeros(64, dtype=np.float32))
 
@@ -154,12 +125,12 @@ class LEWMInferenceServer:
                     .to(DEVICE)
                 )
 
-                info_dict = {"pixels": pixels_stacked, "action": actions_stacked}
-
-                print(f"🧠 Step: Planning with 8k samples...")
+                print("🧠 Step: Planning (8,000 parallel samples)...")
                 start_time = time.time()
                 with torch.inference_mode():
-                    planned_actions = self.solver.solve(info_dict)
+                    planned_actions = self.solver.solve(
+                        {"pixels": pixels_stacked, "action": actions_stacked}
+                    )
 
                 best_plan_64 = planned_actions[0].cpu().numpy()
                 plan_time = time.time() - start_time
@@ -188,9 +159,7 @@ class LEWMInferenceServer:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--dataset", type=str, default=None)
-    parser.add_argument("--gallery", type=str, default=DEFAULT_GALLERY)
+    parser.add_argument("--gallery", type=str, default="goal_gallery.pth")
     args = parser.parse_args()
-
-    server = LEWMInferenceServer(args.model, args.dataset, args.gallery)
+    server = LEWMInferenceServer(args.model, args.gallery)
     server.run()
