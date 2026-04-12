@@ -1,3 +1,13 @@
+"""
+UNIFIED PLANNING AGENT (The "Brain")
+Role: Wrapper for the Oracle World Model and Planning Cost Logic.
+
+This class serves as the primary interface for the CEM Solver. It:
+1. Loads the v17 Oracle weights and maintains the JEPA model instance.
+2. Manages the "Goal Memory" (encoding success frames into goal latents).
+3. Implements the Planning Protocol (.predict and .get_cost) for any CEM/MPC solver.
+"""
+
 import torch
 from pathlib import Path
 import stable_pretraining as spt

@@ -1,3 +1,13 @@
+"""
+DIAGNOSTIC MPC TUNER (The "Lab Experiment")
+Role: Offline validation and hyperparameter tuning of the CEM planner.
+
+This script runs the CEM-MPC logic in a vacuum (no MuJoCo simulation). It is used to:
+1. Verify that the CEMSolver + JEPA World Model can successfully reduce latent cost.
+2. Tune solver hyperparameters (n_samples, var_scale, horizon) before running simulation.
+3. Isolate "Brain" (planning) failures from "Body" (simulation/physics) failures.
+"""
+
 import os
 import sys
 from pathlib import Path

@@ -1,3 +1,13 @@
+"""
+GOAL EXTRACTION UTILITIES (The "Archeologist")
+Role: Extraction of visual success frames from the dataset.
+
+This module provides standalone helper functions to search through the
+pickup dataset and retrieve the "Success" (last) frame of an episode.
+It abstracts away the complexities of Parquet searching and OpenCV video
+decoding.
+"""
+
 import torch
 import pandas as pd
 import numpy as np

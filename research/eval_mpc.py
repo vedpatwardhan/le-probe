@@ -1,3 +1,13 @@
+"""
+MPC EVALUATION COMMANDER (The "Mission")
+Role: Closed-loop MuJoCo simulation and benchmarking.
+
+This is the primary execution script for the GR-1 MPC pipeline. It:
+1. Connects the Planning Agent (GoalMapper) to the MuJoCo simulator (GR1MuJoCoBase).
+2. Runs the 20Hz control loop: Perception -> CEM Planning -> Physical Execution.
+3. Tracks success metrics for Reach, Grasp, and Lift tasks.
+"""
+
 import os
 import sys
 from pathlib import Path
