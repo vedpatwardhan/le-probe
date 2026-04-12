@@ -12,11 +12,9 @@ os.environ["MUJOCO_GL"] = "egl"
 
 # Core imports
 import torch
-import numpy as np
 import hydra
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from torchvision.transforms import v2 as transforms
-import stable_worldmodel as swm
 import stable_pretraining as spt
 
 # Project-specific imports (Absolute relative to sys.path)

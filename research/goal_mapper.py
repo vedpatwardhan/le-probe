@@ -1,8 +1,5 @@
 import torch
-import pandas as pd
-import numpy as np
 from pathlib import Path
-from torchvision.transforms import v2 as transforms
 import stable_pretraining as spt
 from jepa import JEPA
 from module import ARPredictor
