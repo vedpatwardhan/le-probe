@@ -11,16 +11,13 @@ This class serves as the primary interface for the CEM Solver. It:
 import torch
 import sys
 from pathlib import Path
-from torchvision.transforms import v2 as transforms
-
-# Project paths
-# Note: Root and le_wm paths are added by the calling scripts (diagnose/eval)
 
 # Project-specific imports
 import stable_pretraining as spt
 from jepa import JEPA
 from module import ARPredictor
 from gr1_modules import GR1Embedder, GR1MLP
+from le_wm.utils import get_img_preprocessor
 from research.goal_utils import get_goal_pixels, get_episode_video_path
 
 
@@ -35,12 +32,10 @@ class GoalMapper:
         self.dataset_root = Path(dataset_root)
         self.img_size = img_size
 
-        # Standard JEPA Transform
-        self.transform = transforms.Compose(
-            [
-                transforms.Resize(size=(img_size, img_size)),
-                transforms.Normalize(**spt.data.dataset_stats.ImageNet),
-            ]
+        # 🎯 OFFICIAL TRAINING TRANSFORMS (Strict Parity)
+        # We use the library preprocessor to ensure scaling and interpolation match training exactly.
+        self.transform = get_img_preprocessor(
+            source="pixels", target="pixels", img_size=img_size
         )
 
         # Initialize Model Architecture (v17 Hardcoded Abstractions)
@@ -91,11 +86,16 @@ class GoalMapper:
         if pixels is None:
             return False
 
-        # Preprocess: (3, H, W) -> (1, 1, 3, 224, 224)
-        pixels = self.transform(pixels).to(self.device)
-        pixels = pixels.unsqueeze(0).unsqueeze(0)
+        # Preprocess via official dictionary-based transform
+        # pixels is raw uint8 (3, H, W)
+        batch = {"pixels": pixels}
+        batch = self.transform(batch)
+        processed_pixels = batch["pixels"].to(self.device)
 
-        info = self.model.encode({"pixels": pixels})
+        # Prep for JEPA Encoder: (3, 224, 224) -> (1, 1, 3, 224, 224)
+        processed_pixels = processed_pixels.unsqueeze(0).unsqueeze(0)
+
+        info = self.model.encode({"pixels": processed_pixels})
         self.goal_latent = info["emb"]  # (1, 1, D)
         return True
 
