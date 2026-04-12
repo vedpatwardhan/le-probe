@@ -19,39 +19,39 @@ except ImportError:
     HAS_TORCHCODEC = False
 
 
-def get_goal_pixels(video_path):
+def extract_frame_at_index(video_path, frame_idx):
     """
-    Extracts the last frame (success state) from an episode video.
-    Uses torchcodec for robust AV1 support on Colab/Linux.
+    Decodes a specific frame index from the video.
+    Returns: torch.Tensor (3, H, W) in [0, 1]
     """
     if not HAS_TORCHCODEC:
-        raise ImportError(
-            "torchcodec is required for MPC goal extraction. "
-            "Please install it via 'pip install torchcodec'."
-        )
+        raise ImportError("torchcodec is required for frame extraction.")
 
     if not Path(video_path).exists():
-        print(f"❌ Video not found: {video_path}")
         return None
 
     try:
-        # 1. Initialize Decoder
         decoder = torchcodec.decoders.VideoDecoder(str(video_path))
+        frame_batch = decoder.get_frames_at(indices=[frame_idx])
+        return frame_batch.data[0]
+    except Exception as e:
+        print(f"❌ Failed to extract frame {frame_idx}: {e}")
+        return None
 
-        # 2. Target the last frame (Success State)
+
+def get_goal_pixels(video_path):
+    """
+    Extracts the last frame (success state) from an episode video.
+    """
+    if not Path(video_path).exists():
+        return None
+
+    try:
+        decoder = torchcodec.decoders.VideoDecoder(str(video_path))
         num_frames = decoder.metadata.num_frames
         last_frame_idx = num_frames - 1
-
-        # 3. Decode specific frame
-        # Torchcodec returns values in [0, 1] as float32 tensors (C, H, W)
-        frame_batch = decoder.get_frames_at(indices=[last_frame_idx])
-        goal_pixels = frame_batch.data[0]  # Take first (and only) frame
-
-        print(f"🎯 Goal established: Frame {last_frame_idx} of {video_path.name}")
-        return goal_pixels
-
-    except Exception as e:
-        print(f"❌ torchcodec failed to read video: {e}")
+        return extract_frame_at_index(video_path, last_frame_idx)
+    except Exception:
         return None
 
 
