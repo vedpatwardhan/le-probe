@@ -7,8 +7,15 @@ Output: goal_gallery.pth (~350MB)
 import torch
 import argparse
 import numpy as np
+import sys
 from pathlib import Path
 from tqdm import tqdm
+
+# Resolve project paths dynamically
+RESEARCH_DIR = Path(__file__).parent.absolute()
+CORTEX_GR1 = RESEARCH_DIR.parent
+if str(CORTEX_GR1) not in sys.path:
+    sys.path.append(str(CORTEX_GR1))
 
 from research.goal_mapper import GoalMapper
 from research.goal_utils import get_episode_video_path, extract_frame_at_index
