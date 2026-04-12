@@ -10,6 +10,7 @@ import numpy as np
 import sys
 from pathlib import Path
 from tqdm import tqdm
+from huggingface_hub import snapshot_download
 
 # Resolve project paths dynamically
 RESEARCH_DIR = Path(__file__).parent.absolute()
@@ -20,9 +21,17 @@ if str(CORTEX_GR1) not in sys.path:
 from research.goal_mapper import GoalMapper
 from research.goal_utils import get_episode_video_path, extract_frame_at_index
 
+REPO_ID = "vedpatwardhan/gr1_pickup_processed"
+
 
 def harvest(model_path, dataset_root, output_path):
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # 0. Sync Dataset if path is missing or invalid
+    if dataset_root is None or not Path(dataset_root).exists():
+        print(f"☁️ Syncing dataset from Hugging Face Hub: {REPO_ID}...")
+        dataset_root = snapshot_download(repo_id=REPO_ID, repo_type="dataset")
+
     print(f"🎬 Starting Full Spectrum Harvest (All Episodes) on {device}...")
 
     mapper = GoalMapper(model_path, dataset_root)
@@ -71,7 +80,12 @@ def harvest(model_path, dataset_root, output_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--dataset", type=str, required=True)
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default=None,
+        help="Local dataset path (optional, will sync from Hub if missing)",
+    )
     parser.add_argument("--output", type=str, default="goal_gallery.pth")
     args = parser.parse_args()
     harvest(args.model, args.dataset, args.output)
