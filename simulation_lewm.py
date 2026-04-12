@@ -10,6 +10,7 @@ import zmq
 import msgpack
 import time
 import argparse
+import rerun as rr
 from simulation_base import GR1MuJoCoBase
 
 
@@ -91,6 +92,10 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="localhost")
     parser.add_argument("--port", type=int, default=5555)
     args = parser.parse_args()
+
+    # Re-init Rerun for standalone local run (Matches simulation_vla.py pattern)
+    rr.init("gr1_lewm", spawn=False)
+    rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
 
     sim = GR1LEWMClient(server_host=args.host, server_port=args.port)
     sim.run()

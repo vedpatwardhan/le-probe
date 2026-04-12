@@ -103,66 +103,51 @@ class GoalMapper:
     @torch.no_grad()
     def get_cost(self, obs_dict, actions):
         """
-        FAST-PATH MPC COST (Temporally Aligned & VRAM Optimized)
-        Calculates the distance to the goal latent by rolling out candidate actions.
+        FAST-PATH MPC COST (Ironclad 5D Protocol)
+        Guarantees that the World Model only ever sees 5D (B, T, C, H, W).
         """
-        assert hasattr(self, "goal_latent"), "Goal not set. Call set_goal() first."
-
-        # 1. Memory-Aware Observation Encoding
-        pixels = obs_dict["pixels"]
-        num_candidates = actions.size(0) * actions.size(1)
+        # 1. Extract and Force 5D Observation
+        raw_pixels = obs_dict["pixels"]
         B, S = actions.size(0), actions.size(1)
 
-        # 🚀 OPTIMIZATION: De-duplicate Encoding
-        # If pixels are 6D (B, S, T, C, H, W) and S > 1, check if redundant
-        if pixels.ndim == 6 and S > 1:
-            # We assume for single-env planning that all samples share the same history
-            # Encode only the FIRST sample to save 99.9% VRAM
-            unique_pixels = pixels[:, 0, :, :, :, :]  # (B, T, C, H, W)
-            info = self.model.encode({"pixels": unique_pixels})
-            init_emb = info["emb"]  # (B, T, D)
-            # Expand latents downstream to match num_candidates
-            latent_needs_expansion = True
-        else:
-            # Standard 5D path or non-redundant
-            info = self.model.encode(obs_dict)
-            init_emb = info["emb"]
-            latent_needs_expansion = init_emb.size(0) == B and S > 1
+        # Defensive Dimension Stripping: (Batch, Samples, T, C, H, W) -> (Batch, T, C, H, W)
+        pixels_5d = raw_pixels
+        while pixels_5d.ndim > 5:
+            pixels_5d = pixels_5d[:, 0]  # Squeeze the Sample/S dimensions
 
-        # 2. Robust History Action Extraction
-        hist_actions = obs_dict.get("action", None)
-        if hist_actions is None:
-            hist_actions = torch.zeros(B, init_emb.size(1), actions.size(-1)).to(
+        # 2. Optimized Encoding
+        # All samples S share the same history. We encode the 5D batch once.
+        info = self.model.encode({"pixels": pixels_5d})
+        init_emb = info["emb"]  # (B, T, D)
+
+        # Expand latents for the solver: (B, T, D) -> (B*S, T, D)
+        curr_emb = init_emb.repeat_interleave(S, dim=0)
+
+        # 3. History Actions Normalization
+        raw_hist_actions = obs_dict.get("action", None)
+        if raw_hist_actions is None:
+            raw_hist_actions = torch.zeros(B, init_emb.size(1), actions.size(-1)).to(
                 self.device
             )
 
-        # Stabilize History Action Shapes
-        if hist_actions.ndim == 4:
-            # Slicing the FIRST sample's history to match the unique_pixels logic
-            hist_actions = hist_actions[:, 0, : init_emb.size(1), :]  # (B, 3, D)
-        else:
-            hist_actions = hist_actions[:, : init_emb.size(1), :]
+        hist_actions_5d = raw_hist_actions
+        while hist_actions_5d.ndim > 3:  # (B, S, T, D) -> (B, T, D)
+            hist_actions_5d = hist_actions_5d[:, 0]
 
-        # Final History expansion to match all candidates
-        hist_actions = (
-            hist_actions.repeat_interleave(S, dim=0).to(self.device).float()
-        )  # (BS, 3, D)
-
-        # 3. Prepare Plan Actions & Concatenate
-        plan_actions = (
-            actions.view(num_candidates, -1, actions.size(-1)).to(self.device).float()
+        # Flatten to BS space
+        flat_hist_actions = (
+            hist_actions_5d.repeat_interleave(S, dim=0).to(self.device).float()
         )
-        all_actions = torch.cat([hist_actions, plan_actions], dim=1)
 
-        # 4. Sliding Window Rollout
-        if latent_needs_expansion:
-            curr_emb = init_emb.repeat_interleave(S, dim=0)
-        else:
-            curr_emb = init_emb
+        # 4. Prepare Plan Actions (BS, T, D)
+        flat_plan_actions = (
+            actions.view(B * S, -1, actions.size(-1)).to(self.device).float()
+        )
+        all_actions = torch.cat([flat_hist_actions, flat_plan_actions], dim=1)
 
-        curr_emb = curr_emb.to(self.device)
-        T_horizon = actions.size(2)
+        # 5. Sliding Window Rollout (Flattened BS space)
         history_size = init_emb.size(1)
+        T_horizon = actions.size(2)
 
         for t in range(T_horizon):
             emb_window = curr_emb[:, -history_size:, :]
@@ -182,19 +167,16 @@ class GoalMapper:
 
         if num_goals > 1 and B == 1:
             # 🚀 OMNI-GOAL MODE (Production Utility)
-            # Calculate distance to ALL goals and take the minimum (BS, G) -> (BS,)
-            # BS is num_candidates here
             diff = final_latent.unsqueeze(1) - goal_latents.unsqueeze(0)  # (BS, G, D)
             dist = torch.norm(diff, dim=-1).min(dim=-1).values  # (BS,)
         elif num_goals == B and B > 1:
             # 🎯 TARGETED BATCH MODE (Vectorized Audit)
-            # Expand (B, D) -> (BS, D) for 1-to-1 mapping
             goal_vec = goal_latents.repeat_interleave(S, dim=0)
-            dist = torch.norm(final_latent - goal_vec, dim=-1)
+            dist = torch.norm(final_latent - goal_vec, dim=-1)  # (BS,)
         else:
             # SINGLE-GOAL MODE (Standard MPC fallback)
-            goal_vec = goal_latents[0:1]  # Use first available goal
+            goal_vec = goal_latents[0:1]
             dist = torch.norm(final_latent - goal_vec, dim=-1)  # (BS,)
 
-        # 🎯 CALIBRATION: Scale cost to satisfy diagnostic pressure
+        # 6. Unflatten back to (B, S) for the Solver
         return dist.view(B, S) * 10.0

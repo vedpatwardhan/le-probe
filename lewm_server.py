@@ -4,13 +4,27 @@ Role: Standalone ZMQ server hosting the JEPA world model and CEM solver.
 Mandatory: Requires goal_gallery.pth
 """
 
+import sys
+import os
+from pathlib import Path
+
+# --- Project Path Stabilization (Aggressive Front-Load) ---
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+LEWM_DIR = os.path.join(ROOT_DIR, "le_wm")
+if LEWM_DIR not in sys.path:
+    sys.path.insert(0, LEWM_DIR)
+# -----------------------------------------------------------
+
 import zmq
 import msgpack
 import torch
 import numpy as np
 import time
 import argparse
-from pathlib import Path
+import traceback
 
 # Local imports
 from research.goal_mapper import GoalMapper
@@ -138,13 +152,17 @@ class LEWMInferenceServer:
                 print("🧠 Step: Planning (8,000 parallel samples)...")
                 start_time = time.time()
                 with torch.inference_mode():
-                    planned_actions = self.solver.solve(
+                    outputs = self.solver.solve(
                         {"pixels": pixels_stacked, "action": actions_stacked}
                     )
 
-                best_plan_64 = planned_actions[0].cpu().numpy()
-                plan_time = time.time() - start_time
+                best_plan_64 = outputs["actions"].cpu().numpy()
+                if best_plan_64.ndim == 4:
+                    best_plan_64 = best_plan_64[0, 0]  # (B, S, T, D) -> (T, D)
+                elif best_plan_64.ndim == 3:
+                    best_plan_64 = best_plan_64[0]  # (S, T, D) -> (T, D)
 
+                plan_time = time.time() - start_time
                 best_plan_32 = self.map_model_to_sim_actions(best_plan_64)
 
                 self.history["actions"].append(best_plan_64[0])
@@ -163,6 +181,7 @@ class LEWMInferenceServer:
 
             except Exception as e:
                 print(f"❌ Server Error: {e}")
+                traceback.print_exc()
                 socket.send(msgpack.packb({"error": str(e)}, use_bin_type=True))
 
 
