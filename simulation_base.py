@@ -19,6 +19,12 @@ from gr1_config import (
 # Suppress performance warnings from qpsolvers
 warnings.filterwarnings("ignore", category=UserWarning, module="qpsolvers")
 
+try:
+    import pycapacity.robot as pycap
+    PYCAPACITY_AVAILABLE = True
+except ImportError:
+    PYCAPACITY_AVAILABLE = False
+
 
 class GR1MuJoCoBase:
     """
@@ -200,6 +206,36 @@ class GR1MuJoCoBase:
         img_path = cam_dir / f"{self.frame_indices[name]:04d}.png"
         Image.fromarray(rgb).save(img_path)
 
+    def get_reachability_metrics(self):
+        """Calculates the velocity polytope volume for the hands using pycapacity."""
+        if not PYCAPACITY_AVAILABLE:
+            return {}
+
+        metrics = {}
+        for side in ["left", "right"]:
+            ee_name = f"{side}_hand_pitch_link"
+            body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, ee_name)
+            if body_id == -1:
+                continue
+
+            # 1. Full Jacobian
+            jac = np.zeros((3, self.model.nv))
+            mujoco.mj_jacBody(self.model, self.data, jac, None, body_id)
+
+            # 2. Joint Limits (Normalizing velocity to 1.0 rad/s for relative volume)
+            dq_max = np.ones(self.model.nv)
+            dq_min = -np.ones(self.model.nv)
+
+            try:
+                # Calculate the 3D velocity polytope
+                poly = pycap.velocity_polytope(jac, dq_min, dq_max)
+                metrics[f"reachability/{side}_hand_volume"] = float(poly.volume)
+            except Exception as e:
+                # Handle singular configurations where polytope might fail
+                metrics[f"reachability/{side}_hand_volume"] = 0.0
+
+        return metrics
+
     def get_state_32(self):
         return self.qpos_to_action_32(self.data.qpos)
 
@@ -279,8 +315,20 @@ class GR1MuJoCoBase:
 
         self.render_step_idx += 1
         self.rerun_count += 1
+
+        # Periodic Reachability Logging & Dataset Grounding
+        reach_metrics = None
+        if (self.is_recording or self.rerun_count % 10 == 0) and PYCAPACITY_AVAILABLE:
+            reach_metrics = self.get_reachability_metrics()
+
+        # Throttled Rerun Logging (1Hz)
+        if self.rerun_count % 10 == 0 and reach_metrics:
+            for k, v in reach_metrics.items():
+                rr.log(f"telemetry/{k}", rr.Scalar(v))
+
         if self.is_recording:
-            self.recorder.add_frame(views, self.get_state_32(), action_32)
+            # Grounding: Save reachability alongside kinematic state
+            self.recorder.add_frame(views, self.get_state_32(), action_32, reachability=reach_metrics)
 
     def dispatch_action(self, action_32, target_q, n_steps=None, render_freq=None):
         # Backward Compatible Defaults
