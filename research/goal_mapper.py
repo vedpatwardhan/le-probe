@@ -149,6 +149,9 @@ class GoalMapper:
         history_size = init_emb.size(1)
         T_horizon = actions.size(2)
 
+        # Track all predicted latents for dense costing (BS, T_horizon, D)
+        pred_latents = []
+
         for t in range(T_horizon):
             emb_window = curr_emb[:, -history_size:, :]
             act_window = all_actions[:, t : t + history_size, :]
@@ -158,25 +161,31 @@ class GoalMapper:
 
             last_pred = pred_emb[:, -1:, :]
             curr_emb = torch.cat([curr_emb, last_pred], dim=1)
+            pred_latents.append(last_pred)
 
-        # 5. Latent Distance (MSE) to Gallery
-        final_latent = curr_emb[:, -1, :]  # (BS, D)
-        D = self.goal_latent.size(-1)
+        # 6. Dense Latent Distance (Check all steps for progress)
+        # Combine all predictions: (BS, T_horizon, D)
+        all_preds = torch.cat(pred_latents, dim=1)
+        BS, T, D = all_preds.shape
+
         goal_latents = self.goal_latent.view(-1, D)  # (G, D)
         num_goals = goal_latents.size(0)
 
         if num_goals > 1 and B == 1:
             # 🚀 OMNI-GOAL MODE (Production Utility)
-            diff = final_latent.unsqueeze(1) - goal_latents.unsqueeze(0)  # (BS, G, D)
-            dist = torch.norm(diff, dim=-1).min(dim=-1).values  # (BS,)
+            # Efficiently compute distance for all time steps at once: (BS, T, G, D)
+            diff = all_preds.unsqueeze(2) - goal_latents.view(1, 1, num_goals, D)
+            # Find min distance across BOTH Goals and Time
+            # dist shape: (BS, T, G) -> (BS,)
+            dist = torch.norm(diff, dim=-1).min(dim=-1).values.min(dim=-1).values
         elif num_goals == B and B > 1:
             # 🎯 TARGETED BATCH MODE (Vectorized Audit)
-            goal_vec = goal_latents.repeat_interleave(S, dim=0)
-            dist = torch.norm(final_latent - goal_vec, dim=-1)  # (BS,)
+            goal_vec = goal_latents.repeat_interleave(S, dim=0).view(BS, 1, D)
+            dist = torch.norm(all_preds - goal_vec, dim=-1).min(dim=-1).values  # (BS,)
         else:
             # SINGLE-GOAL MODE (Standard MPC fallback)
-            goal_vec = goal_latents[0:1]
-            dist = torch.norm(final_latent - goal_vec, dim=-1)  # (BS,)
+            goal_vec = goal_latents[0:1].view(1, 1, D)
+            dist = torch.norm(all_preds - goal_vec, dim=-1).min(dim=-1).values  # (BS,)
 
-        # 6. Unflatten back to (B, S) for the Solver
-        return dist.view(B, S) * 10.0
+        # 7. Unflatten back to (B, S) for the Solver
+        return dist.view(B, S) * 100.0

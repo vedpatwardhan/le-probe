@@ -282,8 +282,11 @@ class GR1MuJoCoBase:
         if self.is_recording:
             self.recorder.add_frame(views, self.get_state_32(), action_32)
 
-    def dispatch_action(self, action_32, target_q):
-        total_steps = 200
+    def dispatch_action(self, action_32, target_q, n_steps=None, render_freq=None):
+        # Backward Compatible Defaults
+        total_steps = n_steps if n_steps is not None else 200
+        rf = render_freq if render_freq is not None else 16
+
         start_q = self.data.qpos.copy()
         delta_norm = np.linalg.norm(target_q - start_q)
         self._debug_log(f"🚀 Dispatching Action. L2 Delta Norm: {delta_norm:.6f}")
@@ -296,8 +299,14 @@ class GR1MuJoCoBase:
             self.data.qpos[self.root_q_idx : self.root_q_idx + 7] = root_target
             self.data.qvel[:6] = 0.0
             mujoco.mj_step(self.model, self.data)
-            if step % 16 == 0:
+
+            # Legacy Periodic Rendering (e.g., for VLA/Teleop)
+            if rf > 0 and step % rf == 0:
                 self.render_and_record(action_32)
+
+        # Ensure at least one render at the end if rf was too large
+        if rf >= total_steps or rf == 0:
+            self.render_and_record(action_32)
 
     def reset_env(self):
         print("🎲 Randomizing the environment...")

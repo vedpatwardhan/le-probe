@@ -69,16 +69,21 @@ class GR1LEWMClient(GR1MuJoCoBase):
                     diag = resp.get("diagnostics", {})
 
                     print(
-                        f"   🚀 Executing first action from plan (Solve Time: {diag.get('plan_time_ms')}ms)"
+                        "   🚀 Executing first action from plan (Solve Time: "
+                        f"{diag.get('plan_time_ms')}ms, Horizon: {plan.shape[0]})"
                     )
 
-                    # For MPC, we usually execute only the FIRST action and re-plan
-                    # Or we can execute a small chunk (e.g., 5 steps) to save time
-                    curr_action = plan[0]
-                    self.process_target_32(curr_action)
-                    self.dispatch_action(curr_action, self.last_target_q)
+                    # MPC Chunking: Execute 5 steps before re-planning to save ZMQ overhead
+                    chunk_size = min(5, len(plan))
+                    print(f"   🚀 Executing {chunk_size}-action chunk...")
 
-                    step_idx += 1
+                    for i in range(chunk_size):
+                        curr_action = plan[i]
+                        self.process_target_32(curr_action)
+                        self.dispatch_action(
+                            curr_action, self.last_target_q, n_steps=50, render_freq=10
+                        )
+                        step_idx += 1
                 else:
                     print(f"❌ Server Error: {resp.get('error')}")
                     break

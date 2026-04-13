@@ -71,10 +71,10 @@ class LEWMInferenceServer:
         self.agent.goal_latent = torch.stack(goal_list).to(DEVICE)
         print(f"🚀 Brain Prime: Loaded all {len(goal_list)} goals for Omni-MPC.")
 
-        # 4. Setup Calibrated Solver (8k Samples)
+        # 4. Setup Calibrated Solver (1k Samples)
         self.solver = CEMSolver(
             model=self.agent,
-            num_samples=8000,
+            num_samples=1000,
             var_scale=3.0,
             n_steps=1,
             topk=100,
@@ -83,32 +83,24 @@ class LEWMInferenceServer:
         self.solver.configure(
             action_space=MockSpace(shape=(1, 64)),
             n_envs=1,
-            config=MockConfig(horizon=15),
+            config=MockConfig(horizon=8),
         )
 
         # 5. State Buffering
         self.history = {"pixels": [], "actions": []}
 
     def map_sim_to_model_state(self, state_32):
-        state_full = np.zeros(64, dtype=np.float32)
-        state_full[0:7] = state_32[0:7]
-        state_full[7:13] = state_32[7:13]
-        state_full[19:22] = state_32[13:16]
-        state_full[22:29] = state_32[16:23]
-        state_full[29:35] = state_32[23:29]
-        state_full[41:44] = state_32[29:32]
-        return state_full
+        """Standard Identity Mapping: v17 Oracle was trained on 0-31 raw compact wire."""
+        state_64 = np.zeros(64, dtype=np.float32)
+        state_64[:32] = state_32
+        return state_64
 
     def map_model_to_sim_actions(self, actions_64):
+        """Standard Identity Mapping: v17 Oracle outputs 32-dim intent in the first half of 64-dim head."""
         horizon = actions_64.shape[0]
-        actions_32 = np.zeros((horizon, 32), dtype=np.float32)
-        actions_32[:, 0:7] = actions_64[:, 0:7]
-        actions_32[:, 7:13] = actions_64[:, 7:13]
-        actions_32[:, 13:16] = actions_64[:, 19:22]
-        actions_32[:, 16:23] = actions_64[:, 22:29]
-        actions_32[:, 23:29] = actions_64[:, 29:35]
-        actions_32[:, 29:32] = actions_64[:, 41:44]
-        return actions_32
+        # v17 was trained with gr1_pickup_large (32-dim actions)
+        # We take the first 32 dimensions directly.
+        return actions_64[:, :32]
 
     def run(self, host="0.0.0.0"):
         context = zmq.Context()
@@ -164,6 +156,13 @@ class LEWMInferenceServer:
 
                 plan_time = time.time() - start_time
                 best_plan_32 = self.map_model_to_sim_actions(best_plan_64)
+
+                # Diagnostic Logging: Action Stats
+                print(
+                    f"🧠 Planning Stats -> Solve Time: {plan_time:.2f}s, "
+                    f"Max Action: {np.abs(best_plan_32).max():.4f}, "
+                    f"Mean Action: {np.abs(best_plan_32).mean():.4f}"
+                )
 
                 self.history["actions"].append(best_plan_64[0])
                 if len(self.history["actions"]) > 3:
