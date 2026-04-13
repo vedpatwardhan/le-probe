@@ -46,6 +46,7 @@ class LeRobotManager:
         self.root = os.path.abspath(root)
         self.dataset = None
         self.episode_frame_count = 0
+        self.episode_buffer = []  # Buffer for post-recording smoothing
 
         if not LEROBOT_AVAILABLE:
             print("[WARNING] LeRobot not installed. Recording will be disabled.")
@@ -151,48 +152,131 @@ class LeRobotManager:
                 self.dataset.start_image_writer(num_processes=0, num_threads=4)
 
         self.current_task = task_instruction
+        self.episode_buffer = []  # Clear buffer for new episode
         print(
             f"[LEROBOT] Dataset '{self.repo_id}' ready. "
             f"Recording NEW episode for task: '{task_instruction}'"
         )
 
     def add_frame(self, views, state_32, action_32):
-        """Remaps 32-dim simulation protocol to 64-dim Rosetta for the Hub."""
+        """Buffers a frame for post-episode processing (to prevent simulation lag)."""
         if self.dataset is None:
             return
         self.episode_frame_count += 1
+        self.episode_buffer.append(
+            {
+                "views": views,
+                "state_32": state_32.copy() if hasattr(state_32, "copy") else state_32,
+                "action_32": (
+                    action_32.copy() if hasattr(action_32, "copy") else action_32
+                ),
+            }
+        )
 
-        # Create 64-dim buffers
-        state_64 = np.zeros(64, dtype=np.float32)
-        action_64 = np.zeros(64, dtype=np.float32)
+    def stop_episode(self):
+        """Finalizes the episode locally by applying smoothing and flushing to the dataset."""
+        if self.dataset is None or not self.episode_buffer:
+            print("[LEROBOT] Alert: stop_episode called on empty buffer.")
+            return
 
-        # Apply remapping
-        for old_idx, new_idx in ROSETTA_MAP.items():
-            state_64[new_idx] = state_32[old_idx]
-            action_64[new_idx] = action_32[old_idx]
+        print(
+            f"[LEROBOT] Applying Smooth Absolute Interpolation to {len(self.episode_buffer)} frames..."
+        )
 
-        # Add to LeRobot dataset features
-        frame_data = {
-            **{
-                f"observation.images.{k}": Image.fromarray(v[..., :3].astype(np.uint8))
-                for k, v in views.items()
-            },
-            "observation.state": state_64.astype(np.float32),
-            "action": action_64.astype(np.float32),
-            "task": self.current_task,
-        }
+        # 1. Smooth Absolute Interpolation (Linear Ramp Integration)
+        # First reference is the proprioception of the first frame
+        prev_target = self.episode_buffer[0]["state_32"].copy()
+        raw_targets = [f["action_32"] for f in self.episode_buffer]
+        smoothed_actions_32 = [None] * len(self.episode_buffer)
 
-        self.dataset.add_frame(frame_data)
+        i = 0
+        while i < len(raw_targets):
+            curr_target = raw_targets[i]
 
-    @property
-    def total_episodes(self):
-        """Returns the total number of episodes in the dataset."""
-        return self._total_episodes
+            # Find end of constant-target block (Staircase segment)
+            j = i
+            while j < len(raw_targets) and np.allclose(
+                raw_targets[j], curr_target, atol=1e-6
+            ):
+                j += 1
 
-    @property
-    def pending_uploads(self):
-        """Returns the current number of background upload tasks in flight."""
-        return self._pending_uploads
+            duration = j - i
+            start_pos = prev_target
+            end_pos = curr_target
+
+            for k in range(duration):
+                fraction = (k + 1) / duration
+                interpolated_pos = start_pos + (end_pos - start_pos) * fraction
+                smoothed_actions_32[i + k] = interpolated_pos.astype(np.float32)
+
+            prev_target = curr_target.copy()
+            i = j
+
+        # 2. Remap to 64-dim Rosetta and Flush to LeRobotDataset
+        print(f"[LEROBOT] Finalizing episode local save...")
+        for idx, frame in enumerate(self.episode_buffer):
+            # Create 64-dim Rosetta buffers
+            state_64 = np.zeros(64, dtype=np.float32)
+            action_64 = np.zeros(64, dtype=np.float32)
+
+            # Apply mapping protocol
+            for old_idx, new_idx in ROSETTA_MAP.items():
+                state_64[new_idx] = frame["state_32"][old_idx]
+                action_64[new_idx] = smoothed_actions_32[idx][old_idx]
+
+            # Remap in-memory frames to LeRobot features
+            frame_data = {
+                **{
+                    f"observation.images.{k}": Image.fromarray(
+                        v[..., :3].astype(np.uint8)
+                    )
+                    for k, v in frame["views"].items()
+                },
+                "observation.state": state_64.astype(np.float32),
+                "action": action_64.astype(np.float32),
+                "task": self.current_task,
+            }
+            self.dataset.add_frame(frame_data)
+
+        # Commit to Parquet
+        self.dataset.save_episode(parallel_encoding=False)
+        self._total_episodes = self.dataset.num_episodes
+        self.episodes_since_sync += 1
+        print(f"[LEROBOT] Episode saved. Total frames: {len(self.episode_buffer)}")
+
+        # Reset buffers and state for next episode
+        self.episode_buffer = []
+        self.episode_frame_count = 0
+        self.dataset = None
+
+        # Check for batch sync trigger
+        if self.episodes_since_sync >= self.upload_interval:
+            self.force_sync()
+
+    def discard_episode(self):
+        """Aborts the current episode without saving or syncing."""
+        if self.dataset is None:
+            return
+        print(
+            f"[LEROBOT] Discarding current episode buffer ({len(self.episode_buffer)} frames)..."
+        )
+        self.episode_buffer = []
+        self.episode_frame_count = 0
+        self.dataset = None
+
+    def force_sync(self):
+        """Manually triggers a motorized Hub synchronization of all new episodes."""
+        if not LEROBOT_AVAILABLE:
+            return
+        try:
+            print(f"[LEROBOT] Initiating Hub synchronization...")
+            dataset_path = os.path.join(self.root, self.repo_id)
+            temp_ds = LeRobotDataset(repo_id=self.repo_id, root=dataset_path)
+            self._pending_uploads += 1
+            self.executor.submit(self._async_push_to_hub, temp_ds)
+            self.episodes_since_sync = 0
+        except Exception as e:
+            print(f"[LEROBOT] ⚠️ Manual sync trigger failed: {e}")
 
     def _async_push_to_hub(self, dataset_to_push):
         """Internal worker to execute the hub push operation."""
@@ -205,53 +289,10 @@ class LeRobotManager:
         finally:
             self._pending_uploads = max(0, self._pending_uploads - 1)
 
-    def stop_episode(self):
-        """Finalizes locally and and then conditionally queues a Hub sync."""
-        if self.dataset is None:
-            return
+    @property
+    def total_episodes(self):
+        return self._total_episodes
 
-        print(f"[LEROBOT] Finalizing episode local save...")
-        self.dataset.save_episode(parallel_encoding=False)
-        self._total_episodes = self.dataset.num_episodes
-        self.episodes_since_sync += 1
-        print(f"[LEROBOT] Episode saved. Total frames: {self.episode_frame_count}")
-
-        # Batch Sync: Periodic or and then conditional Hub synchronization
-        self.episode_frame_count = 0  # Reset for next episode
-        self.dataset = None
-
-        if self.episodes_since_sync >= self.upload_interval:
-            self.force_sync()
-        else:
-            print(
-                f"[LEROBOT] Batch Status: {self.episodes_since_sync}/{self.upload_interval} episodes. Sync deferred."
-            )
-
-    def force_sync(self):
-        """Manually triggers a motorized Hub synchronization of all new episodes."""
-        if not LEROBOT_AVAILABLE:
-            return
-
-        # Use a temporary dataset object to trigger the push if not currently in an episode
-        try:
-            print(
-                f"[LEROBOT] Initiating Hub synchronization (Batch size: {self.episodes_since_sync})..."
-            )
-            dataset_path = os.path.join(self.root, self.repo_id)
-            temp_ds = LeRobotDataset(repo_id=self.repo_id, root=dataset_path)
-
-            self._pending_uploads += 1
-            self.executor.submit(self._async_push_to_hub, temp_ds)
-            self.episodes_since_sync = 0
-        except Exception as e:
-            print(f"[LEROBOT] ⚠️ Manual sync trigger failed: {e}")
-
-    def discard_episode(self):
-        """Aborts the current episode without saving or syncing."""
-        if self.dataset is None:
-            return
-        print(
-            f"[LEROBOT] Discarding current episode frames ({self.episode_frame_count})..."
-        )
-        self.episode_frame_count = 0  # Reset
-        self.dataset = None  # Drop reference (temp data ignored)
+    @property
+    def pending_uploads(self):
+        return self._pending_uploads
