@@ -175,15 +175,9 @@ class GR00TInferenceServer:
                     image_world_wrist_t,
                 ) = all_images_t
 
-                # Create 64-dim state (Rosetta Protocol 🧪)
-                state_full = np.zeros(64, dtype=np.float32)
-                state_full[0:7] = state_np[0:7]  # Left Arm
-                state_full[7:13] = state_np[7:13]  # Left Hand
-                state_full[19:22] = state_np[13:16]  # Neck/Head
-                state_full[22:29] = state_np[16:23]  # Right Arm
-                state_full[29:35] = state_np[23:29]  # Right Hand
-                state_full[41:44] = state_np[29:32]  # Waist
-                state_t = torch.tensor(state_full, dtype=torch.float32)
+                # Create 32-dim state (Compact Protocol 🧪)
+                # We skip Rosetta expansion to ensure fingers (indices 23-28) are within the model's 32-dim window.
+                state_t = torch.tensor(state_np, dtype=torch.float32)
 
                 # Prepared batch for preprocessor
                 batch = {
