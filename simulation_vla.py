@@ -33,6 +33,9 @@ class GR1VLAClient(GR1MuJoCoBase):
     def capture_vla_observation(self, instruction):
         """Captures 5-cam view and state in the standard ZMQ 'Handshake' format."""
 
+        # ✅ Ensure scene and lighting are initialized before capture
+        mujoco.mj_forward(self.model, self.data)
+
         def pack_np(arr):
             return {
                 "data": arr.tobytes(),
@@ -41,20 +44,17 @@ class GR1VLAClient(GR1MuJoCoBase):
             }
 
         state = self.get_state_32()
-        state_info = f"min:{np.nanmin(state):.4f}, max:{np.nanmax(state):.4f}, NaNs:{np.isnan(state).sum()}"
-        print(f"   [📡] Sending State: {state_info}")
-
         obs = {"instruction": instruction, "state": pack_np(state)}
         for cam in self.cam_names:
             self.renderer.update_scene(self.data, camera=cam)
-            img = self.renderer.render()
-            img_sum = np.sum(img)
-            print(f"   [📷] Camera {cam}: sum={img_sum} (shape={img.shape})")
-            obs[cam] = pack_np(img)
+            obs[cam] = pack_np(self.renderer.render())
         return obs
 
     def run(self, instruction="Pick up the red cube", max_chunks=10):
         print(f"🚀 Starting Autonomous Mission: '{instruction}'")
+
+        # ✅ VLA FIX: Initialize simulation state and renderer
+        self.reset_env()
 
         for chunk_idx in range(max_chunks):
             # 1. Perception
