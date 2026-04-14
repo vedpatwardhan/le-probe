@@ -1,7 +1,7 @@
 dataset:
   num_steps: ${eval:'${wm.num_preds} + ${wm.history_size}'}
   frameskip: 1
-  repo_id: "vedpatwardhan/gr1_pickup_large"
+  repo_id: "vedpatwardhan/gr1_pickup_compact_h264"
   keys_to_load:
     - pixels
     - action
