@@ -6,6 +6,7 @@ import msgpack
 import time
 import argparse
 import rerun as rr
+from PIL import Image
 import mujoco
 from simulation_base import GR1MuJoCoBase
 
@@ -32,7 +33,7 @@ class GR1VLAClient(GR1MuJoCoBase):
         self.vla_client.connect(f"tcp://{server_host}:{server_port}")
 
     def capture_vla_observation(self, instruction):
-        """Captures 5-cam view and state in the standard ZMQ 'Handshake' format."""
+        """Captures 5-cam view (resized to 224x224) and calibrated state."""
 
         # ✅ Ensure scene and lighting are initialized before capture
         mujoco.mj_forward(self.model, self.data)
@@ -44,11 +45,23 @@ class GR1VLAClient(GR1MuJoCoBase):
                 "dtype": str(arr.dtype),
             }
 
+        # ✅ POSTURAL CALIBRATION: Align Sim (-1.46) with Dataset (0.0)
+        # We shift the Shoulder Pitch so 'Arms Down' looks like 'Neutral' to the model.
         state = self.get_state_32()
-        obs = {"instruction": instruction, "state": pack_np(state)}
+        state_calibrated = state.copy()
+        state_calibrated[0] += 1.46  # Left Shoulder Pitch
+        state_calibrated[16] += 1.46  # Right Shoulder Pitch
+
+        obs = {"instruction": instruction, "state": pack_np(state_calibrated)}
         for cam in self.cam_names:
             self.renderer.update_scene(self.data, camera=cam)
-            obs[cam] = pack_np(self.renderer.render())
+            img_raw = self.renderer.render()
+
+            # ✅ RESIZE TO 224x224 (Model Native Resolution)
+            img_resized = np.array(
+                Image.fromarray(img_raw).resize((224, 224), Image.Resampling.LANCZOS)
+            )
+            obs[cam] = pack_np(img_resized)
         return obs
 
     def run(self, instruction="Pick up the red cube", max_chunks=10):
@@ -85,6 +98,12 @@ class GR1VLAClient(GR1MuJoCoBase):
                     print(f"   🚀 Executing {len(actions)} actions...")
                     for i, action in enumerate(actions):
                         action_32 = np.array(action, dtype=np.float32)
+
+                        # ✅ POSTURAL CALIBRATION: Mirror the shift for commands
+                        # Turn Model's 'Neutral (0.0)' back into Sim's 'Arms Down (-1.46)'
+                        action_32[0] -= 1.46
+                        action_32[16] -= 1.46
+
                         self.process_target_32(action_32)
 
                         # ✅ VLA FIX: Only reset start-point to actual physics on the FIRST action of the chunk.

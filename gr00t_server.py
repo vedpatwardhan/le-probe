@@ -18,85 +18,12 @@ from gr1_config import JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
 # -----------------------------------------------------------------------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# --- FAIL-SAFE STATISTICS (32-dim Compact Protocol) ---
-# TODO: GET RID OF THIS AND FETCH THESE VALUES PROGRAMMATICALLY
-# These are extracted directly from the gr1_pickup_compact_h264 dataset stats.json
-# to ensure perfect un-scaling even if local checkpoint stats fail to load.
-ACTION_MEAN_32 = [
-    -0.0086,
-    0.0005,
-    -0.0069,
-    0.0011,
-    0.0016,
-    -0.0022,
-    0.0221,  # Left Arm
-    -0.1827,
-    0.4221,
-    -0.4127,
-    0.1488,
-    -0.3398,
-    -0.5600,  # Left Hand
-    -0.0293,
-    0.0046,
-    0.0140,  # Head
-    0.0156,
-    -0.0146,
-    0.0097,
-    -0.0195,
-    0.0,
-    0.0,
-    0.0,  # Right Arm
-    -0.1079,
-    0.3248,
-    -0.1543,
-    -0.1439,
-    -0.1381,
-    -0.1428,  # Right Hand
-    0.0,
-    0.0,
-    0.0,  # Waist
-]
-ACTION_STD_32 = [
-    0.0468,
-    0.0565,
-    0.0383,
-    0.0513,
-    0.0360,
-    0.1277,
-    0.1864,  # Left Arm
-    0.0846,
-    0.2108,
-    0.1495,
-    0.0950,
-    0.1370,
-    0.2843,  # Left Hand
-    1.1000,
-    0.1273,
-    0.1853,  # Head
-    0.1343,
-    0.1360,
-    0.1383,
-    0.1293,
-    0.05,
-    0.05,
-    0.05,  # Right Arm
-    0.1697,
-    0.4124,
-    0.1730,
-    0.1812,
-    0.1852,
-    0.1818,  # Right Hand
-    0.05,
-    0.05,
-    0.05,  # Waist
-]
-
 # Force FlashAttention fallback for stability on certain GPUs
 _orig_check = PreTrainedModel._check_and_adjust_attn_implementation
 
 
 def patched_check_attn(self, attn_implementation, is_init_check):
-    if attn_implementation == "flash_attention_2":
+    if attn_implementation == "flash_attention_2" or attn_implementation is None:
         return "sdpa"
     return _orig_check(self, attn_implementation, is_init_check)
 
@@ -105,13 +32,13 @@ PreTrainedModel._check_and_adjust_attn_implementation = patched_check_attn
 
 
 # -----------------------------------------------------------------------------
-# 2. UNIFIED MODEL SERVER (Simplified Inference Logic)
+# 2. UNIFIED MODEL SERVER (Final Protocol Alignment)
 # -----------------------------------------------------------------------------
 class GR00TInferenceServer:
     """
     Unified Inference Server for GR00T-N1.5.
-    Uses the factory pre/post processors to handle SigLIP normalization
-    and embodiment-specific joint mapping.
+    Uses native LeRobot pre/post processors to handle Min-Max normalization
+    and vision encoding exactly as defined in policy_preprocessor.json.
     """
 
     def __init__(
@@ -120,413 +47,150 @@ class GR00TInferenceServer:
         port=5555,
         weights_path="nvidia/GR00T-N1.5-3B",
     ):
-        print(f"--- Initializing GR00T N1.5 Server (Embodiment: {embodiment_tag}) ---")
+        print(f"--- GR00T N1.5 Server (Protocol: Min-Max Native) ---")
         self.port = port
         self.weights_path = weights_path
         self.tokenizer = None
 
-        # Load Policy (Supports both HF Repo ID and local paths)
+        # Load Policy
         print(f"Loading weights from: {self.weights_path}")
-
-        # 1. Check if it's a local path and validate its existence
-        is_local = os.path.isdir(self.weights_path) or (
-            "/" in self.weights_path and not self.weights_path.count("/") == 1
-        )
-        if is_local:
-            if not os.path.exists(self.weights_path):
-                raise FileNotFoundError(
-                    f"❌ Local weights path '{self.weights_path}' not found. "
-                    "If this was meant to be a Hugging Face repo ID, ensure it follows 'namespace/repo' format. "
-                    "If it is a relative path, ensure you are running the server from the correct directory."
-                )
-            self.weights_path = os.path.abspath(self.weights_path)
-            print(f"Detected local path, resolved to: {self.weights_path}")
-        else:
-            print("Detected potential Hugging Face Repo ID...")
-
-        # 2. Attempt to load the Policy
         try:
-            print(f"Attempting to load policy from: {self.weights_path}")
             self.policy = GrootPolicy.from_pretrained(self.weights_path)
         except Exception as e:
-            # 3. Fallback: Load base model and override weights if local path fails as a policy
-            if is_local:
-                print(
-                    f"⚠️  Failed to load full policy from '{self.weights_path}' (Error: {e})."
-                )
-                print("🔄 Falling back to base GR00T-N1.5 model with custom weights...")
-                self.policy = GrootPolicy.from_pretrained("nvidia/GR00T-N1.5-3B")
+            print(f"🔄 Retrying with base fallback due to: {e}")
+            self.policy = GrootPolicy.from_pretrained("nvidia/GR00T-N1.5-3B")
+            # Try loading state dict from path if it exists
+            weights_file = os.path.join(self.weights_path, "model.safetensors")
+            if os.path.exists(weights_file):
+                from safetensors.torch import load_file
 
-                # Find weight file (safetensors preferred)
-                weights_file = os.path.join(self.weights_path, "model.safetensors")
-                if not os.path.exists(weights_file):
-                    weights_file = os.path.join(self.weights_path, "pytorch_model.bin")
-
-                if os.path.exists(weights_file):
-                    print(f"📥 Overriding state_dict from: {weights_file}")
-                    if weights_file.endswith(".safetensors"):
-                        from safetensors.torch import load_file
-
-                        state_dict = load_file(weights_file, device=DEVICE)
-                    else:
-                        state_dict = torch.load(weights_file, map_location=DEVICE)
-
-                    # GrootPolicy wraps the model in _groot_model
-                    try:
-                        # Try loading into the policy wrapper first (in case keys are prefixed)
-                        self.policy.load_state_dict(state_dict, strict=False)
-                    except:
-                        # Otherwise load directly into the model backbone
-                        self.policy._groot_model.load_state_dict(
-                            state_dict, strict=False
-                        )
-                    print("✅ Weights successfully overridden.")
-                else:
-                    raise FileNotFoundError(
-                        f"❌ No weights file (model.safetensors or pytorch_model.bin) found in {self.weights_path}"
-                    )
-            else:
-                # If it's a Repo ID and it fails, we just re-raise
-                print(f"❌ Failed to load policy from HuggingFace: {e}")
-                raise e
+                state_dict = load_file(weights_file, device=DEVICE)
+                self.policy.load_state_dict(state_dict, strict=False)
 
         self.policy.to(DEVICE)
         self.policy.eval()
 
-        # Setup Pre/Post Processors
-        # Setting the embodiment tag ensures the pipeline uses the correct joint limits (ID 24 for gr1)
+        # Setup Pre/Post Processors (Critical for Min-Max Scaling)
         self.policy.config.embodiment_tag = embodiment_tag
-
-        print("Creating processors...")
         self.preprocessor, self.postprocessor = make_pre_post_processors(
             policy_cfg=self.policy.config
         )
 
-        # Detect if we have legitimate statistical normalization for the state.
-        # Check for the existence of policy_preprocessor.json which and indicates a fine-tuned LeRobot checkpoint.
-        self.has_stats = False
-        if os.path.isdir(self.weights_path) and os.path.exists(
-            os.path.join(self.weights_path, "policy_preprocessor.json")
-        ):
-            self.has_stats = True
+        print("✅ Pre/Post Processors Initialized from JSON logic.")
 
-        # Fallback to introspection if the file check fails
-        if (
-            not self.has_stats
-            and hasattr(self.preprocessor, "feature_extractors")
-            and OBS_STATE in self.preprocessor.feature_extractors
-        ):
-            fe = self.preprocessor.feature_extractors[OBS_STATE]
-            if hasattr(fe, "do_normalize") and fe.do_normalize:
-                # Base model doesn't "normalize" in the feature extractor typically,
-                # we want to catch if the checkpoint has provided its own stats.
-                self.has_stats = True
-            elif hasattr(fe, "mean") and fe.mean is not None:
-                self.has_stats = True
-
-        print(
-            f"✅ Preprocessor Check: has_stats={self.has_stats} (Fine-tuned Mode: {self.has_stats})"
-        )
-
-        # Extract Action Stats for manual un-scaling (bypasses LeRobot Pipeline type-checking errors)
-        self.action_mean = None
-        self.action_std = None
-        if self.has_stats:
-            print("🔍 Searching for action statistics...")
-
-            # 1. Try to find stats in the policy configuration (Standard HF format)
-            if (
-                hasattr(self.policy.config, "stats")
-                and "action" in self.policy.config.stats
-            ):
-                stats = self.policy.config.stats["action"]
-                self.action_mean = torch.tensor(stats["mean"], device=DEVICE)
-                self.action_std = torch.tensor(stats["std"], device=DEVICE)
-                print("   ✅ Found 'action' stats in policy.config.stats")
-
-            # 2. Try to find stats in dataset_config (Local training format)
-            elif hasattr(self.policy.config, "dataset_config") and hasattr(
-                self.policy.config.dataset_config, "stats"
-            ):
-                stats = self.policy.config.dataset_config.stats.get("action")
-                if stats:
-                    self.action_mean = torch.tensor(stats["mean"], device=DEVICE)
-                    self.action_std = torch.tensor(stats["std"], device=DEVICE)
-                    print(
-                        "   ✅ Found 'action' stats in policy.config.dataset_config.stats"
-                    )
-
-            # 3. Fallback to Hardcoded Fail-safe for GR1 Compact Protocol
-            if self.action_mean is None and embodiment_tag == "gr1":
-                print(
-                    "   🛠️  Applying Fail-safe Static Constants (GR1 Compact Protocol)"
-                )
-                self.action_mean = torch.tensor(ACTION_MEAN_32, device=DEVICE)
-                self.action_std = torch.tensor(ACTION_STD_32, device=DEVICE)
-
-            if self.action_mean is None:
-                print(
-                    "   ⚠️ WARNING: No statistics found for 'action'. Output will use fallback scaling."
-                )
-            else:
-                print(
-                    f"   📊 Action Stats: Mean range [{self.action_mean.min():.3f}, {self.action_mean.max():.3f}], Std range [{self.action_std.min():.3f}, {self.action_std.max():.3f}]"
-                )
-
-        # Pre-cache Joint Limits on Device (for Base Model Mode)
-        self.joint_min_t = torch.tensor(
-            JOINT_LIMITS_MIN, device=DEVICE, dtype=torch.float32
-        )
-        self.joint_max_t = torch.tensor(
-            JOINT_LIMITS_MAX, device=DEVICE, dtype=torch.float32
-        )
-        self.joint_rng_t = torch.maximum(
-            torch.tensor(1e-4, device=DEVICE), self.joint_max_t - self.joint_min_t
-        )
-
-        # Extract Tokenizer (for Debugging)
-        self.tokenizer = None
-        for step in self.preprocessor.steps:
-            if hasattr(step, "proc") and hasattr(step.proc, "tokenizer"):
-                self.tokenizer = step.proc.tokenizer
-                break
-            elif hasattr(step, "tokenizer"):
-                self.tokenizer = step.tokenizer
-                break
-
-        print("✅ Model & Preprocessor Ready!")
-
-        print(
-            f"--- Policy Config Embodiment: {getattr(self.policy.config, 'embodiment_tag', 'None')} ---"
-        )
-
-    def log_diagnostics(self, batch, processed_batch, actions_np, instruction):
-        # General serialization function
-        def serialize(obj):
-            if isinstance(obj, torch.Tensor):
-                return obj.cpu().detach().numpy().tolist()
-            if isinstance(obj, np.ndarray):
-                return obj.tolist()
-            if isinstance(obj, dict):
-                return {k: serialize(v) for k, v in obj.items()}
-            return obj
-
-        # Prepare dict for logging current step
-        proc_state_np = processed_batch["observation.state"].cpu().detach().numpy()
-        log_entry = {
-            "timestamp": time.time(),
-            "batch": serialize(batch),
-            "processed_metrics": {
-                "observation.state": proc_state_np.tolist(),
-                "task": instruction,
-                "bounds": {
-                    "min": float(np.min(proc_state_np)),
-                    "max": float(np.max(proc_state_np)),
-                    "mean": float(np.mean(proc_state_np)),
+    def log_diagnostics(self, processed_batch, actions_np, instruction):
+        try:
+            proc_state_np = processed_batch["observation.state"].cpu().detach().numpy()
+            log_entry = {
+                "timestamp": time.time(),
+                "metrics": {
+                    "input_norm_range": [
+                        float(np.min(proc_state_np)),
+                        float(np.max(proc_state_np)),
+                    ],
+                    "instruction": instruction,
                 },
-                "has_dataset_stats": getattr(self.preprocessor, "stats", None)
-                is not None,
-            },
-            "output": serialize(actions_np),
-            "output_stats": {
-                "min": float(np.min(actions_np)),
-                "max": float(np.max(actions_np)),
-                "mean": float(np.mean(actions_np)),
-            },
-        }
-
-        # Load existing inference history if any
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        log_file = os.path.join(base_dir, "inference_history.json")
-        history = []
-        if os.path.exists(log_file):
-            with open(log_file, "r") as f:
-                history = json.load(f)
-
-        # Write updated history
-        history.append(log_entry)
-        with open(log_file, "w") as f:
-            json.dump(history, f, indent=2)
+                "output_stats": [float(np.min(actions_np)), float(np.max(actions_np))],
+            }
+            log_file = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "vla_server_diag.json"
+            )
+            with open(log_file, "a") as f:
+                f.write(json.dumps(log_entry) + "\n")
+        except:
+            pass
 
     def run(self, host="0.0.0.0"):
         context = zmq.Context()
         socket = context.socket(zmq.REP)
         socket.bind(f"tcp://{host}:{self.port}")
-        print(f"🚀 GR-1 Model Server listening on port {self.port}...")
+        print(f"🚀 GR-1 VLA Server listening on port {self.port}...")
 
         while True:
             try:
+                # 1. Network Handshake
                 message = socket.recv()
                 req = msgpack.unpackb(message, raw=False)
-                print(
-                    f"[{time.strftime('%H:%M:%S')}] 📥 Incoming request: '{req.get('instruction')}'"
-                )
+                instruction = req.get("instruction", "Pick up the red cube")
 
-                # Unpack Inputs from Simulation Client
                 unpack_np = lambda d: (
                     np.frombuffer(d["data"], dtype=d["dtype"]).reshape(d["shape"])
                 )
-                image_world_top_np = unpack_np(req.get("world_top"))
-                image_world_left_np = unpack_np(req.get("world_left"))
-                image_world_right_np = unpack_np(req.get("world_right"))
-                image_world_center_np = unpack_np(req.get("world_center"))
-                image_world_wrist_np = unpack_np(req.get("world_wrist"))
-                state_np = unpack_np(req.get("state"))
-                instruction = req.get("instruction", "Pick up the red cube")
 
-                # ✅ DIAGNOSTIC LOGGING (E2E EVIDENCE)
-                print(
-                    f"   [📥] Received RAW State: min:{state_np.min():.4f}, max:{state_np.max():.4f}, NaNs:{np.isnan(state_np).sum()}"
-                )
-                for cam in [
+                # 2. Perception (Resized to 224 in Sim, arriving as uint8)
+                cams = [
                     "world_top",
                     "world_left",
                     "world_right",
                     "world_center",
                     "world_wrist",
-                ]:
+                ]
+                img_list = []
+                for cam in cams:
                     img = unpack_np(req.get(cam))
-                    print(f"   [🖼️] Received {cam}: sum={np.sum(img)}")
+                    img_list.append(img)
 
-                # Transform images ((224, 224, 3) -> (3, 224, 224))
-                all_imgs_np = np.stack(
-                    [
-                        image_world_top_np,
-                        image_world_left_np,
-                        image_world_right_np,
-                        image_world_center_np,
-                        image_world_wrist_np,
-                    ]
-                )
-                all_images_t = torch.as_tensor(all_imgs_np, dtype=torch.uint8).permute(
-                    0, 3, 1, 2
-                )
-                (
-                    image_world_top_t,
-                    image_world_left_t,
-                    image_world_right_t,
-                    image_world_center_t,
-                    image_world_wrist_t,
-                ) = all_images_t
+                # Stack and permute to [B, C, H, W] for LeRobot
+                all_imgs_np = np.stack(img_list)
+                all_images_t = torch.as_tensor(
+                    all_imgs_np, dtype=torch.uint8, device=DEVICE
+                ).permute(0, 3, 1, 2)
 
-                # Create 32-dim state (Compact Protocol 🧪)
-                # We skip Rosetta expansion to ensure fingers (indices 23-28) are within the model's 32-dim window.
-                state_raw_t = torch.tensor(state_np, dtype=torch.float32, device=DEVICE)
+                # 3. State Preparation (Calibrated in Sim, arriving as radians)
+                state_np = unpack_np(req.get("state"))
+                state_raw_t = torch.tensor(
+                    state_np, dtype=torch.float32, device=DEVICE
+                ).unsqueeze(
+                    0
+                )  # [1, 32]
 
-                if self.has_stats:
-                    # ✅ FINE-TUNED FIX: Apply manual Z-scoring (Scale to Gaussian)
-                    # Training logs show ACTION: IDENTITY, but STATE: MEAN_STD.
-                    # Since state/action are symmetric, we use action_stats for the state.
-                    if self.action_mean is not None:
-                        # Prevent division by zero for dimensions with no variance
-                        safe_std = torch.where(
-                            self.action_std == 0,
-                            torch.ones_like(self.action_std),
-                            self.action_std,
-                        )
-                        state_t = (state_raw_t - self.action_mean) / safe_std
-                        print(
-                            f"   [📊] Input Normalization Applied. Range: [{state_t.min():.3f}, {state_t.max():.3f}]"
-                        )
-                    else:
-                        state_t = state_raw_t
-                else:
-                    # Base model lacks stats; we manually scale radians to [-1, 1] bounds
-                    print("   [INFO] Applying manual [-1, 1] scaling (Base Model Mode)")
-                    state_t = (
-                        2.0 * (state_raw_t - self.joint_min_t) / self.joint_rng_t - 1.0
-                    )
-                    state_t = torch.clamp(state_t, -1.1, 1.1)
-
-                # Prepared batch for preprocessor
+                # 4. Batch Construction
                 batch = {
-                    f"{OBS_IMAGES}.world_top": image_world_top_t,
-                    f"{OBS_IMAGES}.world_left": image_world_left_t,
-                    f"{OBS_IMAGES}.world_right": image_world_right_t,
-                    f"{OBS_IMAGES}.world_center": image_world_center_t,
-                    f"{OBS_IMAGES}.world_wrist": image_world_wrist_t,
-                    OBS_STATE: state_t,
+                    f"{OBS_IMAGES}.world_top": all_images_t[0].unsqueeze(0),
+                    f"{OBS_IMAGES}.world_left": all_images_t[1].unsqueeze(0),
+                    f"{OBS_IMAGES}.world_right": all_images_t[2].unsqueeze(0),
+                    f"{OBS_IMAGES}.world_center": all_images_t[3].unsqueeze(0),
+                    f"{OBS_IMAGES}.world_wrist": all_images_t[4].unsqueeze(0),
+                    OBS_STATE: state_raw_t,
                     "task": instruction,
                     "embodiment_id": torch.tensor(
                         [24], dtype=torch.long, device=DEVICE
                     ),
                 }
-                start_time = time.time()
 
-                # Preprocessing for tokenization and move to device (no normalization)
+                # 5. Native Native Preprocessing (Min-Max + Vision Encode)
                 processed_batch = self.preprocessor(batch)
-                for k, v in processed_batch.items():
-                    if isinstance(v, torch.Tensor):
-                        processed_batch[k] = v.to(DEVICE)
 
-                # Run inference
-                print("   [DEBUG] Running Model Inference...")
+                # 6. Model Prediction
                 with torch.inference_mode():
                     action_chunk = self.policy.predict_action_chunk(processed_batch)
 
-                if self.has_stats:
-                    # ✅ FINE-TUNED FIX: Set Output to IDENTITY
-                    # Training logs show ACTION: IDENTITY. The model speaks Physical Radians.
-                    actions_np = action_chunk[0].cpu().numpy()
-                else:
-                    # Base model outputs [-1, 1]; we manually scale back to Radians using Joint Limits
-                    actions_raw_np = action_chunk[0]  # On DEVICE
-                    print(
-                        "   [INFO] Applying manual Radians un-scaling (Base Model Mode)"
-                    )
-                    actions_t = (
-                        actions_raw_np + 1.0
-                    ) / 2.0 * self.joint_rng_t + self.joint_min_t
-                    actions_np = actions_t.cpu().numpy()
-                inference_time = time.time() - start_time
-                print(f"   [DEBUG] Inference Time: {inference_time:.2f} seconds")
+                # 7. Native Postprocessing (De-normalization to Radians)
+                # The postprocessor handles the Min-Max unscaling defined in policy_postprocessor.json
+                actions_t = self.postprocessor(action_chunk)
+                actions_np = actions_t[0].cpu().numpy()
 
-                # Diagnostic Data Logging
-                self.log_diagnostics(batch, processed_batch, actions_np, instruction)
-
-                # Return canonical 32-dim action (Arms, Hands, Neck, Waist)
-                payload = {
-                    "action": actions_np.tolist(),
-                    "diagnostics": {
-                        "instruction": instruction,
-                        "inference_time_ms": int((time.time() - start_time) * 1000),
-                        "chunk_size": actions_np.shape[0],
-                    },
-                }
+                # 8. Feedback & Diagnostics
+                self.log_diagnostics(processed_batch, actions_np, instruction)
                 print(
-                    f"   [DEBUG] Sending response back. Chunk Size: {actions_np.shape[0]}"
+                    f"[{time.strftime('%H:%M:%S')}] 🧠 Inference. Norm Range: [{processed_batch[OBS_STATE].min():.2f}, {processed_batch[OBS_STATE].max():.2f}]"
                 )
-                socket.send(msgpack.packb(payload, use_bin_type=True))
+
+                socket.send(
+                    msgpack.packb({"action": actions_np.tolist()}, use_bin_type=True)
+                )
 
             except Exception as e:
-                print(f"❌ Error in Inference Loop: {e}")
+                print(f"❌ Server Error: {e}")
                 traceback.print_exc()
                 socket.send(msgpack.packb({"error": str(e)}, use_bin_type=True))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="GR00T-N1.5 Inference Server")
-    parser.add_argument(
-        "--weights",
-        "-w",
-        type=str,
-        default="nvidia/GR00T-N1.5-3B",
-        help="Hugging Face repo ID or local path to the fine-tuned weights (e.g. /path/to/checkpoint/pretrained_model).",
-    )
-    parser.add_argument(
-        "--port",
-        "-p",
-        type=int,
-        default=5555,
-        help="Port to listen on (default: 5555).",
-    )
-    parser.add_argument(
-        "--tag",
-        "-t",
-        type=str,
-        default="gr1",
-        help="Embodiment tag (default: gr1).",
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--weights", "-w", type=str, default="nvidia/GR00T-N1.5-3B")
+    parser.add_argument("--port", "-p", type=int, default=5555)
+    parser.add_argument("--tag", "-t", type=str, default="gr1")
     args = parser.parse_args()
 
     server = GR00TInferenceServer(
