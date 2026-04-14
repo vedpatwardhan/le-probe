@@ -159,9 +159,10 @@ class GR00TInferenceServer:
 
                 # De-normalization and Ensure 2D [T, 32]
                 actions_t = self.postprocessor(action_chunk)
+                # actions_t is [Batch, Horizon, Dim] -> [1, 16, 32]
                 actions_np = actions_t[0].cpu().numpy()
 
-                # RELOAD FOR SAFETY: If postprocessor flattens to (32,), expand to (1, 32)
+                # If the postprocessor or model only produced one frame, it might be (32,)
                 if actions_np.ndim == 1:
                     actions_np = actions_np[np.newaxis, :]
 
