@@ -53,7 +53,69 @@ class GR00TInferenceServer:
 
         # Load Policy (Supports both HF Repo ID and local paths)
         print(f"Loading weights from: {self.weights_path}")
-        self.policy = GrootPolicy.from_pretrained(self.weights_path)
+
+        # 1. Check if it's a local path and validate its existence
+        is_local = os.path.isdir(self.weights_path) or (
+            "/" in self.weights_path and not self.weights_path.count("/") == 1
+        )
+        if is_local:
+            if not os.path.exists(self.weights_path):
+                raise FileNotFoundError(
+                    f"❌ Local weights path '{self.weights_path}' not found. "
+                    "If this was meant to be a Hugging Face repo ID, ensure it follows 'namespace/repo' format. "
+                    "If it is a relative path, ensure you are running the server from the correct directory."
+                )
+            self.weights_path = os.path.abspath(self.weights_path)
+            print(f"Detected local path, resolved to: {self.weights_path}")
+        else:
+            print("Detected potential Hugging Face Repo ID...")
+
+        # 2. Attempt to load the Policy
+        try:
+            print(f"Attempting to load policy from: {self.weights_path}")
+            self.policy = GrootPolicy.from_pretrained(self.weights_path)
+        except Exception as e:
+            # 3. Fallback: Load base model and override weights if local path fails as a policy
+            if is_local:
+                print(
+                    f"⚠️  Failed to load full policy from '{self.weights_path}' (Error: {e})."
+                )
+                print("🔄 Falling back to base GR00T-N1.5 model with custom weights...")
+                self.policy = GrootPolicy.from_pretrained("nvidia/GR00T-N1.5-3B")
+
+                # Find weight file (safetensors preferred)
+                weights_file = os.path.join(self.weights_path, "model.safetensors")
+                if not os.path.exists(weights_file):
+                    weights_file = os.path.join(self.weights_path, "pytorch_model.bin")
+
+                if os.path.exists(weights_file):
+                    print(f"📥 Overriding state_dict from: {weights_file}")
+                    if weights_file.endswith(".safetensors"):
+                        from safetensors.torch import load_file
+
+                        state_dict = load_file(weights_file, device=DEVICE)
+                    else:
+                        state_dict = torch.load(weights_file, map_location=DEVICE)
+
+                    # GrootPolicy wraps the model in _groot_model
+                    try:
+                        # Try loading into the policy wrapper first (in case keys are prefixed)
+                        self.policy.load_state_dict(state_dict, strict=False)
+                    except:
+                        # Otherwise load directly into the model backbone
+                        self.policy._groot_model.load_state_dict(
+                            state_dict, strict=False
+                        )
+                    print("✅ Weights successfully overridden.")
+                else:
+                    raise FileNotFoundError(
+                        f"❌ No weights file (model.safetensors or pytorch_model.bin) found in {self.weights_path}"
+                    )
+            else:
+                # If it's a Repo ID and it fails, we just re-raise
+                print(f"❌ Failed to load policy from HuggingFace: {e}")
+                raise e
+
         self.policy.to(DEVICE)
         self.policy.eval()
 
