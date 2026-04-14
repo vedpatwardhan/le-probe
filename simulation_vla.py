@@ -6,6 +6,7 @@ import msgpack
 import time
 import argparse
 import rerun as rr
+import traceback
 from PIL import Image
 import mujoco
 from simulation_base import GR1MuJoCoBase
@@ -95,19 +96,27 @@ class GR1VLAClient(GR1MuJoCoBase):
                             f"⚠️ Received Action Chunk: {actions_np.shape} BUT ALL VALUES ARE NAN!"
                         )
 
-                    print(f"   🚀 Executing {len(actions)} actions...")
                     for i, action in enumerate(actions):
-                        action_32 = np.array(action, dtype=np.float32)
+                        # Ensure 'action' is at least 1D (a vector of 32 joints)
+                        action_np = np.array(action, dtype=np.float32)
+                        if action_np.ndim == 0:
+                            # If 'actions' was a 1D list, treat it as a single frame
+                            action_32 = np.array(actions, dtype=np.float32)
+                            action_32[0] -= 1.46
+                            action_32[16] -= 1.46
+                            self.dispatch_action(
+                                action_32,
+                                self.last_target_q,
+                                n_steps=32,
+                                reset_start=True,
+                            )
+                            break
 
-                        # ✅ POSTURAL CALIBRATION: Mirror the shift for commands
-                        # Turn Model's 'Neutral (0.0)' back into Sim's 'Arms Down (-1.46)'
+                        action_32 = action_np
                         action_32[0] -= 1.46
                         action_32[16] -= 1.46
 
                         self.process_target_32(action_32)
-
-                        # ✅ VLA FIX: Only reset start-point to actual physics on the FIRST action of the chunk.
-                        # For frames 2-16, we follow the predicted trajectory smoothly.
                         do_reset = i == 0
                         self.dispatch_action(
                             action_32,
@@ -119,7 +128,8 @@ class GR1VLAClient(GR1MuJoCoBase):
                     print(f"❌ VLA Server Error: {resp.get('error', 'Unknown error')}")
                     break
             except Exception as e:
-                print(f"❌ Connection Error: {e}")
+                print(f"❌ Mission Error: {e}")
+                traceback.print_exc()
                 break
 
         print("🏁 Mission Complete. Exit.")

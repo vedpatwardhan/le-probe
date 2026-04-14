@@ -37,8 +37,7 @@ PreTrainedModel._check_and_adjust_attn_implementation = patched_check_attn
 class GR00TInferenceServer:
     """
     Unified Inference Server for GR00T-N1.5.
-    Uses native LeRobot pre/post processors to handle Min-Max normalization
-    and vision encoding exactly as defined in policy_preprocessor.json.
+    Uses native LeRobot pre/post processors to handle Min-Max normalization.
     """
 
     def __init__(
@@ -59,7 +58,6 @@ class GR00TInferenceServer:
         except Exception as e:
             print(f"🔄 Retrying with base fallback due to: {e}")
             self.policy = GrootPolicy.from_pretrained("nvidia/GR00T-N1.5-3B")
-            # Try loading state dict from path if it exists
             weights_file = os.path.join(self.weights_path, "model.safetensors")
             if os.path.exists(weights_file):
                 from safetensors.torch import load_file
@@ -70,13 +68,11 @@ class GR00TInferenceServer:
         self.policy.to(DEVICE)
         self.policy.eval()
 
-        # Setup Pre/Post Processors (Critical for Min-Max Scaling)
         self.policy.config.embodiment_tag = embodiment_tag
         self.preprocessor, self.postprocessor = make_pre_post_processors(
             policy_cfg=self.policy.config
         )
-
-        print("✅ Pre/Post Processors Initialized from JSON logic.")
+        print("✅ Pre/Post Processors Initialized.")
 
     def log_diagnostics(self, processed_batch, actions_np, instruction):
         try:
@@ -108,7 +104,6 @@ class GR00TInferenceServer:
 
         while True:
             try:
-                # 1. Network Handshake
                 message = socket.recv()
                 req = msgpack.unpackb(message, raw=False)
                 instruction = req.get("instruction", "Pick up the red cube")
@@ -117,7 +112,7 @@ class GR00TInferenceServer:
                     np.frombuffer(d["data"], dtype=d["dtype"]).reshape(d["shape"])
                 )
 
-                # 2. Perception (Resized to 224 in Sim, arriving as uint8)
+                # Images
                 cams = [
                     "world_top",
                     "world_left",
@@ -130,13 +125,12 @@ class GR00TInferenceServer:
                     img = unpack_np(req.get(cam))
                     img_list.append(img)
 
-                # Stack and permute to [B, C, H, W] for LeRobot
                 all_imgs_np = np.stack(img_list)
                 all_images_t = torch.as_tensor(
                     all_imgs_np, dtype=torch.uint8, device=DEVICE
                 ).permute(0, 3, 1, 2)
 
-                # 3. State Preparation (Calibrated in Sim, arriving as radians)
+                # State Calibration handled simulation-side
                 state_np = unpack_np(req.get("state"))
                 state_raw_t = torch.tensor(
                     state_np, dtype=torch.float32, device=DEVICE
@@ -144,7 +138,7 @@ class GR00TInferenceServer:
                     0
                 )  # [1, 32]
 
-                # 4. Batch Construction
+                # Batch
                 batch = {
                     f"{OBS_IMAGES}.world_top": all_images_t[0].unsqueeze(0),
                     f"{OBS_IMAGES}.world_left": all_images_t[1].unsqueeze(0),
@@ -158,24 +152,24 @@ class GR00TInferenceServer:
                     ),
                 }
 
-                # 5. Native Native Preprocessing (Min-Max + Vision Encode)
                 processed_batch = self.preprocessor(batch)
 
-                # 6. Model Prediction
                 with torch.inference_mode():
                     action_chunk = self.policy.predict_action_chunk(processed_batch)
 
-                # 7. Native Postprocessing (De-normalization to Radians)
-                # The postprocessor handles the Min-Max unscaling defined in policy_postprocessor.json
+                # De-normalization and Ensure 2D [T, 32]
                 actions_t = self.postprocessor(action_chunk)
                 actions_np = actions_t[0].cpu().numpy()
 
-                # 8. Feedback & Diagnostics
-                self.log_diagnostics(processed_batch, actions_np, instruction)
+                # RELOAD FOR SAFETY: If postprocessor flattens to (32,), expand to (1, 32)
+                if actions_np.ndim == 1:
+                    actions_np = actions_np[np.newaxis, :]
+
                 print(
-                    f"[{time.strftime('%H:%M:%S')}] 🧠 Inference. Norm Range: [{processed_batch[OBS_STATE].min():.2f}, {processed_batch[OBS_STATE].max():.2f}]"
+                    f"[{time.strftime('%H:%M:%S')}] 🧠 Inference. Norm Range: [{processed_batch[OBS_STATE].min():.2f}, {processed_batch[OBS_STATE].max():.2f}] | Actions: {actions_np.shape}"
                 )
 
+                self.log_diagnostics(processed_batch, actions_np, instruction)
                 socket.send(
                     msgpack.packb({"action": actions_np.tolist()}, use_bin_type=True)
                 )
