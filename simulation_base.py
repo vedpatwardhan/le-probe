@@ -204,15 +204,12 @@ class GR1MuJoCoBase:
         return self.qpos_to_action_32(self.data.qpos)
 
     def qpos_to_action_32(self, qpos):
-        """Converts a 76-dim qpos vector to a normalized 32-dim protocol action/state."""
+        """Converts a 76-dim qpos vector to a raw 32-dim protocol action/state (Radians)."""
         state = np.zeros(32, dtype=np.float32)
         for i, j_id in enumerate(self.protocol_joint_ids):
             if j_id != -1:
-                qpos_idx = self.model.jnt_qposadr[j_id]
-                val = qpos[qpos_idx]
-                rng = max(1e-4, self.wire_max[i] - self.wire_min[i])
-                norm = 2.0 * (val - self.wire_min[i]) / rng - 1.0
-                state[i] = np.clip(norm, -1.1, 1.1)
+                q_idx = self.model.jnt_qposadr[j_id]
+                state[i] = qpos[q_idx]
         return state
 
     def solve_ik(self, pos_wrist, quat, pos_index=None, pos_thumb=None):
@@ -282,14 +279,20 @@ class GR1MuJoCoBase:
         if self.is_recording:
             self.recorder.add_frame(views, self.get_state_32(), action_32)
 
-    def dispatch_action(self, action_32, target_q, n_steps=None, render_freq=None):
+    def dispatch_action(
+        self, action_32, target_q, n_steps=None, render_freq=None, reset_start=True
+    ):
         # Backward Compatible Defaults
         total_steps = n_steps if n_steps is not None else 200
         rf = render_freq if render_freq is not None else 16
 
-        start_q = self.data.qpos.copy()
-        delta_norm = np.linalg.norm(target_q - start_q)
-        self._debug_log(f"🚀 Dispatching Action. L2 Delta Norm: {delta_norm:.6f}")
+        # ✅ VLA FIX: Trajectory Threading
+        # If reset_start is True (default), we interpolate from current actual physics pose.
+        # If False, we preserve the last target to ensure smooth trajectory flow across chunks.
+        if reset_start or not hasattr(self, "_last_interp_q"):
+            self._last_interp_q = self.data.qpos.copy()
+
+        start_q = self._last_interp_q
 
         root_target = target_q[self.root_q_idx : self.root_q_idx + 7]
         for step in range(total_steps):
@@ -307,6 +310,9 @@ class GR1MuJoCoBase:
         # Ensure at least one render at the end if rf was too large
         if rf >= total_steps or rf == 0:
             self.render_and_record(action_32)
+
+        # Save target for next chunk (VLA Trajectory Threading)
+        self._last_interp_q = target_q.copy()
 
     def reset_env(self):
         print("🎲 Randomizing the environment...")
@@ -353,11 +359,9 @@ class GR1MuJoCoBase:
                 and self.protocol_joint_ids[i] != -1
             ):
                 self.active_joints_this_command.add(i)
-                val = np.clip(val, -1.0, 1.0)
+                # action_32 is now RAW RADIANS from the server
                 q_idx = self.model.jnt_qposadr[self.protocol_joint_ids[i]]
-                rad = (val + 1.0) / 2.0 * (
-                    self.wire_max[i] - self.wire_min[i]
-                ) + self.wire_min[i]
+                rad = val
                 old_rad = self.last_target_q[q_idx]
                 self.last_target_q[q_idx] = rad
                 if abs(rad - old_rad) > 1e-5:

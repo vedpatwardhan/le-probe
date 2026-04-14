@@ -79,10 +79,19 @@ class GR1VLAClient(GR1MuJoCoBase):
                         )
 
                     print(f"   🚀 Executing {len(actions)} actions...")
-                    for action in actions:
+                    for i, action in enumerate(actions):
                         action_32 = np.array(action, dtype=np.float32)
                         self.process_target_32(action_32)
-                        self.dispatch_action(action_32, self.last_target_q)
+
+                        # ✅ VLA FIX: Only reset start-point to actual physics on the FIRST action of the chunk.
+                        # For frames 2-16, we follow the predicted trajectory smoothly.
+                        do_reset = i == 0
+                        self.dispatch_action(
+                            action_32,
+                            self.last_target_q,
+                            n_steps=32,
+                            reset_start=do_reset,
+                        )
                 else:
                     print(f"❌ VLA Server Error: {resp.get('error', 'Unknown error')}")
                     break

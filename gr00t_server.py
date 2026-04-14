@@ -11,11 +11,85 @@ from transformers import PreTrainedModel
 from lerobot.policies.groot.modeling_groot import GrootPolicy
 from lerobot.policies.factory import make_pre_post_processors
 from lerobot.utils.constants import OBS_IMAGES, OBS_STATE
+from gr1_config import JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
 
 # -----------------------------------------------------------------------------
 # 1. HARDWARE & COMPATIBILITY
 # -----------------------------------------------------------------------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# --- FAIL-SAFE STATISTICS (32-dim Compact Protocol) ---
+# TODO: GET RID OF THIS AND FETCH THESE VALUES PROGRAMMATICALLY
+# These are extracted directly from the gr1_pickup_compact_h264 dataset stats.json
+# to ensure perfect un-scaling even if local checkpoint stats fail to load.
+ACTION_MEAN_32 = [
+    -0.00885169580578804,
+    -0.0004610285977832973,
+    -0.006922537460923195,
+    0.0008136362303048372,
+    0.0016450101975351572,
+    -0.0023524146527051926,
+    0.02196965366601944,
+    -0.1878836452960968,
+    0.4360756278038025,
+    -0.42222365736961365,
+    0.15410202741622925,
+    -0.34708738327026367,
+    -0.5762120485305786,
+    -0.029333386570215225,
+    0.004611211828887463,
+    0.013999348506331444,
+    0.015579478815197945,
+    -0.014618994668126106,
+    0.0096802469342947,
+    -0.019505003467202187,
+    0.0,
+    0.0,
+    0.0,
+    -0.11612068861722946,
+    0.3479006290435791,
+    -0.16578777134418488,
+    -0.15538309514522552,
+    -0.15033003687858582,
+    -0.1550322026014328,
+    0.0,
+    0.0,
+    0.0,
+]
+ACTION_STD_32 = [
+    0.04668724164366722,
+    0.05634459853172302,
+    0.038286760449409485,
+    0.05131921544671059,
+    0.03601062670350075,
+    0.12776821851730347,
+    0.1863974630832672,
+    0.0816228985786438,
+    0.20345927774906158,
+    0.1388711780309677,
+    0.0957081988453865,
+    0.13011333346366882,
+    0.27658334374427795,
+    1.0996264219284058,
+    0.12731678783893585,
+    0.18531660735607147,
+    0.13456332683563232,
+    0.13627128303050995,
+    0.13853468000888824,
+    0.1295442134141922,
+    0.0,
+    0.0,
+    0.0,
+    0.1718074232339859,
+    0.42163020372390747,
+    0.17843188345432281,
+    0.18690456449985504,
+    0.19115972518920898,
+    0.18743643164634705,
+    0.0,
+    0.0,
+    0.0,
+]
 
 # Force FlashAttention fallback for stability on certain GPUs
 _orig_check = PreTrainedModel._check_and_adjust_attn_implementation
@@ -124,7 +198,80 @@ class GR00TInferenceServer:
         self.policy.config.embodiment_tag = embodiment_tag
 
         print("Creating processors...")
-        self.preprocessor, _ = make_pre_post_processors(policy_cfg=self.policy.config)
+        self.preprocessor, self.postprocessor = make_pre_post_processors(
+            policy_cfg=self.policy.config
+        )
+
+        # Detect if we have legitimate statistical normalization for the state.
+        # Check for the existence of policy_preprocessor.json which and indicates a fine-tuned LeRobot checkpoint.
+        self.has_stats = False
+        if os.path.isdir(self.weights_path) and os.path.exists(
+            os.path.join(self.weights_path, "policy_preprocessor.json")
+        ):
+            self.has_stats = True
+
+        # Fallback to introspection if the file check fails
+        if (
+            not self.has_stats
+            and hasattr(self.preprocessor, "feature_extractors")
+            and OBS_STATE in self.preprocessor.feature_extractors
+        ):
+            fe = self.preprocessor.feature_extractors[OBS_STATE]
+            if hasattr(fe, "do_normalize") and fe.do_normalize:
+                # Base model doesn't "normalize" in the feature extractor typically,
+                # we want to catch if the checkpoint has provided its own stats.
+                self.has_stats = True
+            elif hasattr(fe, "mean") and fe.mean is not None:
+                self.has_stats = True
+
+        print(
+            f"✅ Preprocessor Check: has_stats={self.has_stats} (Fine-tuned Mode: {self.has_stats})"
+        )
+
+        # Extract Action Stats for manual un-scaling (bypasses LeRobot Pipeline type-checking errors)
+        self.action_mean = None
+        self.action_std = None
+        if self.has_stats:
+            print("🔍 Searching for action statistics...")
+
+            # 1. Try to find stats in the policy configuration (Standard HF format)
+            if (
+                hasattr(self.policy.config, "stats")
+                and "action" in self.policy.config.stats
+            ):
+                stats = self.policy.config.stats["action"]
+                self.action_mean = torch.tensor(stats["mean"], device=DEVICE)
+                self.action_std = torch.tensor(stats["std"], device=DEVICE)
+                print("   ✅ Found 'action' stats in policy.config.stats")
+
+            # 2. Try to find stats in dataset_config (Local training format)
+            elif hasattr(self.policy.config, "dataset_config") and hasattr(
+                self.policy.config.dataset_config, "stats"
+            ):
+                stats = self.policy.config.dataset_config.stats.get("action")
+                if stats:
+                    self.action_mean = torch.tensor(stats["mean"], device=DEVICE)
+                    self.action_std = torch.tensor(stats["std"], device=DEVICE)
+                    print(
+                        "   ✅ Found 'action' stats in policy.config.dataset_config.stats"
+                    )
+
+            # 3. Fallback to Hardcoded Fail-safe for GR1 Compact Protocol
+            if self.action_mean is None and embodiment_tag == "gr1":
+                print(
+                    "   🛠️  Applying Fail-safe Static Constants (GR1 Compact Protocol)"
+                )
+                self.action_mean = torch.tensor(ACTION_MEAN_32, device=DEVICE)
+                self.action_std = torch.tensor(ACTION_STD_32, device=DEVICE)
+
+            if self.action_mean is None:
+                print(
+                    "   ⚠️ WARNING: No statistics found for 'action'. Output will use fallback scaling."
+                )
+            else:
+                print(
+                    f"   📊 Action Stats: Mean range [{self.action_mean.min():.3f}, {self.action_mean.max():.3f}], Std range [{self.action_std.min():.3f}, {self.action_std.max():.3f}]"
+                )
 
         # Extract Tokenizer (for Debugging)
         self.tokenizer = None
@@ -239,7 +386,30 @@ class GR00TInferenceServer:
 
                 # Create 32-dim state (Compact Protocol 🧪)
                 # We skip Rosetta expansion to ensure fingers (indices 23-28) are within the model's 32-dim window.
-                state_t = torch.tensor(state_np, dtype=torch.float32)
+                state_raw_t = torch.tensor(state_np, dtype=torch.float32)
+
+                if self.has_stats:
+                    # ✅ FINE-TUNED FIX: Apply manual Z-scoring (Scale to Gaussian)
+                    # Training logs show ACTION: IDENTITY, but STATE: MEAN_STD.
+                    # Since state/action are symmetric, we use action_stats for the state.
+                    if self.action_mean is not None:
+                        state_t = (state_raw_t - self.action_mean) / self.action_std
+                        print(
+                            f"   [📊] Input Normalization Applied. Range: [{state_t.min():.3f}, {state_t.max():.3f}]"
+                        )
+                    else:
+                        state_t = state_raw_t
+                else:
+                    # Base model lacks stats; we manually scale radians to [-1, 1] bounds
+                    print("   [INFO] Applying manual [-1, 1] scaling (Base Model Mode)")
+                    rng = np.maximum(1e-4, JOINT_LIMITS_MAX - JOINT_LIMITS_MIN)
+                    state_t = (
+                        2.0
+                        * (state_raw_t - torch.tensor(JOINT_LIMITS_MIN))
+                        / torch.tensor(rng)
+                        - 1.0
+                    )
+                    state_t = torch.clamp(state_t, -1.1, 1.1)
 
                 # Prepared batch for preprocessor
                 batch = {
@@ -267,7 +437,18 @@ class GR00TInferenceServer:
                 with torch.inference_mode():
                     action_chunk = self.policy.predict_action_chunk(processed_batch)
 
-                actions_np = action_chunk[0].cpu().numpy()  # (16, 32)
+                if self.has_stats:
+                    # ✅ FINE-TUNED FIX: Set Output to IDENTITY
+                    # Training logs show ACTION: IDENTITY. The model speaks Physical Radians.
+                    actions_np = action_chunk[0].cpu().numpy()
+                else:
+                    # Base model outputs [-1, 1]; we manually scale back to Radians using Joint Limits
+                    actions_raw_np = action_chunk[0].cpu().numpy()
+                    print(
+                        "   [INFO] Applying manual Radians un-scaling (Base Model Mode)"
+                    )
+                    rng = np.maximum(1e-4, JOINT_LIMITS_MAX - JOINT_LIMITS_MIN)
+                    actions_np = (actions_raw_np + 1.0) / 2.0 * rng + JOINT_LIMITS_MIN
                 inference_time = time.time() - start_time
                 print(f"   [DEBUG] Inference Time: {inference_time:.2f} seconds")
 
