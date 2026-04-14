@@ -273,6 +273,17 @@ class GR00TInferenceServer:
                     f"   📊 Action Stats: Mean range [{self.action_mean.min():.3f}, {self.action_mean.max():.3f}], Std range [{self.action_std.min():.3f}, {self.action_std.max():.3f}]"
                 )
 
+        # Pre-cache Joint Limits on Device (for Base Model Mode)
+        self.joint_min_t = torch.tensor(
+            JOINT_LIMITS_MIN, device=DEVICE, dtype=torch.float32
+        )
+        self.joint_max_t = torch.tensor(
+            JOINT_LIMITS_MAX, device=DEVICE, dtype=torch.float32
+        )
+        self.joint_rng_t = torch.maximum(
+            torch.tensor(1e-4, device=DEVICE), self.joint_max_t - self.joint_min_t
+        )
+
         # Extract Tokenizer (for Debugging)
         self.tokenizer = None
         for step in self.preprocessor.steps:
@@ -386,7 +397,7 @@ class GR00TInferenceServer:
 
                 # Create 32-dim state (Compact Protocol 🧪)
                 # We skip Rosetta expansion to ensure fingers (indices 23-28) are within the model's 32-dim window.
-                state_raw_t = torch.tensor(state_np, dtype=torch.float32)
+                state_raw_t = torch.tensor(state_np, dtype=torch.float32, device=DEVICE)
 
                 if self.has_stats:
                     # ✅ FINE-TUNED FIX: Apply manual Z-scoring (Scale to Gaussian)
@@ -402,12 +413,8 @@ class GR00TInferenceServer:
                 else:
                     # Base model lacks stats; we manually scale radians to [-1, 1] bounds
                     print("   [INFO] Applying manual [-1, 1] scaling (Base Model Mode)")
-                    rng = np.maximum(1e-4, JOINT_LIMITS_MAX - JOINT_LIMITS_MIN)
                     state_t = (
-                        2.0
-                        * (state_raw_t - torch.tensor(JOINT_LIMITS_MIN))
-                        / torch.tensor(rng)
-                        - 1.0
+                        2.0 * (state_raw_t - self.joint_min_t) / self.joint_rng_t - 1.0
                     )
                     state_t = torch.clamp(state_t, -1.1, 1.1)
 
@@ -443,12 +450,14 @@ class GR00TInferenceServer:
                     actions_np = action_chunk[0].cpu().numpy()
                 else:
                     # Base model outputs [-1, 1]; we manually scale back to Radians using Joint Limits
-                    actions_raw_np = action_chunk[0].cpu().numpy()
+                    actions_raw_np = action_chunk[0]  # On DEVICE
                     print(
                         "   [INFO] Applying manual Radians un-scaling (Base Model Mode)"
                     )
-                    rng = np.maximum(1e-4, JOINT_LIMITS_MAX - JOINT_LIMITS_MIN)
-                    actions_np = (actions_raw_np + 1.0) / 2.0 * rng + JOINT_LIMITS_MIN
+                    actions_t = (
+                        actions_raw_np + 1.0
+                    ) / 2.0 * self.joint_rng_t + self.joint_min_t
+                    actions_np = actions_t.cpu().numpy()
                 inference_time = time.time() - start_time
                 print(f"   [DEBUG] Inference Time: {inference_time:.2f} seconds")
 
