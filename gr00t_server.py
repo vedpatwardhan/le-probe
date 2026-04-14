@@ -374,6 +374,20 @@ class GR00TInferenceServer:
                 state_np = unpack_np(req.get("state"))
                 instruction = req.get("instruction", "Pick up the red cube")
 
+                # ✅ DIAGNOSTIC LOGGING (E2E EVIDENCE)
+                print(
+                    f"   [📥] Received RAW State: min:{state_np.min():.4f}, max:{state_np.max():.4f}, NaNs:{np.isnan(state_np).sum()}"
+                )
+                for cam in [
+                    "world_top",
+                    "world_left",
+                    "world_right",
+                    "world_center",
+                    "world_wrist",
+                ]:
+                    img = unpack_np(req.get(cam))
+                    print(f"   [🖼️] Received {cam}: sum={np.sum(img)}")
+
                 # Transform images ((224, 224, 3) -> (3, 224, 224))
                 all_imgs_np = np.stack(
                     [
@@ -404,7 +418,13 @@ class GR00TInferenceServer:
                     # Training logs show ACTION: IDENTITY, but STATE: MEAN_STD.
                     # Since state/action are symmetric, we use action_stats for the state.
                     if self.action_mean is not None:
-                        state_t = (state_raw_t - self.action_mean) / self.action_std
+                        # Prevent division by zero for dimensions with no variance
+                        safe_std = torch.where(
+                            self.action_std == 0,
+                            torch.ones_like(self.action_std),
+                            self.action_std,
+                        )
+                        state_t = (state_raw_t - self.action_mean) / safe_std
                         print(
                             f"   [📊] Input Normalization Applied. Range: [{state_t.min():.3f}, {state_t.max():.3f}]"
                         )

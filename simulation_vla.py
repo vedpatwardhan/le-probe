@@ -41,13 +41,16 @@ class GR1VLAClient(GR1MuJoCoBase):
             }
 
         state = self.get_state_32()
-        self._debug_log(
-            f"📤 capture_vla_observation: state stats [min:{np.nanmin(state):.3f}, max:{np.nanmax(state):.3f}, mean:{np.nanmean(state):.3f}, NaNs:{np.isnan(state).sum()}]"
-        )
+        state_info = f"min:{np.nanmin(state):.4f}, max:{np.nanmax(state):.4f}, NaNs:{np.isnan(state).sum()}"
+        print(f"   [📡] Sending State: {state_info}")
+
         obs = {"instruction": instruction, "state": pack_np(state)}
         for cam in self.cam_names:
             self.renderer.update_scene(self.data, camera=cam)
-            obs[cam] = pack_np(self.renderer.render())
+            img = self.renderer.render()
+            img_sum = np.sum(img)
+            print(f"   [📷] Camera {cam}: sum={img_sum} (shape={img.shape})")
+            obs[cam] = pack_np(img)
         return obs
 
     def run(self, instruction="Pick up the red cube", max_chunks=10):
