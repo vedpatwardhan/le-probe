@@ -6,6 +6,7 @@ import msgpack
 import time
 import argparse
 import rerun as rr
+import mujoco
 from simulation_base import GR1MuJoCoBase
 
 
