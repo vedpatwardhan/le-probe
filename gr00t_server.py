@@ -46,10 +46,11 @@ class GR00TInferenceServer:
         port=5555,
         weights_path="nvidia/GR00T-N1.5-3B",
     ):
-        print(f"--- GR00T N1.5 Server (Protocol: Min-Max Native) ---")
+        print(f"--- GR00T N1.5 Server (Protocol: Universal Handshake) ---")
         self.port = port
         self.weights_path = weights_path
         self.tokenizer = None
+        self.device = DEVICE
 
         # Load Policy
         print(f"Loading weights from: {self.weights_path}")
@@ -68,15 +69,32 @@ class GR00TInferenceServer:
         self.policy.to(DEVICE)
         self.policy.eval()
 
+        # Protocol Detection
+        self.normalization_mapping = getattr(
+            self.policy.config, "normalization_mapping", {}
+        )
+        print(f"🔍 Protocol Detected: {self.normalization_mapping}")
+
         self.policy.config.embodiment_tag = embodiment_tag
         self.preprocessor, self.postprocessor = make_pre_post_processors(
             policy_cfg=self.policy.config
         )
+
+        # Force-override preprocessor if the model is fine-tuned (Z-score mode)
+        # This prevents the server from re-mangling the Z-scored inputs from the client
+        if self.normalization_mapping.get("STATE") == "MEAN_STD":
+            for step in self.preprocessor.steps:
+                if hasattr(step, "normalize_min_max"):
+                    print(
+                        f"  🛠️ Disabling {step.__class__.__name__}.normalize_min_max for Z-Score parity."
+                    )
+                    step.normalize_min_max = False
+
         print("✅ Pre/Post Processors Initialized.")
 
     def log_diagnostics(self, processed_batch, actions_np, instruction):
         try:
-            proc_state_np = processed_batch["observation.state"].cpu().detach().numpy()
+            proc_state_np = processed_batch[OBS_STATE].cpu().detach().numpy()
             log_entry = {
                 "timestamp": time.time(),
                 "metrics": {
@@ -85,6 +103,7 @@ class GR00TInferenceServer:
                         float(np.max(proc_state_np)),
                     ],
                     "instruction": instruction,
+                    "mapping": str(self.normalization_mapping),
                 },
                 "output_stats": [float(np.min(actions_np)), float(np.max(actions_np))],
             }
@@ -130,13 +149,11 @@ class GR00TInferenceServer:
                     all_imgs_np, dtype=torch.uint8, device=DEVICE
                 ).permute(0, 3, 1, 2)
 
-                # State Calibration handled simulation-side
+                # State
                 state_np = unpack_np(req.get("state"))
-                state_raw_t = torch.tensor(
+                state_t = torch.tensor(
                     state_np, dtype=torch.float32, device=DEVICE
-                ).unsqueeze(
-                    0
-                )  # [1, 32]
+                ).unsqueeze(0)
 
                 # Batch
                 batch = {
@@ -145,7 +162,7 @@ class GR00TInferenceServer:
                     f"{OBS_IMAGES}.world_right": all_images_t[2].unsqueeze(0),
                     f"{OBS_IMAGES}.world_center": all_images_t[3].unsqueeze(0),
                     f"{OBS_IMAGES}.world_wrist": all_images_t[4].unsqueeze(0),
-                    OBS_STATE: state_raw_t,
+                    OBS_STATE: state_t,
                     "task": instruction,
                     "embodiment_id": torch.tensor(
                         [24], dtype=torch.long, device=DEVICE
@@ -155,27 +172,24 @@ class GR00TInferenceServer:
                 processed_batch = self.preprocessor(batch)
 
                 with torch.inference_mode():
-                    action_chunk = self.policy.predict_action_chunk(processed_batch)
+                    action_chunk = self.policy.predict_action_chunk(
+                        processed_batch
+                    )  # [1, 16, 32]
 
-                # De-normalization and Ensure 2D [T, 32]
-                actions_t = self.postprocessor(action_chunk)
-                # actions_t shape can be [1, 16, 32] or [16, 32] depending on LeRobot version
-                print("Actions Shape:", actions_t.shape)
-                actions_np = (
-                    actions_t.cpu().numpy()
-                    if hasattr(actions_t, "cpu")
-                    else np.array(actions_t)
-                )
-
-                # Squeeze out batch dim if present: [1, T, D] -> [T, D]
-                if actions_np.ndim == 3:
-                    actions_np = actions_np[0]  # -> [T, 32]
-                elif actions_np.ndim == 1:
-                    actions_np = actions_np[np.newaxis, :]  # -> [1, 32] fallback
-                # actions_np should now be [T, 32] where T == action_horizon (16)
+                # Protocol-Specific Post-Processing
+                # If IDENTITY, we bypass the postprocessor to avoid horizon slicing and mangled unscaling
+                if self.normalization_mapping.get("ACTION") == "IDENTITY":
+                    actions_np = action_chunk[0].cpu().detach().float().numpy()
+                else:
+                    # Fallback for Base Model (Min-Max)
+                    actions_t = self.postprocessor(action_chunk)
+                    if actions_t.ndim == 3:
+                        actions_np = actions_t[0].cpu().numpy()
+                    else:
+                        actions_np = actions_t.cpu().numpy()
 
                 print(
-                    f"[{time.strftime('%H:%M:%S')}] 🧠 Inference. Norm Range: [{processed_batch[OBS_STATE].min():.2f}, {processed_batch[OBS_STATE].max():.2f}] | Actions: {actions_np.shape}"
+                    f"[{time.strftime('%H:%M:%S')}] 🧠 Inference ({self.normalization_mapping.get('ACTION', 'BASE')}). Norm Range: [{processed_batch[OBS_STATE].min():.2f}, {processed_batch[OBS_STATE].max():.2f}] | Actions: {actions_np.shape}"
                 )
 
                 self.log_diagnostics(processed_batch, actions_np, instruction)
