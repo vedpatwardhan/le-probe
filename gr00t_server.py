@@ -160,6 +160,7 @@ class GR00TInferenceServer:
                 # De-normalization and Ensure 2D [T, 32]
                 actions_t = self.postprocessor(action_chunk)
                 # actions_t shape can be [1, 16, 32] or [16, 32] depending on LeRobot version
+                print("Actions Shape:", actions_t.shape)
                 actions_np = (
                     actions_t.cpu().numpy()
                     if hasattr(actions_t, "cpu")
