@@ -159,12 +159,19 @@ class GR00TInferenceServer:
 
                 # De-normalization and Ensure 2D [T, 32]
                 actions_t = self.postprocessor(action_chunk)
-                # actions_t is [Batch, Horizon, Dim] -> [1, 16, 32]
-                actions_np = actions_t[0].cpu().numpy()
+                # actions_t shape can be [1, 16, 32] or [16, 32] depending on LeRobot version
+                actions_np = (
+                    actions_t.cpu().numpy()
+                    if hasattr(actions_t, "cpu")
+                    else np.array(actions_t)
+                )
 
-                # If the postprocessor or model only produced one frame, it might be (32,)
-                if actions_np.ndim == 1:
-                    actions_np = actions_np[np.newaxis, :]
+                # Squeeze out batch dim if present: [1, T, D] -> [T, D]
+                if actions_np.ndim == 3:
+                    actions_np = actions_np[0]  # -> [T, 32]
+                elif actions_np.ndim == 1:
+                    actions_np = actions_np[np.newaxis, :]  # -> [1, 32] fallback
+                # actions_np should now be [T, 32] where T == action_horizon (16)
 
                 print(
                     f"[{time.strftime('%H:%M:%S')}] 🧠 Inference. Norm Range: [{processed_batch[OBS_STATE].min():.2f}, {processed_batch[OBS_STATE].max():.2f}] | Actions: {actions_np.shape}"

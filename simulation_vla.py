@@ -39,11 +39,13 @@ class StatisticalUnscaler:
         return norm_action * (self.action_max - self.action_min) + self.action_min
 
     def scale_state(self, raw_state):
-        """Maps Raw Radians -> [0.0, 1.0] (or whatever the model expects)."""
-        # We don't actually need to scale on the client because the SERVER's Preprocessor
-        # handles the scaling. We just need to send Raw Radians that fall within
-        # the training distribution.
-        return raw_state
+        """Maps Raw Radians -> [0.0, 1.0] using dataset min/max."""
+        # The server's preprocessor does NOT apply Min-Max to the state — it expects
+        # the client to pre-normalize. Evidence: Norm Range: [-1.46, 1.34] in server logs.
+        denom = self.state_max - self.state_min
+        # Clip denom to avoid division by zero for constant joints
+        denom = np.where(denom < 1e-6, 1.0, denom)
+        return np.clip((raw_state - self.state_min) / denom, 0.0, 1.0)
 
 
 class GR1VLAClient(GR1MuJoCoBase):
@@ -85,13 +87,13 @@ class GR1VLAClient(GR1MuJoCoBase):
                 "dtype": str(arr.dtype),
             }
 
-        # ✅ STATISTICAL GROUNDING: Send Raw Radians.
-        # The Server's preprocessor will handle the Min-Max scaling.
-        # We no longer need the manual +1.46 shift because the preprocessor
-        # knows that '-1.46' is the 'down' pose in this dataset version.
-        state = self.get_state_32()
+        # ✅ FULL STATISTICAL HANDSHAKE: Pre-normalize state before sending.
+        # The server's preprocessor expects [0, 1] normalized inputs — it does NOT
+        # re-scale the state. We apply the same Min-Max transform used during training.
+        raw_state = self.get_state_32()
+        norm_state = self.unscaler.scale_state(raw_state)
 
-        obs = {"instruction": instruction, "state": pack_np(state)}
+        obs = {"instruction": instruction, "state": pack_np(norm_state)}
         for cam in self.cam_names:
             self.renderer.update_scene(self.data, camera=cam)
             img_raw = self.renderer.render()
