@@ -31,6 +31,45 @@ class StandardScaler:
             # Min-Max statistics (fallback)
             self.action_min = np.array(self.stats["action"]["min"], dtype=np.float32)
             self.action_max = np.array(self.stats["action"]["max"], dtype=np.float32)
+
+            # --- FORENSIC LINK PROTOCOL BRIDGE ---
+            # Corrects index-level relay by mapping the model's "Dialect" (from compact dataset)
+            # to the simulation's physical joints (Linear Protocol).
+            # Mapping: Model_Idx -> Sim_Idx
+            self.sim_to_rosetta = [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,  # 0-6   -> L-Arm (0-6)
+                16,
+                17,
+                18,
+                19,
+                20,
+                21,  # 7-12  -> R-Arm (16-21) [Clipped at 6 joints]
+                13,  # 13    -> Head Pitch [Buffer]
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,  # 14-19 -> L-Hand (7-12) [Shifted]
+                14,
+                15,
+                22,  # 20-22 -> Buffers (Head/Wrist)
+                23,
+                24,
+                25,
+                26,
+                27,
+                28,  # 23-28 -> R-Hand (23-28)
+                29,
+                30,
+                31,  # 29-31 -> Waist (Frozen)
+            ]
         else:
             print(
                 "[WARNING] No stats.json found. Defaulting to Physical Limits (Base)."
@@ -38,27 +77,33 @@ class StandardScaler:
             self.mode = "base"
 
     def unscale_action(self, norm_action):
-        """Maps model output to Radians."""
+        """Maps model output to Radians (aligned with robot body)."""
         if self.mode == "compact":
-            # Per fine-tune config: "ACTION": "IDENTITY" (model predicts raw radians)
-            return np.array(norm_action, dtype=np.float32)
+            # 1. Identity unscaling (model predicts raw radians)
+            unshuffled = np.array(norm_action, dtype=np.float32)
+            # 2. De-shuffle from Rosetta Brain Slots to Linear Body Joints
+            result = np.zeros(32, dtype=np.float32)
+            for brain_idx, sim_idx in enumerate(self.sim_to_rosetta):
+                result[sim_idx] = unshuffled[brain_idx]
+            return result
         else:
             # Per base model protocol: Maps [-1, 1] to JOINT_LIMITS
-            # Note: We use JOINT_LIMITS from gr1_config
             from gr1_config import JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
 
             lmin = np.array(JOINT_LIMITS_MIN, dtype=np.float32)
             lmax = np.array(JOINT_LIMITS_MAX, dtype=np.float32)
-            # Simple Min-Max unscaling: val * (max - min) / 2 + (max + min) / 2
-            # because the model output is in [-1, 1]
             return (norm_action + 1.0) * (lmax - lmin) / 2.0 + lmin
 
     def scale_state(self, raw_state):
-        """Maps Raw Radians to model-ready distribution."""
+        """Maps Raw Radians to model-ready distribution (aligned with model brain)."""
         if self.mode == "compact":
-            # Per fine-tune config: "STATE": "MEAN_STD" (Z-Score)
+            # 1. Shuffle from Linear Body to Rosetta Brain Slots
+            shuffled = np.array(
+                [raw_state[i] for i in self.sim_to_rosetta], dtype=np.float32
+            )
+            # 2. Z-Score normalization
             safe_std = np.where(self.state_std > 1e-6, self.state_std, 1.0)
-            return (raw_state - self.state_mean) / safe_std
+            return (shuffled - self.state_mean) / safe_std
         else:
             # Per base model protocol: Maps Radians to [-1, 1]
             from gr1_config import JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
@@ -67,7 +112,6 @@ class StandardScaler:
             lmax = np.array(JOINT_LIMITS_MAX, dtype=np.float32)
             range_val = lmax - lmin
             range_val = np.where(range_val < 1e-6, 1.0, range_val)
-            # Maps [min, max] to [-1, 1]
             return 2.0 * (raw_state - lmin) / range_val - 1.0
 
 
@@ -138,6 +182,9 @@ class GR1VLAClient(GR1MuJoCoBase):
         print(f"🚀 Starting Autonomous Mission ({self.mode} protocol): '{instruction}'")
         self.reset_env()
 
+        # Audit History for Joint-Level verification
+        audit_history = []
+
         for chunk_idx in range(max_chunks):
             # 1. Perception
             obs_payload = self.capture_vla_observation(instruction)
@@ -160,6 +207,16 @@ class GR1VLAClient(GR1MuJoCoBase):
                         # ✅ UNSCALE ACTION: Map model output back to Radians
                         action_32 = self.unscaler.unscale_action(norm_action)
 
+                        # Record for joint-level audit
+                        audit_history.append(
+                            {
+                                "chunk": chunk_idx,
+                                "frame": i,
+                                "brain_slots": norm_action.tolist(),
+                                "sim_joints": action_32.tolist(),
+                            }
+                        )
+
                         self.process_target_32(action_32)
 
                         # Smooth Trajectory Threading
@@ -178,6 +235,12 @@ class GR1VLAClient(GR1MuJoCoBase):
                 traceback.print_exc()
                 break
 
+        # Save Detailed Audit
+        os.makedirs("inference_history_new", exist_ok=True)
+        audit_path = "inference_history_new/joint_level_audit.json"
+        with open(audit_path, "w") as f:
+            json.dump(audit_history, f)
+        print(f"💾 Full joint-level audit saved to: {audit_path}")
         print("🏁 Mission Complete. Exit.")
 
 
