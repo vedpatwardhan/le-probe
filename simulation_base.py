@@ -330,7 +330,6 @@ class GR1MuJoCoBase:
                         )
                     ]
                 ]
-                print(f"[AUDIT:STAGE2] {q_val:.6f}")
 
             # Legacy Periodic Rendering (e.g., for VLA/Teleop)
             if rf > 0 and step % rf == 0:

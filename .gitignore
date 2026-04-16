@@ -2,5 +2,8 @@ __pycache__
 .DS_Store
 temp_images
 datasets
+scratch
 *.log
 run_*
+phase_lifecycle.json
+teleop_settings.json

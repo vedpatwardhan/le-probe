@@ -99,12 +99,12 @@ def sync_ui_to_joints(joints):
 
     # Automatically activate sliders for important joints
     for idx, val in enumerate(joints):
-        val = float(np.clip(val, -1, 1))
-        if abs(val) > 1e-4:
+        clipped_val = float(np.clip(val, -1.0, 1.0))
+        if abs(clipped_val) > 1e-4:
             if idx not in st.session_state.active_joints:
                 st.session_state.active_joints.add(idx)
-            # Update the key associated with the slider so it jumps to the value
-            st.session_state[f"input_{idx}"] = val
+            # Update the key associated with the slider
+            st.session_state[f"input_{idx}"] = clipped_val
 
 
 def handle_reset():
@@ -132,6 +132,31 @@ def send_stop_recording():
 
 def send_discard_recording():
     return send_command({"command": "discard_recording"})
+
+
+def apply_snapshot(snapshot_dict):
+    """Maps name-based snapshot to 32-DOF and syncs UI/Server."""
+    normalized = snapshot_dict.get("normalized", {})
+    target = np.zeros(32, dtype=np.float32)
+
+    for name, val in normalized.items():
+        if name in COMPACT_WIRE_JOINTS:
+            idx = COMPACT_WIRE_JOINTS.index(name)
+            # SAFETY CLIP: Ensure value fits in [-1, 1] slider range
+            clipped_val = float(np.clip(val, -1.0, 1.0))
+            target[idx] = clipped_val
+            # Update the EXACT key used by the slider to force a UI refresh
+            st.session_state[f"input_{idx}"] = clipped_val
+
+    # 1. Send Cube Pose FIRST to stage the scene
+    cube_qpos = snapshot_dict.get("cube_qpos", [])
+    if cube_qpos:
+        send_command({"command": "set_cube_pose", "pose": cube_qpos})
+
+    # 2. Update buffers and send robot target
+    st.session_state.staging_buffer = target.copy()
+    st.session_state.target_buffer = target.copy()
+    send_command({"target": target.tolist()})
 
 
 def home_all():
@@ -231,22 +256,22 @@ with st.sidebar:
             send_command({"command": "sync"})
             st.rerun()
 
-st.markdown("### Select Joint:")
-col1, col2 = st.columns([3, 1])
-with col1:
+st.markdown("### Joint Management & State Audit")
+
+# --- Joint and Phase Controls Row ---
+col_joint, col_add, col_phase, col_apply = st.columns([3, 1, 3, 1])
+
+with col_joint:
     selected_joint_name = st.selectbox(
         "Pick a joint...",
         options=COMPACT_WIRE_JOINTS,
         index=None,
-        placeholder="Pick a joint...",
+        placeholder="Select Joint...",
         label_visibility="collapsed",
     )
-with col2:
-    if st.button(
-        "Add",
-        type="primary",
-        use_container_width=True,
-    ):
+
+with col_add:
+    if st.button("Add", type="secondary", use_container_width=True):
         if selected_joint_name:
             idx = COMPACT_WIRE_JOINTS.index(selected_joint_name)
             st.session_state.active_joints.add(idx)
@@ -256,6 +281,32 @@ with col2:
                 st.session_state.staging_buffer[idx] = val
             if f"input_{idx}" not in st.session_state:
                 st.session_state[f"input_{idx}"] = val
+            st.rerun()
+
+with col_phase:
+    if os.path.exists("cortex-gr1/phase_lifecycle.json"):
+        with open("cortex-gr1/phase_lifecycle.json", "r") as f:
+            lifecycle_data = json.load(f)
+        phases = sorted(lifecycle_data.keys())
+        selected_phase = st.selectbox(
+            "Load IK Phase",
+            options=["-- Load Phase --"] + phases,
+            label_visibility="collapsed",
+        )
+    else:
+        st.info("No lifecycle log.")
+        selected_phase = "-- Load Phase --"
+
+with col_apply:
+    if st.button("Apply", type="primary", use_container_width=True):
+        if selected_phase != "-- Load Phase --" and os.path.exists(
+            "cortex-gr1/phase_lifecycle.json"
+        ):
+            with open("cortex-gr1/phase_lifecycle.json", "r") as f:
+                data = json.load(f)
+            apply_snapshot(data[selected_phase])
+            st.session_state.last_msg = (f"Loaded {selected_phase}!", "🔭")
+            st.rerun()
 
 st.divider()
 
@@ -265,18 +316,23 @@ else:
     for idx in sorted(list(st.session_state.active_joints)):
         name = COMPACT_WIRE_JOINTS[idx]
 
+        # SAFETY INIT: Ensure key exists before rendering slider
+        if f"input_{idx}" not in st.session_state:
+            st.session_state[f"input_{idx}"] = 0.0
+
         col_lbl, col_inp, col_clr = st.columns([3, 6, 1])
         with col_lbl:
             st.markdown(f"**[{idx:02}] {name}**")
         with col_inp:
-            # Sliders pull value from keyed session state to reflect IK movement in real-time
+            # SAFETY CLIP: Ensure value from session_state fits in slider bounds
+            current_val = float(np.clip(st.session_state[f"input_{idx}"], -1.0, 1.0))
             new_val = st.slider(
                 f"Value for {name}",
                 min_value=-1.0,
                 max_value=1.0,
                 step=0.01,
                 label_visibility="collapsed",
-                key=f"input_{idx}",
+                key=f"input_{idx}",  # Unified key
             )
             st.session_state.staging_buffer[idx] = new_val
         with col_clr:

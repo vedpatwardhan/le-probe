@@ -4,11 +4,11 @@ import msgpack
 import rerun as rr
 import mujoco
 import os
-import datetime
-from pathlib import Path
-from PIL import Image
+import json
 from simulation_base import GR1MuJoCoBase
-from gr1_config import BASE_DIR, SCENE_PATH
+from gr1_config import SCENE_PATH
+from gr1_protocol import StandardScaler
+from gr1_config import COMPACT_WIRE_JOINTS
 
 
 class GR1TeleopServer(GR1MuJoCoBase):
@@ -48,9 +48,9 @@ class GR1TeleopServer(GR1MuJoCoBase):
 
             if cmd == "reset":
                 self.reset_env()
-                send_resp(
-                    {"status": "reset_ok", "joints": self.get_state_32().tolist()}
-                )
+                # Server is the Source of Normalized Truth
+                norm_state = StandardScaler().scale_state(self.get_state_32())
+                send_resp({"status": "reset_ok", "joints": norm_state.tolist()})
 
             elif cmd == "sync":
                 self.recorder.force_sync()
@@ -78,9 +78,21 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 phase = data.get("phase", 0)
                 offset_cm = data.get("offset_cm", 5)
                 self._handle_ik_pickup_logic(phase=phase, offset_cm=offset_cm)
-                send_resp(
-                    {"status": "ik_pickup_ok", "joints": self.get_state_32().tolist()}
+
+                # Server is the Source of Normalized Truth
+                norm_state = StandardScaler().scale_state(self.get_state_32())
+                send_resp({"status": "ik_pickup_ok", "joints": norm_state.tolist()})
+
+            elif cmd == "set_cube_pose":
+                pose = np.array(data["pose"], dtype=np.float32)
+                cube_id = mujoco.mj_name2id(
+                    self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint"
                 )
+                if cube_id != -1:
+                    q_idx = self.model.jnt_qposadr[cube_id]
+                    self.data.qpos[q_idx : q_idx + 7] = pose
+                    mujoco.mj_forward(self.model, self.data)
+                send_resp({"status": "cube_pose_ok"})
 
             elif "target" in data:
                 action_32 = np.array(data["target"], dtype=np.float32)
@@ -146,6 +158,46 @@ class GR1TeleopServer(GR1MuJoCoBase):
             for g_id in [50, 52, 54, 56]:
                 q_lift[g_id] = -1.1
             self.dispatch_action(self.qpos_to_action_32(q_lift), q_lift)
+
+        # Automatically snapshot the phase for the lifecycle audit
+        self._log_phase(phase + 1)
+
+    def _log_phase(self, phase_num):
+        """Snapshots unnormalized, normalized, and scene states for the current phase."""
+        # 1. Capture states
+        raw_state = self.get_state_32()
+        norm_state = StandardScaler().scale_state(raw_state)
+
+        # Capture Cube State
+        cube_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint")
+        cube_qpos = []
+        if cube_id != -1:
+            q_idx = self.model.jnt_qposadr[cube_id]
+            cube_qpos = self.data.qpos[q_idx : q_idx + 7].tolist()
+
+        # 2. Map to Names
+        unnorm_dict = {
+            name: float(val) for name, val in zip(COMPACT_WIRE_JOINTS, raw_state)
+        }
+        norm_dict = {
+            name: float(val) for name, val in zip(COMPACT_WIRE_JOINTS, norm_state)
+        }
+
+        # 3. Update internal registry
+        if not hasattr(self, "phase_lifecycle"):
+            self.phase_lifecycle = {}
+
+        self.phase_lifecycle[f"phase_{phase_num}"] = {
+            "unnormalized": unnorm_dict,
+            "normalized": norm_dict,
+            "cube_qpos": cube_qpos,
+        }
+
+        # 4. Save to target file
+        log_path = os.path.join(os.path.dirname(__file__), "phase_lifecycle.json")
+        with open(log_path, "w") as f:
+            json.dump(self.phase_lifecycle, f, indent=4)
+        print(f"📝 Phase {phase_num} lifecycle saved to phase_lifecycle.json")
 
 
 if __name__ == "__main__":
