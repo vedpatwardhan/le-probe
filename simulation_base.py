@@ -15,6 +15,7 @@ from gr1_config import (
     JOINT_LIMITS_MAX,
     SCENE_PATH,
 )
+from gr1_protocol import StandardScaler
 
 # Suppress performance warnings from qpsolvers
 warnings.filterwarnings("ignore", category=UserWarning, module="qpsolvers")
@@ -59,8 +60,11 @@ class GR1MuJoCoBase:
 
         # LeRobot Manager
         self.recorder = LeRobotManager(
-            repo_id="vedpatwardhan/gr1_pickup_large", fps=10, upload_interval=20
+            repo_id="vedpatwardhan/gr1_pickup_final", fps=10, upload_interval=20
         )
+
+        # Canonical Scaling Logic
+        self.unscaler = StandardScaler()
 
         # IK Setup (Mink 1.1.0)
         self._init_ik_solver()
@@ -183,6 +187,13 @@ class GR1MuJoCoBase:
         ]
         self.tasks[3].set_target(self.model.qpos0)
 
+        # Build physical constraints (Hard Limits 🔗)
+        # This ensures the solver itself is aware of the XML boundaries
+        self.limits = [
+            mink.ConfigurationLimit(model=self.model, min_distance_from_limits=0.01),
+            mink.VelocityLimit(model=self.model),
+        ]
+
     def _debug_log(self, msg):
         """Helper for timestamped diagnostic logging. Only writes if debug_log_path is set."""
         if self.debug_log_path is None:
@@ -240,7 +251,11 @@ class GR1MuJoCoBase:
         )
         for i in range(1500):
             solver = mink.solve_ik(
-                self.configuration, self.tasks, dt=0.15, solver="osqp"
+                self.configuration,
+                self.tasks,
+                dt=0.15,
+                solver="osqp",
+                limits=self.limits,
             )
             q_ref = self.configuration.q.copy()
             full_vel = solver.copy()
@@ -252,6 +267,7 @@ class GR1MuJoCoBase:
             err = self.tasks[0].compute_error(self.configuration)
             if np.linalg.norm(err) < 0.01:
                 break
+
         return self.configuration.q.copy()
 
     def sync_ctrl_to_qpos(self, q):
@@ -303,6 +319,19 @@ class GR1MuJoCoBase:
             self.data.qvel[:6] = 0.0
             mujoco.mj_step(self.model, self.data)
 
+            # [AUDIT:STAGE2] Physical Reality for R-Shoulder Roll
+            if step == total_steps - 1:
+                q_val = self.data.qpos[
+                    self.model.jnt_qposadr[
+                        mujoco.mj_name2id(
+                            self.model,
+                            mujoco.mjtObj.mjOBJ_JOINT,
+                            "right_shoulder_roll_joint",
+                        )
+                    ]
+                ]
+                print(f"[AUDIT:STAGE2] {q_val:.6f}")
+
             # Legacy Periodic Rendering (e.g., for VLA/Teleop)
             if rf > 0 and step % rf == 0:
                 self.render_and_record(action_32)
@@ -343,31 +372,25 @@ class GR1MuJoCoBase:
         self.last_target_q = home_q.copy()
         self.dispatch_action(None, home_q)
 
-    def process_target_32(self, action_32):
+    def process_target_32(self, action_32_norm):
         self.active_joints_this_command.clear()
-        valid_actions = action_32[~np.isnan(action_32)]
-        if len(valid_actions) > 0:
-            self._debug_log(
-                f"📥 process_target_32: stats [min:{np.min(valid_actions):.3f}, max:{np.max(valid_actions):.3f}, mean:{np.mean(valid_actions):.3f}]"
-            )
-        else:
-            self._debug_log("⚠️ process_target_32: action_32 is ALL NAN")
-        for i, val in enumerate(action_32):
+
+        # Canonical Handshake: unscale incoming [-1, 1] to raw Radians
+        action_32_rad = self.unscaler.unscale_action(action_32_norm)
+
+        for i, val_norm in enumerate(action_32_norm):
             if (
-                not np.isnan(val)
+                not np.isnan(val_norm)
                 and self.v_allowed_mask[i] > 0
                 and self.protocol_joint_ids[i] != -1
             ):
                 self.active_joints_this_command.add(i)
-                # action_32 is now RAW RADIANS from the server
                 q_idx = self.model.jnt_qposadr[self.protocol_joint_ids[i]]
-                rad = val
-                old_rad = self.last_target_q[q_idx]
+
+                # Update target in raw radians
+                rad = float(action_32_rad[i])
                 self.last_target_q[q_idx] = rad
-                if abs(rad - old_rad) > 1e-5:
-                    self._debug_log(
-                        f"   🔗 Joint {i} ({COMPACT_WIRE_JOINTS[i]}): {old_rad:.4f} -> {rad:.4f}"
-                    )
+
                 if i in self.coupling_map:
                     for distal_idx in self.coupling_map[i]:
                         self.last_target_q[distal_idx] = rad

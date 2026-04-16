@@ -11,108 +11,7 @@ import traceback
 from PIL import Image
 import mujoco
 from simulation_base import GR1MuJoCoBase
-
-
-class StandardScaler:
-    """Grounds model outputs in either dataset statistics (Z-Score) or physical limits (Min-Max)."""
-
-    def __init__(self, stats_path=None, mode="compact"):
-        self.mode = mode
-        if stats_path and os.path.exists(stats_path):
-            with open(stats_path, "r") as f:
-                self.stats = json.load(f)
-            # Z-Score statistics
-            self.state_mean = np.array(
-                self.stats["observation.state"]["mean"], dtype=np.float32
-            )
-            self.state_std = np.array(
-                self.stats["observation.state"]["std"], dtype=np.float32
-            )
-            # Min-Max statistics (fallback)
-            self.action_min = np.array(self.stats["action"]["min"], dtype=np.float32)
-            self.action_max = np.array(self.stats["action"]["max"], dtype=np.float32)
-
-            # --- FORENSIC LINK PROTOCOL BRIDGE ---
-            # Corrects index-level relay by mapping the model's "Dialect" (from compact dataset)
-            # to the simulation's physical joints (Linear Protocol).
-            # Mapping: Model_Idx -> Sim_Idx
-            self.sim_to_rosetta = [
-                0,
-                1,
-                2,
-                3,
-                4,
-                5,
-                6,  # 0-6   -> L-Arm (0-6)
-                16,
-                17,
-                18,
-                19,
-                20,
-                21,  # 7-12  -> R-Arm (16-21) [Clipped at 6 joints]
-                13,  # 13    -> Head Pitch [Buffer]
-                7,
-                8,
-                9,
-                10,
-                11,
-                12,  # 14-19 -> L-Hand (7-12) [Shifted]
-                14,
-                15,
-                22,  # 20-22 -> Buffers (Head/Wrist)
-                23,
-                24,
-                25,
-                26,
-                27,
-                28,  # 23-28 -> R-Hand (23-28)
-                29,
-                30,
-                31,  # 29-31 -> Waist (Frozen)
-            ]
-        else:
-            print(
-                "[WARNING] No stats.json found. Defaulting to Physical Limits (Base)."
-            )
-            self.mode = "base"
-
-    def unscale_action(self, norm_action):
-        """Maps model output to Radians (aligned with robot body)."""
-        if self.mode == "compact":
-            # 1. Identity unscaling (model predicts raw radians)
-            unshuffled = np.array(norm_action, dtype=np.float32)
-            # 2. De-shuffle from Rosetta Brain Slots to Linear Body Joints
-            result = np.zeros(32, dtype=np.float32)
-            for brain_idx, sim_idx in enumerate(self.sim_to_rosetta):
-                result[sim_idx] = unshuffled[brain_idx]
-            return result
-        else:
-            # Per base model protocol: Maps [-1, 1] to JOINT_LIMITS
-            from gr1_config import JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
-
-            lmin = np.array(JOINT_LIMITS_MIN, dtype=np.float32)
-            lmax = np.array(JOINT_LIMITS_MAX, dtype=np.float32)
-            return (norm_action + 1.0) * (lmax - lmin) / 2.0 + lmin
-
-    def scale_state(self, raw_state):
-        """Maps Raw Radians to model-ready distribution (aligned with model brain)."""
-        if self.mode == "compact":
-            # 1. Shuffle from Linear Body to Rosetta Brain Slots
-            shuffled = np.array(
-                [raw_state[i] for i in self.sim_to_rosetta], dtype=np.float32
-            )
-            # 2. Z-Score normalization
-            safe_std = np.where(self.state_std > 1e-6, self.state_std, 1.0)
-            return (shuffled - self.state_mean) / safe_std
-        else:
-            # Per base model protocol: Maps Radians to [-1, 1]
-            from gr1_config import JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
-
-            lmin = np.array(JOINT_LIMITS_MIN, dtype=np.float32)
-            lmax = np.array(JOINT_LIMITS_MAX, dtype=np.float32)
-            range_val = lmax - lmin
-            range_val = np.where(range_val < 1e-6, 1.0, range_val)
-            return 2.0 * (raw_state - lmin) / range_val - 1.0
+from gr1_protocol import StandardScaler
 
 
 class GR1VLAClient(GR1MuJoCoBase):
@@ -126,17 +25,11 @@ class GR1VLAClient(GR1MuJoCoBase):
         scene_path=None,
         server_host="localhost",
         server_port=5555,
-        mode="compact",
     ):
         super().__init__(scene_path) if scene_path else super().__init__()
-        self.mode = mode
 
-        # ✅ Load Statistical Grounding
-        stats_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "datasets/vedpatwardhan/gr1_pickup_compact_h264/meta/stats.json",
-        )
-        self.unscaler = StandardScaler(stats_path, mode=self.mode)
+        # ✅ Canonical Normalization (Min-Max [-1, 1])
+        self.unscaler = StandardScaler()
 
         # Enable VLA-specific diagnostic logging
         self.debug_log_path = os.path.join(
@@ -179,7 +72,7 @@ class GR1VLAClient(GR1MuJoCoBase):
         return obs
 
     def run(self, instruction="Pick up the red cube", max_chunks=10):
-        print(f"🚀 Starting Autonomous Mission ({self.mode} protocol): '{instruction}'")
+        print(f"🚀 Starting Autonomous Mission (Canonical Protocol): '{instruction}'")
         self.reset_env()
 
         # Audit History for Joint-Level verification
@@ -249,19 +142,12 @@ if __name__ == "__main__":
     parser.add_argument("--instruction", type=str, default="Pick up the red cube")
     parser.add_argument("--chunks", type=int, default=10)
     parser.add_argument("--host", type=str, default="localhost", help="VLA Server host")
-    parser.add_argument("--port", type=int, default=5555, help="VLA Server port")
-    parser.add_argument(
-        "--mode",
-        type=str,
-        choices=["base", "compact"],
-        default="compact",
-        help="Protocol mode: 'base' for raw limits, 'compact' for Z-Score stats",
-    )
+    parser.add_argument("--port", "-p", type=int, default=5555, help="VLA Server port")
     args = parser.parse_args()
 
     # Re-init Rerun for standalone local run
     rr.init("gr1_vla", spawn=False)
     rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
 
-    sim = GR1VLAClient(server_host=args.host, server_port=args.port, mode=args.mode)
+    sim = GR1VLAClient(server_host=args.host, server_port=args.port)
     sim.run(instruction=args.instruction, max_chunks=args.chunks)

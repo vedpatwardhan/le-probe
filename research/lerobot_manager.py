@@ -2,6 +2,7 @@ import os
 import numpy as np
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor
+from gr1_protocol import StandardScaler
 
 try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -32,7 +33,7 @@ class LeRobotManager:
     """Manages LeRobot dataset creation and frame buffering."""
 
     def __init__(
-        self, repo_id="gr1_pickup_large", fps=10, root=None, upload_interval=20
+        self, repo_id="gr1_pickup_final", fps=10, root=None, upload_interval=20
     ):
         self.repo_id = repo_id
         self.fps = fps
@@ -76,6 +77,9 @@ class LeRobotManager:
                 self._total_episodes = temp_ds.num_episodes
             except Exception as e:
                 print(f"[LEROBOT] ⚠️ Metadata probe failed: {e}")
+
+        # Canonical Scaling Logic
+        self.unscaler = StandardScaler()
 
     def start_episode(self, task_instruction):
         """Initializes a new episode or resumes the dataset."""
@@ -140,6 +144,7 @@ class LeRobotManager:
                 use_videos=True,
                 image_writer_processes=0,
                 image_writer_threads=4,
+                video_backend="ffmpeg",
             )
         else:
             # Resume existing dataset using constructor
@@ -209,20 +214,33 @@ class LeRobotManager:
                 interpolated_pos = start_pos + (end_pos - start_pos) * fraction
                 smoothed_actions_32[i + k] = interpolated_pos.astype(np.float32)
 
+                # [AUDIT:STAGE3] Data Buffer for R-Shoulder Roll
+                print(f"[AUDIT:STAGE3] {interpolated_pos[17]:.6f}")
+
             prev_target = curr_target.copy()
             i = j
 
-        # 2. Remap to 64-dim Rosetta and Flush to LeRobotDataset
-        print(f"[LEROBOT] Finalizing episode local save...")
+        # 2. Canonical Normalize and Remap to 64-dim Rosetta and Flush to LeRobotDataset
+        from gr1_protocol import StandardScaler
+
+        self.unscaler = StandardScaler()
+
+        print(
+            f"[LEROBOT] Finalizing episode local save with Canonical Normalization..."
+        )
         for idx, frame in enumerate(self.episode_buffer):
+            # Normalize raw radians to [-1, 1] based on canonical physical limits
+            norm_state_32 = self.unscaler.scale_state(frame["state_32"])
+            norm_action_32 = self.unscaler.scale_state(smoothed_actions_32[idx])
+
             # Create 64-dim Rosetta buffers
             state_64 = np.zeros(64, dtype=np.float32)
             action_64 = np.zeros(64, dtype=np.float32)
 
             # Apply mapping protocol
             for old_idx, new_idx in ROSETTA_MAP.items():
-                state_64[new_idx] = frame["state_32"][old_idx]
-                action_64[new_idx] = smoothed_actions_32[idx][old_idx]
+                state_64[new_idx] = norm_state_32[old_idx]
+                action_64[new_idx] = norm_action_32[old_idx]
 
             # Remap in-memory frames to LeRobot features
             frame_data = {

@@ -80,17 +80,19 @@ class GR00TInferenceServer:
             policy_cfg=self.policy.config
         )
 
-        # Force-override preprocessor if the model is fine-tuned (Z-score mode)
-        # This prevents the server from re-mangling the Z-scored inputs from the client
-        if self.normalization_mapping.get("STATE") == "MEAN_STD":
-            for step in self.preprocessor.steps:
-                if hasattr(step, "normalize_min_max"):
-                    print(
-                        f"  🛠️ Disabling {step.__class__.__name__}.normalize_min_max for Z-Score parity."
-                    )
-                    step.normalize_min_max = False
+        self.preprocessor, self.postprocessor = make_pre_post_processors(
+            policy_cfg=self.policy.config
+        )
 
-        print("✅ Pre/Post Processors Initialized.")
+        # Force Canonical Handshake: Always use Min-Max [-1, 1]
+        for step in self.preprocessor.steps:
+            if hasattr(step, "normalize_min_max"):
+                print(
+                    f"  🛠️ Enforcing {step.__class__.__name__}.normalize_min_max = True"
+                )
+                step.normalize_min_max = True
+
+        print("✅ Pre/Post Processors Initialized to Canonical Standard.")
 
     def log_diagnostics(self, processed_batch, actions_np, instruction):
         try:
@@ -176,17 +178,12 @@ class GR00TInferenceServer:
                         processed_batch
                     )  # [1, 16, 32]
 
-                # Protocol-Specific Post-Processing
-                # If IDENTITY, we bypass the postprocessor to avoid horizon slicing and mangled unscaling
-                if self.normalization_mapping.get("ACTION") == "IDENTITY":
-                    actions_np = action_chunk[0].cpu().detach().float().numpy()
+                # Protocol-Specific Post-Processing: Canonical Min-Max Handshake
+                actions_t = self.postprocessor(action_chunk)
+                if actions_t.ndim == 3:
+                    actions_np = actions_t[0].cpu().numpy()
                 else:
-                    # Fallback for Base Model (Min-Max)
-                    actions_t = self.postprocessor(action_chunk)
-                    if actions_t.ndim == 3:
-                        actions_np = actions_t[0].cpu().numpy()
-                    else:
-                        actions_np = actions_t.cpu().numpy()
+                    actions_np = actions_t.cpu().numpy()
 
                 print(
                     f"[{time.strftime('%H:%M:%S')}] 🧠 Inference ({self.normalization_mapping.get('ACTION', 'BASE')}). Norm Range: [{processed_batch[OBS_STATE].min():.2f}, {processed_batch[OBS_STATE].max():.2f}] | Actions: {actions_np.shape}"

@@ -156,7 +156,7 @@
                           <body name="left_hand_pitch_link" pos="0 0 0" euler="0 0 0">
                             <joint name="left_wrist_pitch_joint" axis="0 1 0" range="-0.61 0.61" />
                             <geom mesh="left_hand_pitch_link" pos="0 0 0" euler="0 0 0" />
-                            <body name="left_end_effector_link" pos="0 0 -0.023" euler="0 0 0">
+                            <body name="left_end_effector_link" pos="0 0 -0.023" euler="0 0 3.14159">
                               <body name="L_hand_base_link" pos="0 0 0" euler="0 0 0">
                                 <geom mesh="L_hand_base_link" pos="0 0 0" euler="0 0 0" />
                                 <geom type="capsule" fromto="0.01 -0.01 -0.02 -0.01 0.01 -0.08" size="0.03" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
