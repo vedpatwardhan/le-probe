@@ -62,9 +62,6 @@ class GR1ReplayClient(GR1MuJoCoBase):
                 reset_start=False,
             )
 
-            # Wait for user visualization
-            time.sleep(2)
-
         print(f"🏁 Replay of {parquet_path} complete.")
 
 

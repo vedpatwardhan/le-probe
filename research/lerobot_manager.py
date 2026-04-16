@@ -12,21 +12,9 @@ except ImportError:
     LEROBOT_AVAILABLE = False
 
 # -----------------------------------------------------------------------------
-# ROSETTA 64-DIM MAPPING (Simulation 32 -> Dataset 64)
+# 32-DIM PROTOCOL ENFORCEMENT
 # -----------------------------------------------------------------------------
-# Compact 32: 0-6:L_Arm, 7-12:L_Hand, 13-15:Head, 16-22:R_Arm, 23-28:R_Hand, 29-31:Waist
-ROSETTA_MAP = {
-    # Arms
-    **{i: i for i in range(7)},  # L-Arm: 0-6 -> 0-6
-    **{i + 16: i + 7 for i in range(7)},  # R-Arm: 16-22 -> 7-13
-    # Waist
-    **{i + 29: i + 14 for i in range(3)},  # Waist: 29-31 -> 14-16
-    # Head
-    **{i + 13: i + 17 for i in range(3)},  # Head: 13-15 -> 17-19
-    # Hands
-    **{i + 7: i + 20 for i in range(6)},  # L-Hand: 7-12 -> 20-25
-    **{i + 23: i + 32 for i in range(6)},  # R-Hand: 23-28 -> 32-37
-}
+# Both state and action are recorded as raw 32-dim vectors mirroring gr1_joint_order.txt.
 
 
 class LeRobotManager:
@@ -114,10 +102,10 @@ class LeRobotManager:
             },
             "observation.state": {
                 "dtype": "float32",
-                "shape": (64,),
+                "shape": (32,),
                 "names": ["joints"],
             },
-            "action": {"dtype": "float32", "shape": (64,), "names": ["joints"]},
+            "action": {"dtype": "float32", "shape": (32,), "names": ["joints"]},
         }
 
         # Point root directly to the specific dataset folder
@@ -225,22 +213,11 @@ class LeRobotManager:
 
         self.unscaler = StandardScaler()
 
-        print(
-            f"[LEROBOT] Finalizing episode local save with Canonical Normalization..."
-        )
+        print(f"[LEROBOT] Finalizing episode local save with 32-dim Normalization...")
         for idx, frame in enumerate(self.episode_buffer):
             # Normalize raw radians to [-1, 1] based on canonical physical limits
             norm_state_32 = self.unscaler.scale_state(frame["state_32"])
             norm_action_32 = self.unscaler.scale_state(smoothed_actions_32[idx])
-
-            # Create 64-dim Rosetta buffers
-            state_64 = np.zeros(64, dtype=np.float32)
-            action_64 = np.zeros(64, dtype=np.float32)
-
-            # Apply mapping protocol
-            for old_idx, new_idx in ROSETTA_MAP.items():
-                state_64[new_idx] = norm_state_32[old_idx]
-                action_64[new_idx] = norm_action_32[old_idx]
 
             # Remap in-memory frames to LeRobot features
             frame_data = {
@@ -250,8 +227,8 @@ class LeRobotManager:
                     )
                     for k, v in frame["views"].items()
                 },
-                "observation.state": state_64.astype(np.float32),
-                "action": action_64.astype(np.float32),
+                "observation.state": norm_state_32.astype(np.float32),
+                "action": norm_action_32.astype(np.float32),
                 "task": self.current_task,
             }
             self.dataset.add_frame(frame_data)
