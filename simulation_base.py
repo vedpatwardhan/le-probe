@@ -296,7 +296,7 @@ class GR1MuJoCoBase:
             self.recorder.add_frame(views, self.get_state_32(), action_32)
 
     def dispatch_action(
-        self, action_32, target_q, n_steps=None, render_freq=None, reset_start=True
+        self, action_32_norm, target_q, n_steps=None, render_freq=None, reset_start=True
     ):
         # Backward Compatible Defaults
         total_steps = n_steps if n_steps is not None else 200
@@ -333,11 +333,11 @@ class GR1MuJoCoBase:
 
             # Legacy Periodic Rendering (e.g., for VLA/Teleop)
             if rf > 0 and step % rf == 0:
-                self.render_and_record(action_32)
+                self.render_and_record(action_32_norm)
 
         # Ensure at least one render at the end if rf was too large
         if rf >= total_steps or rf == 0:
-            self.render_and_record(action_32)
+            self.render_and_record(action_32_norm)
 
         # Save target for next chunk (VLA Trajectory Threading)
         self._last_interp_q = target_q.copy()
@@ -372,6 +372,7 @@ class GR1MuJoCoBase:
         self.dispatch_action(None, home_q)
 
     def process_target_32(self, action_32_norm):
+        """Receives the normalized action and updates the target qpos."""
         self.active_joints_this_command.clear()
 
         # Canonical Handshake: unscale incoming [-1, 1] to raw Radians

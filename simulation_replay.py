@@ -1,18 +1,11 @@
+import time
 import numpy as np
-import zmq
-import msgpack
 import rerun as rr
-import mujoco
-import os
-import datetime
 import pandas as pd
 import argparse
-import json
-import traceback
-from pathlib import Path
-from PIL import Image
 from simulation_base import GR1MuJoCoBase
-from gr1_config import BASE_DIR, SCENE_PATH
+from gr1_config import SCENE_PATH, COMPACT_WIRE_JOINTS
+from gr1_protocol import StandardScaler
 
 
 class GR1ReplayClient(GR1MuJoCoBase):
@@ -51,14 +44,16 @@ class GR1ReplayClient(GR1MuJoCoBase):
                 print(f"⚠️ Index {idx} out of range (max {len(actions)-1})")
                 continue
 
-            raw_action = actions[idx]
             # Standardized 32-dim order (compact)
-            action_32_norm = np.array(raw_action, dtype=np.float32)[:32]
+            action_32_norm = np.clip(actions[idx], -1.0, 1.0).astype(np.float32)
 
-            print(f"🎬 Replaying Action Index {idx}...")
+            print(f"🎬 Replaying Action Index {idx} (Normalized)...")
+
+            # Calculate targets in Radians
             self.process_target_32(action_32_norm)
 
-            # Execute with high target persistence (200 steps)
+            # Execute using the UN-SCALED Radians action
+            # This matches the teleop server's verified execution flow
             self.dispatch_action(
                 action_32_norm,
                 self.last_target_q,
@@ -66,6 +61,9 @@ class GR1ReplayClient(GR1MuJoCoBase):
                 render_freq=16,
                 reset_start=False,
             )
+
+            # Wait for user visualization
+            time.sleep(2)
 
         print(f"🏁 Replay of {parquet_path} complete.")
 
