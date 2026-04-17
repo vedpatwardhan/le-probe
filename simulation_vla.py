@@ -97,8 +97,10 @@ class GR1VLAClient(GR1MuJoCoBase):
                     print(f"   🚀 Executing Chunk: {actions_np.shape} steps...")
 
                     for i, norm_action in enumerate(actions_np):
-                        # ✅ UNSCALE ACTION: Map model output back to Radians
-                        action_32 = self.unscaler.unscale_action(norm_action)
+                        # ✅ PROTOCOL ALIGNMENT: Pass normalized action directly to base.
+                        # The base.process_target_32 handles the unscaling internally
+                        # to ensure bit-perfect parity with simulation_replay.py.
+                        self.process_target_32(norm_action)
 
                         # Record for joint-level audit
                         audit_history.append(
@@ -106,16 +108,14 @@ class GR1VLAClient(GR1MuJoCoBase):
                                 "chunk": chunk_idx,
                                 "frame": i,
                                 "brain_slots": norm_action.tolist(),
-                                "sim_joints": action_32.tolist(),
+                                "sim_joints": self.get_state_32().tolist(),
                             }
                         )
-
-                        self.process_target_32(action_32)
 
                         # Smooth Trajectory Threading
                         do_reset = i == 0
                         self.dispatch_action(
-                            action_32,
+                            norm_action,
                             self.last_target_q,
                             n_steps=32,
                             reset_start=do_reset,
