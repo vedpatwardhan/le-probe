@@ -183,6 +183,12 @@ class GR00TInferenceServer:
 
                 # Protocol-Specific Post-Processing: Canonical Min-Max Handshake
                 actions_t = self.postprocessor(action_chunk)
+
+                # DEBUG: Trace the temporal chunk loss
+                print(
+                    f"DEBUG: Raw Chunk {action_chunk.shape} | Post-Proc {actions_t.shape}"
+                )
+
                 if actions_t.ndim == 3:
                     actions_np = actions_t[0].cpu().numpy()
                 else:

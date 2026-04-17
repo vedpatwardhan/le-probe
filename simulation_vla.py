@@ -57,6 +57,7 @@ class GR1VLAClient(GR1MuJoCoBase):
         # ✅ UNIVERSAL HANDSHAKE: Scale state based on mode
         raw_state = self.get_state_32()
         norm_state = self.unscaler.scale_state(raw_state)
+        norm_state = np.clip(norm_state, -1.0, 1.0)
 
         obs = {"instruction": instruction, "state": pack_np(norm_state)}
         for cam in self.cam_names:
@@ -92,8 +93,9 @@ class GR1VLAClient(GR1MuJoCoBase):
 
                 if "action" in resp:
                     actions = resp["action"]
-                    actions_np = np.array(actions, dtype=np.float32)
 
+                    # ✅ ACTION SAFETY: Clip to [-1, 1] to match simulation_replay.py
+                    actions_np = np.clip(actions, -1.0, 1.0)
                     print(f"   🚀 Executing Chunk: {actions_np.shape} steps...")
 
                     for i, norm_action in enumerate(actions_np):
