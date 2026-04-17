@@ -35,11 +35,9 @@ class GR1ReplayClient(GR1MuJoCoBase):
         # Reset environment
         self.reset_env()
 
-        # Replay only the 4 specific keyframes requested by the user
-        target_indices = [12, 25, 38, 51]
-        print(f"📊 Replaying keyframes: {target_indices} (Normalized [-1, 1])...")
-
-        for idx in target_indices:
+        # Replay all the frames
+        print(f"📊 Replaying frames (Normalized [-1, 1])...")
+        for idx in range(len(actions)):
             if idx >= len(actions):
                 print(f"⚠️ Index {idx} out of range (max {len(actions)-1})")
                 continue
@@ -57,8 +55,8 @@ class GR1ReplayClient(GR1MuJoCoBase):
             self.dispatch_action(
                 action_32_norm,
                 self.last_target_q,
-                n_steps=200,
-                render_freq=16,
+                n_steps=4,
+                render_freq=1,
                 reset_start=False,
             )
 

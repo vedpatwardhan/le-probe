@@ -133,12 +133,14 @@ class LeRobotManager:
                 image_writer_processes=0,
                 image_writer_threads=4,
                 video_backend="ffmpeg",
+                vcodec="h264",
             )
         else:
             # Resume existing dataset using constructor
             self.dataset = LeRobotDataset(
                 repo_id=self.repo_id,
                 root=dataset_path,
+                vcodec="h264",
             )
             # Standard constructor doesn't start writers for recording, do it manually
             if self.dataset.image_writer is None:
