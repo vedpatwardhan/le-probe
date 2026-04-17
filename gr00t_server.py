@@ -85,8 +85,8 @@ class GR00TInferenceServer:
         )
 
         # Protocol-Aware Handshake: Only force Min-Max if not in IDENTITY mode
-        is_identity = self.normalization_mapping.get("STATE") == "IDENTITY"
-        if not is_identity:
+        self.is_identity = self.normalization_mapping.get("STATE") == "IDENTITY"
+        if not self.is_identity:
             for step in self.preprocessor.steps:
                 if hasattr(step, "normalize_min_max"):
                     print(
@@ -182,7 +182,12 @@ class GR00TInferenceServer:
                     )  # [1, 16, 32]
 
                 # Protocol-Specific Post-Processing: Canonical Min-Max Handshake
-                actions_t = self.postprocessor(action_chunk)
+                # VLA FIX: To avoid temporal chunk loss, we ensure the action dim is preserved.
+                # If using IDENTITY, we can bypass the postprocessor for actions to keep (16, 32).
+                if self.is_identity:
+                    actions_t = action_chunk
+                else:
+                    actions_t = self.postprocessor(action_chunk)
 
                 # DEBUG: Trace the temporal chunk loss
                 print(
@@ -191,6 +196,8 @@ class GR00TInferenceServer:
 
                 if actions_t.ndim == 3:
                     actions_np = actions_t[0].cpu().numpy()
+                elif actions_t.ndim == 2:
+                    actions_np = actions_t.cpu().numpy()
                 else:
                     actions_np = actions_t.cpu().numpy()
 

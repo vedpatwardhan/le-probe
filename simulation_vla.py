@@ -96,7 +96,9 @@ class GR1VLAClient(GR1MuJoCoBase):
 
                     # ✅ ACTION SAFETY: Clip to [-1, 1] to match simulation_replay.py
                     actions_np = np.clip(actions, -1.0, 1.0)
-                    print(f"   🚀 Executing Chunk: {actions_np.shape} steps...")
+                    print(
+                        f"   🚀 Executing Chunk ({chunk_idx+1}/{max_chunks}): {actions_np.shape[0]} temporal steps..."
+                    )
 
                     for i, norm_action in enumerate(actions_np):
                         # ✅ PROTOCOL ALIGNMENT: Pass normalized action directly to base.
