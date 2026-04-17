@@ -84,15 +84,18 @@ class GR00TInferenceServer:
             policy_cfg=self.policy.config
         )
 
-        # Force Canonical Handshake: Always use Min-Max [-1, 1]
-        for step in self.preprocessor.steps:
-            if hasattr(step, "normalize_min_max"):
-                print(
-                    f"  🛠️ Enforcing {step.__class__.__name__}.normalize_min_max = True"
-                )
-                step.normalize_min_max = True
-
-        print("✅ Pre/Post Processors Initialized to Canonical Standard.")
+        # Protocol-Aware Handshake: Only force Min-Max if not in IDENTITY mode
+        is_identity = self.normalization_mapping.get("STATE") == "IDENTITY"
+        if not is_identity:
+            for step in self.preprocessor.steps:
+                if hasattr(step, "normalize_min_max"):
+                    print(
+                        f"  🛠️ Enforcing {step.__class__.__name__}.normalize_min_max = True"
+                    )
+                    step.normalize_min_max = True
+            print("✅ Pre/Post Processors Initialized to Canonical Standard.")
+        else:
+            print("🚀 IDENTITY Protocol detected. Skipping redundant normalization.")
 
     def log_diagnostics(self, processed_batch, actions_np, instruction):
         try:
