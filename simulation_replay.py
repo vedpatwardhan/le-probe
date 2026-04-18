@@ -55,8 +55,8 @@ class GR1ReplayClient(GR1MuJoCoBase):
             self.dispatch_action(
                 action_32_norm,
                 self.last_target_q,
-                n_steps=4,
-                render_freq=1,
+                n_steps=50,
+                render_freq=10,
                 reset_start=False,
             )
 
