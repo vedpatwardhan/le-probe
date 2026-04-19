@@ -410,8 +410,19 @@ class GR1MuJoCoBase:
                     self.wire_max[i] + self.wire_min[i]
                 ) / 2.0 + np.random.uniform(-0.2, 0.2)
         home_q[self.root_q_idx : self.root_q_idx + 3] = [0.0, 0.0, 0.95]
+
+        # --- INSTANT HARD RESET ---
+        # Teleport instantly instead of interpolating to avoid 'batting' the cube
+        self.data.qpos[:] = home_q.copy()
+        self.data.qvel[:] = 0.0
+        mujoco.mj_forward(self.model, self.data)
+
+        # Sync the interpolation state so the NEXT movement starts from here
+        self._last_interp_q = self.data.qpos.copy()
         self.last_target_q = home_q.copy()
-        self.dispatch_action(None, home_q)
+
+        # Render one frame to update the UI immediately
+        self.render_and_record(None)
 
     def process_target_32(self, action_32_norm):
         """Receives the normalized action and updates the target qpos."""
