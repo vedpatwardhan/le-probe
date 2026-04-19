@@ -60,7 +60,7 @@ class GR1MuJoCoBase:
 
         # LeRobot Manager
         self.recorder = LeRobotManager(
-            repo_id="vedpatwardhan/gr1_pickup_final", fps=10, upload_interval=20
+            repo_id="vedpatwardhan/gr1_pickup_reward", fps=10, upload_interval=20
         )
 
         # Canonical Scaling Logic
@@ -77,6 +77,7 @@ class GR1MuJoCoBase:
         self.last_target_q = self.data.qpos.copy()
         self.active_joints_this_command = set()
         self.is_recording = False
+        self.current_phase = 0  # 0: Neutral, 1: Approach, 2: Descent, 3: Grasp, 4: Lift
         self.rerun_count = 0
         self.render_step_idx = 0
         self.session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -276,6 +277,42 @@ class GR1MuJoCoBase:
             q_idx = self.model.jnt_qposadr[j_id]
             self.data.ctrl[a_id] = q[q_idx]
 
+    def get_physics_state(self):
+        """Calculates current ground-truth metrics for RA-BC conditioning and UI monitoring."""
+        # 1. Extract Cube Position
+        cube_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint")
+        cube_pos = np.zeros(3)
+        if cube_id != -1:
+            cube_pos = self.data.qpos[
+                self.model.jnt_qposadr[cube_id] : self.model.jnt_qposadr[cube_id] + 3
+            ].copy()
+
+        # 2. Extract Hand Center (Midpoint of index and thumb tips)
+        index_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_BODY, "R_index_tip_link"
+        )
+        thumb_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_BODY, "R_thumb_tip_link"
+        )
+
+        hand_pos = np.zeros(3)
+        if index_id != -1 and thumb_id != -1:
+            p_index = self.data.xpos[index_id]
+            p_thumb = self.data.xpos[thumb_id]
+            hand_pos = (p_index + p_thumb) / 2.0
+
+        # 3. Calculate L2 Distance
+        target_dist = float(np.linalg.norm(hand_pos - cube_pos))
+
+        # 4. Phase-based Grasp Detection
+        is_grasping = self.current_phase >= 3
+
+        return {
+            "cube_z": float(cube_pos[2]),
+            "is_grasping": is_grasping,
+            "target_dist": target_dist,
+        }
+
     def render_and_record(self, action_32):
         views = {}
         rr.set_time("sim_step", sequence=self.render_step_idx)
@@ -292,8 +329,12 @@ class GR1MuJoCoBase:
 
         self.render_step_idx += 1
         self.rerun_count += 1
+        self.render_step_idx += 1
+        self.rerun_count += 1
         if self.is_recording:
-            self.recorder.add_frame(views, self.get_state_32(), action_32)
+            # Extract ground-truth physics for RA-BC Progress Weighting
+            physics = self.get_physics_state()
+            self.recorder.add_frame(views, self.get_state_32(), action_32, physics)
 
     def dispatch_action(
         self, action_32_norm, target_q, n_steps=None, render_freq=None, reset_start=True
@@ -344,6 +385,7 @@ class GR1MuJoCoBase:
 
     def reset_env(self):
         print("🎲 Randomizing the environment...")
+        self.current_phase = 0
         # Constrain cube randomization to table bounds (X: 0.25-0.65, Y: ±0.25)
         # Using [0.27, 0.63] and ±0.23 for a small safety margin from the edges
         rx, ry = np.random.uniform(0.27, 0.63), np.random.uniform(-0.23, 0.23)

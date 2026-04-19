@@ -121,7 +121,8 @@ class GR1VLAClient(GR1MuJoCoBase):
                         self.dispatch_action(
                             norm_action,
                             self.last_target_q,
-                            n_steps=32,
+                            n_steps=100,
+                            render_freq=10,
                             reset_start=do_reset,
                         )
                 else:

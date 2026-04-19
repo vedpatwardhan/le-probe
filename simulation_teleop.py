@@ -42,6 +42,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
                         "upload_queue": self.recorder.pending_uploads,
                         "total_episodes": self.recorder.total_episodes,
                         "batch_status": self.recorder.episodes_since_sync,
+                        "physics": self.get_physics_state(),
                     }
                 )
                 socket.send(msgpack.packb(payload))
@@ -104,7 +105,10 @@ class GR1TeleopServer(GR1MuJoCoBase):
 
     def _handle_ik_pickup_logic(self, phase=0, offset_cm=5):
         """Hardened multi-phase IK solver for red cube."""
-        print(f"🎯 Executing IK Pickup Phase {phase}...")
+        self.current_phase = phase + 1
+        print(
+            f"🎯 Executing IK Pickup Phase {phase} (Global ID: {self.current_phase})..."
+        )
 
         cube_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint")
         cube_pos = self.data.qpos[
@@ -119,7 +123,12 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 cube_pos + [0, 0, 0.15 + offset_cm / 100.0],
             )
             q_reach_h = self.solve_ik(pos_w_h, [0, 1, 0, 0], pos_i_h, pos_t_h)
-            self.dispatch_action(self.qpos_to_action_32(q_reach_h), q_reach_h)
+            self.dispatch_action(
+                self.qpos_to_action_32(q_reach_h),
+                q_reach_h,
+                n_steps=90,
+                render_freq=30,
+            )
 
         elif phase == 1:
             # Phase 2: Descent
@@ -129,7 +138,12 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 cube_pos + [0, 0, 0.04],
             )
             q_reach_l = self.solve_ik(pos_w_l, [0, 1, 0, 0], pos_i_l, pos_t_l)
-            self.dispatch_action(self.qpos_to_action_32(q_reach_l), q_reach_l)
+            self.dispatch_action(
+                self.qpos_to_action_32(q_reach_l),
+                q_reach_l,
+                n_steps=90,
+                render_freq=30,
+            )
 
         elif phase == 2:
             # Phase 3: Grasp
@@ -144,7 +158,12 @@ class GR1TeleopServer(GR1MuJoCoBase):
             q_grasp[47], q_grasp[48] = -1.1, 1.1
             for g_id in [50, 52, 54, 56]:
                 q_grasp[g_id] = -1.1
-            self.dispatch_action(self.qpos_to_action_32(q_grasp), q_grasp)
+            self.dispatch_action(
+                self.qpos_to_action_32(q_grasp),
+                q_grasp,
+                n_steps=90,
+                render_freq=30,
+            )
 
         elif phase == 3:
             # Phase 4: Lift (Retract)
@@ -157,7 +176,12 @@ class GR1TeleopServer(GR1MuJoCoBase):
             q_lift[47], q_lift[48] = -1.1, 1.1
             for g_id in [50, 52, 54, 56]:
                 q_lift[g_id] = -1.1
-            self.dispatch_action(self.qpos_to_action_32(q_lift), q_lift)
+            self.dispatch_action(
+                self.qpos_to_action_32(q_lift),
+                q_lift,
+                n_steps=90,
+                render_freq=30,
+            )
 
         # Automatically snapshot the phase for the lifecycle audit
         self._log_phase(phase + 1)

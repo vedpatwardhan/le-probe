@@ -1,5 +1,9 @@
 import os
+import shutil
+import json
+import lerobot.datasets.utils as lerobot_utils
 import numpy as np
+import pandas as pd
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor
 from gr1_protocol import StandardScaler
@@ -106,22 +110,29 @@ class LeRobotManager:
                 "names": ["joints"],
             },
             "action": {"dtype": "float32", "shape": (32,), "names": ["joints"]},
+            "observation.physics": {
+                "dtype": "float32",
+                "shape": (3,),
+                "names": ["cube_z", "is_grasping", "target_dist"],
+            },
         }
 
         # Point root directly to the specific dataset folder
         dataset_path = os.path.join(self.root, self.repo_id)
         metadata_path = os.path.join(dataset_path, "meta", "info.json")
+        episodes_path = os.path.join(dataset_path, "meta", "episodes")
 
-        # We only resume if the folder exists AND has the metadata file.
-        if not os.path.exists(metadata_path):
-            # If the directory exists but has no metadata, we must use .create.
-            # However, LeRobotDataset.create will fail if the folder exists with exist_ok=False.
-            # We check if it's an empty (or partial) folder and handle it.
-            if os.path.exists(dataset_path) and not os.listdir(dataset_path):
+        # We only resume if the folder exists AND is a fully initialized dataset.
+        # If the folders are present but empty/incomplete, we MUST use .create.
+        if not os.path.exists(metadata_path) or not os.path.exists(episodes_path):
+            # If the directory exists but is incomplete, we clean up for a fresh creation.
+            if os.path.exists(dataset_path):
+                import shutil
+
                 print(
-                    f"[LEROBOT] Warning: '{dataset_path}' exists but is not a valid dataset. Checking for cleanup..."
+                    f"[LEROBOT] Warning: '{dataset_path}' is incomplete. Cleaning up for Re-Creation..."
                 )
-                os.rmdir(dataset_path)
+                shutil.rmtree(dataset_path)
 
             os.makedirs(self.root, exist_ok=True)
             self.dataset = LeRobotDataset.create(
@@ -136,7 +147,7 @@ class LeRobotManager:
                 vcodec="h264",
             )
         else:
-            # Resume existing dataset using constructor
+            # Resume existing local dataset
             self.dataset = LeRobotDataset(
                 repo_id=self.repo_id,
                 root=dataset_path,
@@ -153,7 +164,7 @@ class LeRobotManager:
             f"Recording NEW episode for task: '{task_instruction}'"
         )
 
-    def add_frame(self, views, state_32, action_32):
+    def add_frame(self, views, state_32, action_32, extra_info=None):
         """Buffers a frame for post-episode processing (to prevent simulation lag)."""
         if self.dataset is None:
             return
@@ -165,6 +176,12 @@ class LeRobotManager:
                 "action_32": (
                     action_32.copy() if hasattr(action_32, "copy") else action_32
                 ),
+                "extra_info": extra_info
+                or {
+                    "cube_z": 0.0,
+                    "is_grasping": False,
+                    "target_dist": 1.0,
+                },
             }
         )
 
@@ -231,12 +248,24 @@ class LeRobotManager:
                 },
                 "observation.state": norm_state_32.astype(np.float32),
                 "action": norm_action_32.astype(np.float32),
+                "observation.physics": np.array(
+                    [
+                        float(frame["extra_info"].get("cube_z", 0.0)),
+                        float(frame["extra_info"].get("is_grasping", False)),
+                        float(frame["extra_info"].get("target_dist", 1.0)),
+                    ],
+                    dtype=np.float32,
+                ),
                 "task": self.current_task,
             }
+
             self.dataset.add_frame(frame_data)
 
-        # Commit to Parquet
+        # Commit to Parquet (Main Dataset)
         self.dataset.save_episode(parallel_encoding=False)
+
+        # Incremental Reward calculation for the episode
+        self._append_rewards_to_sidecar()
         self._total_episodes = self.dataset.num_episodes
         self.episodes_since_sync += 1
         print(f"[LEROBOT] Episode saved. Total frames: {len(self.episode_buffer)}")
@@ -285,6 +314,62 @@ class LeRobotManager:
             print(f"[SYNC] ⚠️ Hub Upload Failed: {e}")
         finally:
             self._pending_uploads = max(0, self._pending_uploads - 1)
+
+    def _append_rewards_to_sidecar(self):
+        """Calculates rewards for the current buffer and appends to progress_sparse.parquet."""
+        if not LEROBOT_AVAILABLE:
+            return
+
+        print(
+            f"[LEROBOT] Appending rewards to sidecar for episode {self.dataset.num_episodes - 1}..."
+        )
+
+        # Determine global start index for this episode
+        # num_frames includes the frames we JUST added
+        num_total_frames = self.dataset.num_frames
+        episode_len = len(self.episode_buffer)
+        start_idx = num_total_frames - episode_len
+        episode_idx = self.dataset.num_episodes - 1
+
+        rewards = []
+        MAX_APPROACH_DIST = 0.5
+
+        for i, frame in enumerate(self.episode_buffer):
+            # Extract physics from extra_info
+            cube_z = float(frame["extra_info"].get("cube_z", 0.0))
+            is_grasping = bool(frame["extra_info"].get("is_grasping", False))
+            target_dist = float(frame["extra_info"].get("target_dist", 1.0))
+
+            # Calculate Progress Score (v1 Heuristic)
+            z_offset = cube_z - 0.82
+            if z_offset > 0.03:
+                score = 0.7 + min(0.3, (z_offset / 0.15) * 0.3)
+            elif is_grasping:
+                score = 0.6
+            else:
+                dist_factor = max(0, 1.0 - (target_dist / MAX_APPROACH_DIST))
+                score = 0.1 + (dist_factor * 0.4)
+
+            rewards.append(
+                {
+                    "index": start_idx + i,
+                    "episode_index": episode_idx,
+                    "progress_sparse": float(score),
+                    "progress_dense": float(score),
+                }
+            )
+
+        reward_df = pd.DataFrame(rewards)
+        sidecar_path = os.path.join(self.root, self.repo_id, "progress_sparse.parquet")
+
+        if os.path.exists(sidecar_path):
+            existing_df = pd.read_parquet(sidecar_path)
+            # Ensure we don't have overlapping indices if a save failed previously
+            existing_df = existing_df[existing_df["index"] < start_idx]
+            reward_df = pd.concat([existing_df, reward_df], ignore_index=True)
+
+        reward_df.to_parquet(sidecar_path)
+        print(f"[LEROBOT] Sidecar updated. Total reward frames: {len(reward_df)}")
 
     @property
     def total_episodes(self):

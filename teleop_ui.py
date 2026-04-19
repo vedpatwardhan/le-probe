@@ -35,6 +35,8 @@ if "batch_status" not in st.session_state:
     st.session_state.batch_status = 0
 if "ik_phase" not in st.session_state:
     st.session_state.ik_phase = None
+if "physics" not in st.session_state:
+    st.session_state.physics = {"cube_z": 0.0, "is_grasping": False, "target_dist": 0.0}
 
 # --- Load Default Active Joints ---
 if "active_joints" not in st.session_state:
@@ -61,6 +63,8 @@ def send_command(payload):
         st.session_state.upload_queue = data.get("upload_queue", 0)
         st.session_state.total_episodes = data.get("total_episodes", 0)
         st.session_state.batch_status = data.get("batch_status", 0)
+        if "physics" in data:
+            st.session_state.physics = data["physics"]
         return data
 
         # Track background sync progress
@@ -225,6 +229,29 @@ with st.sidebar:
                 st.session_state.is_recording = False
                 st.rerun()
         st.error("RECORDING...")
+
+    st.divider()
+    st.header("🔭 Live Physics Monitor")
+    phys = st.session_state.physics
+    dist = phys.get("target_dist", 0.0)
+
+    # Distance Metric with color cue
+    dist_label = "🎯 Target Distance"
+    st.metric(
+        dist_label,
+        f"{dist:.3f} m",
+        delta=f"{0.05 - dist:.3f} m" if dist < 0.05 else None,
+    )
+
+    # Grasping Status
+    is_grasp = phys.get("is_grasping", False)
+    if is_grasp:
+        st.success("✊ GRASPING: TRUE")
+    else:
+        st.info("✋ GRASPING: FALSE")
+
+    # Height Metric
+    st.metric("📦 Cube Height (Z)", f"{phys.get('cube_z', 0.0):.3f} m")
 
     st.divider()
     st.header("🎯 IK Configuration")
