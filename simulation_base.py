@@ -329,8 +329,6 @@ class GR1MuJoCoBase:
 
         self.render_step_idx += 1
         self.rerun_count += 1
-        self.render_step_idx += 1
-        self.rerun_count += 1
         if self.is_recording:
             # Extract ground-truth physics for RA-BC Progress Weighting
             physics = self.get_physics_state()

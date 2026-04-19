@@ -254,16 +254,16 @@ with st.sidebar:
     st.metric("📦 Cube Height (Z)", f"{phys.get('cube_z', 0.0):.3f} m")
 
     st.divider()
-    st.header("🎯 IK Configuration")
-    reach_offset = st.slider("Reach Height (cm)", 5, 40, 5)
-
-    st.divider()
     st.header("📊 Dataset Statistics")
     col_stat1, col_stat2 = st.columns(2)
     with col_stat1:
         st.metric("Total Episodes", st.session_state.total_episodes)
     with col_stat2:
         st.metric("Batch Status", f"{st.session_state.batch_status}/20")
+
+    st.divider()
+    st.header("🎯 IK Configuration")
+    reach_offset = st.slider("Reach Height (cm)", 5, 40, 5)
 
     st.header("☁️ Cloud Sync Status")
     if st.session_state.upload_queue > 0:
