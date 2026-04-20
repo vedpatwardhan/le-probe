@@ -126,7 +126,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             self.dispatch_action(
                 self.qpos_to_action_32(q_reach_h),
                 q_reach_h,
-                n_steps=90,
+                n_steps=240,
                 render_freq=30,
             )
 
@@ -141,7 +141,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             self.dispatch_action(
                 self.qpos_to_action_32(q_reach_l),
                 q_reach_l,
-                n_steps=90,
+                n_steps=240,
                 render_freq=30,
             )
 
@@ -161,7 +161,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             self.dispatch_action(
                 self.qpos_to_action_32(q_grasp),
                 q_grasp,
-                n_steps=90,
+                n_steps=240,
                 render_freq=30,
             )
 
@@ -179,7 +179,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             self.dispatch_action(
                 self.qpos_to_action_32(q_lift),
                 q_lift,
-                n_steps=90,
+                n_steps=240,
                 render_freq=30,
             )
 

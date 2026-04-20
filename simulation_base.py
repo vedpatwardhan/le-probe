@@ -60,7 +60,7 @@ class GR1MuJoCoBase:
 
         # LeRobot Manager
         self.recorder = LeRobotManager(
-            repo_id="vedpatwardhan/gr1_pickup_reward", fps=10, upload_interval=20
+            repo_id="vedpatwardhan/gr1_pickup_32", fps=10, upload_interval=20
         )
 
         # Canonical Scaling Logic
