@@ -14,6 +14,7 @@ from gr1_config import (
     JOINT_LIMITS_MIN,
     JOINT_LIMITS_MAX,
     SCENE_PATH,
+    FROZEN_JOINTS,
 )
 from gr1_protocol import StandardScaler
 
@@ -403,10 +404,15 @@ class GR1MuJoCoBase:
         ].copy()
         for i, j_id in enumerate(self.protocol_joint_ids):
             if j_id != -1 and self.v_allowed_mask[i] > 0.5:
-                # Wider joint randomization range (±0.2 rad) to test starting configuration limits
-                home_q[self.model.jnt_qposadr[j_id]] = (
-                    self.wire_max[i] + self.wire_min[i]
-                ) / 2.0 + np.random.uniform(-0.2, 0.2)
+                # Protocols: Exempt frozen joints from randomization
+                j_name = COMPACT_WIRE_JOINTS[i]
+                if j_name in FROZEN_JOINTS:
+                    home_q[self.model.jnt_qposadr[j_id]] = FROZEN_JOINTS[j_name]
+                else:
+                    # Wider joint randomization range (±0.2 rad) to test starting configuration limits
+                    home_q[self.model.jnt_qposadr[j_id]] = (
+                        self.wire_max[i] + self.wire_min[i]
+                    ) / 2.0 + np.random.uniform(-0.2, 0.2)
         home_q[self.root_q_idx : self.root_q_idx + 3] = [0.0, 0.0, 0.95]
 
         # --- INSTANT HARD RESET ---
