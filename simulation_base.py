@@ -15,6 +15,7 @@ from gr1_config import (
     JOINT_LIMITS_MAX,
     SCENE_PATH,
     FROZEN_JOINTS,
+    IK_POSTURE_LOCKS,
 )
 from gr1_protocol import StandardScaler
 
@@ -225,7 +226,15 @@ class GR1MuJoCoBase:
                 state[i] = qpos[q_idx]
         return state
 
-    def solve_ik(self, pos_wrist, quat, pos_index=None, pos_thumb=None):
+    def solve_ik(
+        self,
+        pos_wrist,
+        quat,
+        pos_index=None,
+        pos_thumb=None,
+        posture_target=None,
+        posture_cost=None,
+    ):
         """Hardened IK solver for a 3-tip end effector (Index, Thumb, Wrist)."""
         quat = np.array(quat)
         if quat.shape[0] != 4:
@@ -240,8 +249,28 @@ class GR1MuJoCoBase:
         pos_index = np.array(pos_index)
         pos_thumb = np.array(pos_thumb)
 
-        self.configuration.update(self.data.qpos)
+        # ✅ IK POSTURE ENFORCEMENT: Snap restricted joints to target waypoints
+        q_start = self.data.qpos.copy()
+        for j_name, target_val in IK_POSTURE_LOCKS.items():
+            j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, j_name)
+            if j_id != -1:
+                q_start[self.model.jnt_qposadr[j_id]] = target_val
+
+        self.configuration.update(q_start)
+
         rotation = mink.SO3(quat)
+
+        # ✅ DYNAMIC POSTURE BIASING (Top-Down Alignment)
+        if posture_target is not None:
+            self.tasks[3].set_target(posture_target)
+        else:
+            self.tasks[3].set_target(self.model.qpos0)
+
+        if posture_cost is not None:
+            self.tasks[3].cost = np.array([posture_cost])
+        else:
+            self.tasks[3].cost = np.array([1e-6])  # Default low bias
+
         self.tasks[0].set_target(
             mink.SE3.from_rotation_and_translation(rotation, pos_index)
         )

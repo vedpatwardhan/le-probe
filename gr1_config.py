@@ -29,6 +29,18 @@ FROZEN_JOINTS = {
     "head_yaw_joint": 0.0,
 }
 
+# Joints that are temporarily locked to a specific pose ONLY during IK demonstations
+# to stabilize biomechanics (e.g., preventing palm flips).
+# These remain ACTIVE in the VLA action space with full range.
+IK_POSTURE_LOCKS = {
+    "right_shoulder_yaw_joint": 2.97,  # Normalized +1.0
+    "right_elbow_pitch_joint": 0.0,  # Straight Arm
+    "right_wrist_yaw_joint": 2.97,  # Normalized +1.0
+    "right_wrist_pitch_joint": 0.0,  # Neutral center
+    "right_wrist_roll_joint": 0.0,  # Fixed palm orientation
+    "R_thumb_proximal_yaw_joint": -1.676,  # Normalized -1.0
+}
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCENE_PATH = os.path.join(BASE_DIR, "sim_assets/scene_gr1_pickup.xml")
 
