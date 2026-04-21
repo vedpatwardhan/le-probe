@@ -122,9 +122,9 @@ class GR1TeleopServer(GR1MuJoCoBase):
         if phase == 0:
             # Phase 1: Lift (Approach)
             pos_i_h, pos_t_h, pos_w_h = (
-                cube_pos + [0.06, 0, 0.02 + offset_cm / 100.0],
-                cube_pos + [-0.06, 0, 0.02 + offset_cm / 100.0],
-                cube_pos + [0, 0, 0.08 + offset_cm / 100.0],
+                cube_pos + [0.02, 0.02, 0.02 + offset_cm / 100.0],
+                cube_pos + [-0.10, 0, 0.02 + offset_cm / 100.0],
+                cube_pos + [0, 0, 0.04 + offset_cm / 100.0],
             )
             q_reach_h = self.solve_ik(
                 pos_w_h, quat_down, pos_i_h, pos_t_h, posture_cost=1e-6
@@ -144,9 +144,9 @@ class GR1TeleopServer(GR1MuJoCoBase):
         elif phase == 1:
             # Phase 2: Descent
             pos_i_l, pos_t_l, pos_w_l = (
-                cube_pos + [0.06, 0, 0.02],
-                cube_pos + [-0.06, 0, 0.02],
-                cube_pos + [0, 0, 0.08],
+                cube_pos + [0.02, 0.02, 0],
+                cube_pos + [-0.10, 0, 0],
+                cube_pos + [0, 0, 0.02],
             )
             q_reach_l = self.solve_ik(
                 pos_w_l, quat_down, pos_i_l, pos_t_l, posture_cost=1e-6
@@ -166,9 +166,9 @@ class GR1TeleopServer(GR1MuJoCoBase):
         elif phase == 2:
             # Phase 3: Grasp
             pos_i_l, pos_t_l, pos_w_l = (
-                cube_pos + [0.06, 0, 0.02],
-                cube_pos + [-0.06, 0, 0.02],
-                cube_pos + [0, 0, 0.08],
+                cube_pos + [0.02, 0.02, 0],
+                cube_pos + [-0.10, 0, 0],
+                cube_pos + [0, 0, 0.02],
             )
             q_reach_l = self.solve_ik(
                 pos_w_l, quat_down, pos_i_l, pos_t_l, posture_cost=1e-6
@@ -184,9 +184,9 @@ class GR1TeleopServer(GR1MuJoCoBase):
         elif phase == 3:
             # Phase 4: Lift (Retract)
             pos_i_up, pos_t_up, pos_w_up = (
-                cube_pos + [0.06, 0, 0.15],
-                cube_pos + [-0.06, 0, 0.15],
-                cube_pos + [0, 0, 0.21],
+                cube_pos + [0.02, 0.02, 0.15],
+                cube_pos + [-0.10, 0, 0.15],
+                cube_pos + [0, 0, 0.17],
             )
             q_lift = self.solve_ik(
                 pos_w_up, quat_down, pos_i_up, pos_t_up, posture_cost=1e-6
