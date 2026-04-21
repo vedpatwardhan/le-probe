@@ -236,11 +236,15 @@ class GR1MuJoCoBase:
         posture_cost=None,
     ):
         """Hardened IK solver for a 3-tip end effector (Index, Thumb, Wrist)."""
+        # 1. Convert input rotation (wxyz) to a NumPy array for mathematical operations
         quat = np.array(quat)
+        # Validate that the quaternion has the correct length (MuJoCo/Mink expects 4: wxyz)
         if quat.shape[0] != 4:
             raise ValueError(f"solve_ik: quat must be length 4 (wxyz), got {len(quat)}")
 
+        # 2. Convert target positions to NumPy arrays
         pos_wrist = np.array(pos_wrist)
+        # If fingertip targets aren't provided, default them to a small offset above the wrist
         if pos_index is None:
             pos_index = pos_wrist + np.array([0, 0, 0.05])
         if pos_thumb is None:
@@ -249,28 +253,38 @@ class GR1MuJoCoBase:
         pos_index = np.array(pos_index)
         pos_thumb = np.array(pos_thumb)
 
-        # ✅ IK POSTURE ENFORCEMENT: Snap restricted joints to target waypoints
+        # 3. IK POSTURE ENFORCEMENT: Force restricted joints (like shoulder yaw) to specific waypoints
+        # This keeps the arm 'stiff' and predictable during demonstrations
         q_start = self.data.qpos.copy()
         for j_name, target_val in IK_POSTURE_LOCKS.items():
+            # Look up the MuJoCo joint ID by its XML name
             j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, j_name)
             if j_id != -1:
+                # Update the starting configuration with the locked value
                 q_start[self.model.jnt_qposadr[j_id]] = target_val
 
+        # Update the solver's internal configuration with the snapped starting pose
         self.configuration.update(q_start)
 
+        # Convert the target quaternion into a Mink rotation object
         rotation = mink.SO3(quat)
 
-        # ✅ DYNAMIC POSTURE BIASING (Top-Down Alignment)
+        # 4. DYNAMIC POSTURE BIASING: Influence the solver toward a 'natural' or neutral pose
         if posture_target is not None:
+            # If a specific target is provided, use it to guide the whole body
             self.tasks[3].set_target(posture_target)
         else:
+            # Otherwise, use the model's default neutral pose (qpos0) as a reference
             self.tasks[3].set_target(self.model.qpos0)
 
+        # Adjust the 'strength' of the postural bias (how hard the solver tries to stay neutral)
         if posture_cost is not None:
             self.tasks[3].cost = np.array([posture_cost])
         else:
-            self.tasks[3].cost = np.array([1e-6])  # Default low bias
+            self.tasks[3].cost = np.array([1e-6])  # Use a very low cost by default
 
+        # 5. CONSTRUCT SPATIAL TASKS: Map the XYZ + Rotation targets to the MuJoCo sites
+        # These tell the solver WHERE and HOW oriented each tip should be
         self.tasks[0].set_target(
             mink.SE3.from_rotation_and_translation(rotation, pos_index)
         )
@@ -280,25 +294,42 @@ class GR1MuJoCoBase:
         self.tasks[2].set_target(
             mink.SE3.from_rotation_and_translation(rotation, pos_wrist)
         )
+
+        # 6. ITERATIVE SOLVER LOOP: Refine the joint angles to minimize distance to targets
         for i in range(1500):
+            # Calculate the velocity vector needed to move toward targets
             solver = mink.solve_ik(
                 self.configuration,
                 self.tasks,
-                dt=0.15,
-                solver="osqp",
-                limits=self.limits,
+                dt=0.15,  # Time step size for the solver
+                solver="osqp",  # Quadratic programming solver backend
+                limits=self.limits,  # Respect physical joint limits defined in XML
             )
+
+            # Extract the current joint state to calculate the next step
             q_ref = self.configuration.q.copy()
             full_vel = solver.copy()
+
+            # 7. VELOCITY FILTERING: Prevent movement in 'Unauthorized' or locked joints
+            # This is the physical enforcement of your stiff-arm demonstrations
             for d in range(len(full_vel)):
                 if d not in self.auth_dofs:
-                    full_vel[d] = 0.0
+                    full_vel[d] = (
+                        0.0  # Zero out the velocity for unauthorized/frozen degrees-of-freedom
+                    )
+
+            # Integrate the velocity over a small 'tick' to find new joint positions
             mujoco.mj_integratePos(self.model, q_ref, full_vel, 0.05)
+
+            # Update the configuration state with the new calculated positions
             self.configuration.update(q_ref)
+
+            # 8. CONVERGENCE CHECK: Stop early if the index finger is within 1cm of the target
             err = self.tasks[0].compute_error(self.configuration)
             if np.linalg.norm(err) < 0.01:
                 break
 
+        # Return the final calculated joint sequence (qpos)
         return self.configuration.q.copy()
 
     def sync_ctrl_to_qpos(self, q):
@@ -411,8 +442,9 @@ class GR1MuJoCoBase:
         # Save target for next chunk (VLA Trajectory Threading)
         self._last_interp_q = target_q.copy()
 
-    def reset_env(self):
-        print("🎲 Randomizing the environment...")
+    def reset_env(self, lock_posture=False):
+        """Resets the simulation with optional postural locking."""
+        print(f"🎲 Resetting environment (Lock Posture: {lock_posture})...")
         self.current_phase = 0
         # Constrain cube randomization to table bounds (X: 0.25-0.65, Y: ±0.25)
         # Using [0.27, 0.63] and ±0.23 for a small safety margin from the edges
@@ -434,14 +466,23 @@ class GR1MuJoCoBase:
         for i, j_id in enumerate(self.protocol_joint_ids):
             if j_id != -1 and self.v_allowed_mask[i] > 0.5:
                 # Protocols: Exempt frozen joints from randomization
-                j_name = COMPACT_WIRE_JOINTS[i]
-                if j_name in FROZEN_JOINTS:
-                    home_q[self.model.jnt_qposadr[j_id]] = FROZEN_JOINTS[j_name]
-                else:
-                    # Wider joint randomization range (±0.2 rad) to test starting configuration limits
+                name = COMPACT_WIRE_JOINTS[i]
+                if name in FROZEN_JOINTS:
+                    home_q[self.model.jnt_qposadr[j_id]] = FROZEN_JOINTS[name]
+                elif name in IK_POSTURE_LOCKS:
+                    target = IK_POSTURE_LOCKS[name]
+                    # Snap if locked, otherwise add small jitter for data diversity
                     home_q[self.model.jnt_qposadr[j_id]] = (
-                        self.wire_max[i] + self.wire_min[i]
-                    ) / 2.0 + np.random.uniform(-0.2, 0.2)
+                        target
+                        if lock_posture
+                        else target + np.random.uniform(-0.1, 0.1)
+                    )
+                else:
+                    # Always randomize other active joints (waist, etc.)
+                    center = (self.wire_max[i] + self.wire_min[i]) / 2.0
+                    home_q[self.model.jnt_qposadr[j_id]] = center + np.random.uniform(
+                        -0.2, 0.2
+                    )
         home_q[self.root_q_idx : self.root_q_idx + 3] = [0.0, 0.0, 0.95]
 
         # --- INSTANT HARD RESET ---

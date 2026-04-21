@@ -33,11 +33,6 @@ FROZEN_JOINTS = {
 # to stabilize biomechanics (e.g., preventing palm flips).
 # These remain ACTIVE in the VLA action space with full range.
 IK_POSTURE_LOCKS = {
-    "right_shoulder_yaw_joint": 2.97,  # Normalized +1.0
-    "right_elbow_pitch_joint": 0.0,  # Straight Arm
-    "right_wrist_yaw_joint": 2.97,  # Normalized +1.0
-    "right_wrist_pitch_joint": 0.0,  # Neutral center
-    "right_wrist_roll_joint": 0.0,  # Fixed palm orientation
     "R_thumb_proximal_yaw_joint": -1.676,  # Normalized -1.0
 }
 

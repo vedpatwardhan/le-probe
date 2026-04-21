@@ -5,6 +5,7 @@ import rerun as rr
 import mujoco
 import os
 import json
+import argparse
 from simulation_base import GR1MuJoCoBase
 from gr1_config import SCENE_PATH
 from gr1_protocol import StandardScaler
@@ -17,9 +18,10 @@ class GR1TeleopServer(GR1MuJoCoBase):
     Dedicated to the Streamlit Dashboard and IK Calibration.
     """
 
-    def __init__(self, scene_path=None, port=5556):
+    def __init__(self, scene_path=None, port=5556, lock_posture=False):
         super().__init__(scene_path or SCENE_PATH, restrict_ik=True)
         self.port = port
+        self.lock_posture = lock_posture
         self.is_running = True
 
     def run(self):
@@ -29,7 +31,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
 
         rr.init("gr1_teleop", spawn=False)
         rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
-        print(f"🚀 Teleop Server Running on port {self.port}")
+        print(f"🚀 Teleop Server Running on port {self.port} (Lock Posture: {self.lock_posture})")
 
         while self.is_running:
             msg = socket.recv()
@@ -48,7 +50,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 socket.send(msgpack.packb(payload))
 
             if cmd == "reset":
-                self.reset_env()
+                self.reset_env(lock_posture=self.lock_posture)
                 # Server is the Source of Normalized Truth
                 norm_state = StandardScaler().scale_state(self.get_state_32())
                 send_resp({"status": "reset_ok", "joints": norm_state.tolist()})
@@ -100,6 +102,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 self.process_target_32(action_32)
                 self.dispatch_action(action_32, self.last_target_q)
                 send_resp({"status": "step_ok"})
+
             else:
                 send_resp({"status": "unknown"})
 
@@ -119,9 +122,9 @@ class GR1TeleopServer(GR1MuJoCoBase):
         if phase == 0:
             # Phase 1: Lift (Approach)
             pos_i_h, pos_t_h, pos_w_h = (
-                cube_pos + [0.1, -0.02, 0.07 + offset_cm / 100.0],
-                cube_pos + [-0.1, -0.02, 0.07 + offset_cm / 100.0],
-                cube_pos + [0, -0.02, 0.15 + offset_cm / 100.0],
+                cube_pos + [0.06, 0, 0.02 + offset_cm / 100.0],
+                cube_pos + [-0.06, 0, 0.02 + offset_cm / 100.0],
+                cube_pos + [0, 0, 0.08 + offset_cm / 100.0],
             )
             q_reach_h = self.solve_ik(
                 pos_w_h, quat_down, pos_i_h, pos_t_h, posture_cost=1e-6
@@ -134,16 +137,16 @@ class GR1TeleopServer(GR1MuJoCoBase):
             self.dispatch_action(
                 self.qpos_to_action_32(q_reach_h),
                 q_reach_h,
-                n_steps=240,
-                render_freq=30,
+                n_steps=300,
+                render_freq=15,
             )
 
         elif phase == 1:
             # Phase 2: Descent
             pos_i_l, pos_t_l, pos_w_l = (
-                cube_pos + [0.1, -0.04, 0.0],
-                cube_pos + [-0.1, -0.04, 0.0],
-                cube_pos + [0, -0.04, 0.02],
+                cube_pos + [0.06, 0, 0.02],
+                cube_pos + [-0.06, 0, 0.02],
+                cube_pos + [0, 0, 0.08],
             )
             q_reach_l = self.solve_ik(
                 pos_w_l, quat_down, pos_i_l, pos_t_l, posture_cost=1e-6
@@ -156,43 +159,43 @@ class GR1TeleopServer(GR1MuJoCoBase):
             self.dispatch_action(
                 self.qpos_to_action_32(q_reach_l),
                 q_reach_l,
-                n_steps=240,
-                render_freq=30,
+                n_steps=300,
+                render_freq=15,
             )
 
         elif phase == 2:
             # Phase 3: Grasp
             pos_i_l, pos_t_l, pos_w_l = (
-                cube_pos + [0.04, -0.04, 0.0],
-                cube_pos + [-0.04, -0.04, 0.0],
-                cube_pos + [0, -0.04, 0.02],
+                cube_pos + [0.06, 0, 0.02],
+                cube_pos + [-0.06, 0, 0.02],
+                cube_pos + [0, 0, 0.08],
             )
             q_reach_l = self.solve_ik(
                 pos_w_l, quat_down, pos_i_l, pos_t_l, posture_cost=1e-6
             )
             q_grasp = q_reach_l.copy()
-            q_grasp[47], q_grasp[48] = -1.1, 1.1
+            q_grasp[48] = 1.1
             for g_id in [50, 52, 54, 56]:
                 q_grasp[g_id] = -1.1
             self.dispatch_action(
-                self.qpos_to_action_32(q_grasp), q_grasp, n_steps=240, render_freq=30
+                self.qpos_to_action_32(q_grasp), q_grasp, n_steps=300, render_freq=15
             )
 
         elif phase == 3:
             # Phase 4: Lift (Retract)
             pos_i_up, pos_t_up, pos_w_up = (
-                cube_pos + [0.04, -0.04, 0.15],
-                cube_pos + [-0.04, -0.04, 0.15],
-                cube_pos + [0, -0.04, 0.19],
+                cube_pos + [0.06, 0, 0.15],
+                cube_pos + [-0.06, 0, 0.15],
+                cube_pos + [0, 0, 0.21],
             )
             q_lift = self.solve_ik(
                 pos_w_up, quat_down, pos_i_up, pos_t_up, posture_cost=1e-6
             )
-            q_lift[47], q_lift[48] = -1.1, 1.1
+            q_lift[48] = 1.1
             for g_id in [50, 52, 54, 56]:
                 q_lift[g_id] = -1.1
             self.dispatch_action(
-                self.qpos_to_action_32(q_lift), q_lift, n_steps=240, render_freq=30
+                self.qpos_to_action_32(q_lift), q_lift, n_steps=300, render_freq=15
             )
 
         self._log_phase(phase + 1)
@@ -236,4 +239,15 @@ class GR1TeleopServer(GR1MuJoCoBase):
 
 
 if __name__ == "__main__":
-    GR1TeleopServer().run()
+    parser = argparse.ArgumentParser(description="GR-1 Teleop Server")
+    parser.add_argument("--port", type=int, default=5556, help="ZMQ Port")
+    parser.add_argument(
+        "--lock-posture",
+        action="store_true",
+        default=True,
+        help="Lock IK joints to specific targets",
+    )
+    args = parser.parse_args()
+
+    # Pass the toggle to the server
+    GR1TeleopServer(port=args.port, lock_posture=args.lock_posture).run()
