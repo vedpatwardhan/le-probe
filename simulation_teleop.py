@@ -123,16 +123,12 @@ class GR1TeleopServer(GR1MuJoCoBase):
             # Phase 1: Lift (Approach)
             pos_i_h, pos_t_h, pos_w_h = (
                 cube_pos + [0.02, 0.02, 0.02 + offset_cm / 100.0],
-                cube_pos + [-0.10, 0, 0.02 + offset_cm / 100.0],
-                cube_pos + [0, 0, 0.04 + offset_cm / 100.0],
+                cube_pos + [-0.02, 0, 0.02 + offset_cm / 100.0],
+                cube_pos + [0, 0, 0.08 + offset_cm / 100.0],
             )
             q_reach_h = self.solve_ik(
                 pos_w_h, quat_down, pos_i_h, pos_t_h, posture_cost=1e-6
             )
-            # ✅ WIDE OPEN HAND: Force fingers to 0.0 (Open)
-            for f_idx in [50, 51, 52, 53, 54, 55, 56]:
-                if f_idx < len(q_reach_h):
-                    q_reach_h[f_idx] = 0.0
 
             self.dispatch_action(
                 self.qpos_to_action_32(q_reach_h),
@@ -144,9 +140,9 @@ class GR1TeleopServer(GR1MuJoCoBase):
         elif phase == 1:
             # Phase 2: Descent
             pos_i_l, pos_t_l, pos_w_l = (
-                cube_pos + [0.02, 0.02, 0],
-                cube_pos + [-0.10, 0, 0],
-                cube_pos + [0, 0, 0.02],
+                cube_pos + [-0.02, 0.02, 0],
+                cube_pos + [-0.06, 0, 0],
+                cube_pos + [0, 0, 0.06],
             )
             q_reach_l = self.solve_ik(
                 pos_w_l, quat_down, pos_i_l, pos_t_l, posture_cost=1e-6
@@ -166,9 +162,9 @@ class GR1TeleopServer(GR1MuJoCoBase):
         elif phase == 2:
             # Phase 3: Grasp
             pos_i_l, pos_t_l, pos_w_l = (
-                cube_pos + [0.02, 0.02, 0],
-                cube_pos + [-0.10, 0, 0],
-                cube_pos + [0, 0, 0.02],
+                cube_pos + [0, 0.02, 0],
+                cube_pos + [0, 0, 0],
+                cube_pos + [0, 0, 0.06],
             )
             q_reach_l = self.solve_ik(
                 pos_w_l, quat_down, pos_i_l, pos_t_l, posture_cost=1e-6
@@ -184,9 +180,9 @@ class GR1TeleopServer(GR1MuJoCoBase):
         elif phase == 3:
             # Phase 4: Lift (Retract)
             pos_i_up, pos_t_up, pos_w_up = (
-                cube_pos + [0.02, 0.02, 0.15],
-                cube_pos + [-0.10, 0, 0.15],
-                cube_pos + [0, 0, 0.17],
+                cube_pos + [0, 0.02, 0.25],
+                cube_pos + [0, 0, 0.25],
+                cube_pos + [0, 0, 0.31],
             )
             q_lift = self.solve_ik(
                 pos_w_up, quat_down, pos_i_up, pos_t_up, posture_cost=1e-6
