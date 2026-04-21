@@ -181,6 +181,7 @@
                                   <body name="L_index_intermediate_link" pos="0.031533 -0.0054444 0" euler="0 0 0">
                                     <joint name="L_index_intermediate_joint" axis="0 0 1" range="-1.791 0" />
                                     <geom mesh="L_index_intermediate_link" pos="0 0 0" euler="0 0 0" />
+                                    <geom type="capsule" fromto="0 0 0 0.039 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="L_index_tip_link" pos="0.0390 -0.0020 0" euler="0 0 0" />
                                   </body>
                                 </body>
@@ -190,6 +191,7 @@
                                   <body name="L_middle_intermediate_link" pos="0.031521 -0.0055139 0" euler="0 0 0">
                                     <joint name="L_middle_intermediate_joint" axis="0 0 1" range="-1.791 0" />
                                     <geom mesh="L_middle_intermediate_link" pos="0 0 0" euler="0 0 0" />
+                                    <geom type="capsule" fromto="0 0 0 0.047 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="L_middle_tip_link" pos="0.047 -0.0025 0" euler="0 0 0" />
                                   </body>
                                 </body>
@@ -199,6 +201,7 @@
                                   <body name="L_ring_intermediate_link" pos="0.031531 -0.0054567 0.00025" euler="0 0 0">
                                     <joint name="L_ring_intermediate_joint" axis="0 0 1" range="-1.798 0" />
                                     <geom mesh="L_ring_intermediate_link" pos="0 0 0" euler="0 0 0" />
+                                    <geom type="capsule" fromto="0 0 0 0.0385 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="L_ring_tip_link" pos="0.0385 -0.0015 0" euler="0 0 0" />
                                   </body>
                                 </body>
@@ -208,6 +211,7 @@
                                   <body name="L_pinky_intermediate_link" pos="0.031532 -0.005451 0" euler="0 0 0">
                                     <joint name="L_pinky_intermediate_joint" axis="0 0 1" range="-1.796 0" />
                                     <geom mesh="L_pinky_intermediate_link" pos="0 0 0" euler="0 0 0" />
+                                    <geom type="capsule" fromto="0 0 0 0.033 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="L_pinky_tip_link" pos="0.033 -0.0015 0" euler="0 0 0" />
                                   </body>
                                 </body>
@@ -270,7 +274,7 @@
                                   <body name="R_index_intermediate_link" pos="0.031535 -0.0054349 0" euler="0 0 0">
                                     <joint name="R_index_intermediate_joint" axis="0 0 1" range="-1.791 0" />
                                     <geom mesh="R_index_intermediate_link" pos="0 0 0" euler="0 0 0" />
-                                    <geom type="capsule" fromto="0 0 0 0.025 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
+                                    <geom type="capsule" fromto="0 0 0 0.039 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="R_index_tip_link" pos="0.0390 -0.0020 0" euler="0 0 0" />
                                   </body>
                                 </body>
@@ -281,7 +285,7 @@
                                   <body name="R_middle_intermediate_link" pos="0.031531 -0.0054597 0" euler="0 0 0">
                                     <joint name="R_middle_intermediate_joint" axis="0 0 1" range="-1.791 0" />
                                     <geom mesh="R_middle_intermediate_link" pos="0 0 0" euler="0 0 0" />
-                                    <geom type="capsule" fromto="0 0 0 0.025 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
+                                    <geom type="capsule" fromto="0 0 0 0.047 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="R_middle_tip_link" pos="0.047 -0.0025 0" euler="0 0 0" />
                                   </body>
                                 </body>
@@ -292,7 +296,7 @@
                                   <body name="R_ring_intermediate_link" pos="0.031474 -0.0057806 0" euler="0 0 0">
                                     <joint name="R_ring_intermediate_joint" axis="0 0 1" range="-1.798 0" />
                                     <geom mesh="R_ring_intermediate_link" pos="0 0 0" euler="0 0 0" />
-                                    <geom type="capsule" fromto="0 0 0 0.025 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
+                                    <geom type="capsule" fromto="0 0 0 0.0385 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="R_ring_tip_link" pos="0.0385 -0.0015 0" euler="0 0 0" />
                                   </body>
                                 </body>
@@ -303,7 +307,7 @@
                                   <body name="R_pinky_intermediate_link" pos="0.031474 -0.0057796 0" euler="0 0 0">
                                     <joint name="R_pinky_intermediate_joint" axis="0 0 1" range="-1.796 0" />
                                     <geom mesh="R_pinky_intermediate_link" pos="0 0 0" euler="0 0 0" />
-                                    <geom type="capsule" fromto="0 0 0 0.02 0 0" size="0.008" group="0" rgba="1 0 0 0.1" solref="0.005 1" solimp="0.99 0.99 0.001" />
+                                    <geom type="capsule" fromto="0 0 0 0.033 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="R_pinky_tip_link" pos="0.033 -0.0015 0" euler="0 0 0" />
                                   </body>
                                 </body>
