@@ -24,7 +24,9 @@ except ImportError:
 class LeRobotManager:
     """Manages LeRobot dataset creation and frame buffering."""
 
-    def __init__(self, repo_id="gr1_pickup_32", fps=10, root=None, upload_interval=20):
+    def __init__(
+        self, repo_id="gr1_pickup_grasp", fps=10, root=None, upload_interval=20
+    ):
         self.repo_id = repo_id
         self.fps = fps
         self.upload_interval = upload_interval
@@ -339,34 +341,13 @@ class LeRobotManager:
             target_dist = float(frame["extra_info"].get("target_dist", 1.0))
 
             # -----------------------------------------------------------------
-            # 32-FRAME HYBRID ACCELERATING RAMP (Final RA-BC Strategy)
+            # 32-FRAME PURE INVERTED DISTANCE STRATEGY
             # -----------------------------------------------------------------
-            # Combines: 1. Phase Base, 2. Velocity Ramp, 3. Distance Bonus
             if len(self.episode_buffer) == 32:
-                # 1. Base Milestone + Internal Ramp (0.1 per frame)
-                if i < 8:  # Phase 1: Rotate
-                    score = 1.0 + (i * 0.1)
-                elif i < 16:  # Phase 2: Approach
-                    score = 2.5 + ((i - 8) * 0.1)
-                elif i < 24:  # Phase 3: Grasp
-                    score = 5.0 + ((i - 16) * 0.1)
-                else:  # Phase 4: Lift / Success
-                    z_offset = cube_z - 0.82
-                    if z_offset > 0.03:
-                        score = 10.0 + ((i - 24) * 0.1)
-                    else:
-                        score = 8.0 + ((i - 24) * 0.1)
-
-                # 2. Progress Bonus: Incentivize closing distance to target
-                # We reward the DELTA of improvement compared to the previous frame
-                if i > 0:
-                    prev_dist = float(
-                        self.episode_buffer[i - 1]["extra_info"].get("target_dist", 1.0)
-                    )
-                    dist_improvement = max(0, prev_dist - target_dist)
-                    score += (
-                        dist_improvement * 5.0
-                    )  # High sensitivity to reach velocity
+                # The entire reward is just the proximity to the target (scaled to 10.0)
+                # target_dist is usually around 0.5 to 1.0 at start, and ~0.0 at grasp.
+                proximity = max(0, 1.0 - target_dist)
+                score = proximity * 10.0
 
             else:
                 # Fallback Heuristic for variable-length/manual teleop

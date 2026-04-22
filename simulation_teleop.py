@@ -133,8 +133,8 @@ class GR1TeleopServer(GR1MuJoCoBase):
             self.dispatch_action(
                 self.qpos_to_action_32(q_reach_h),
                 q_reach_h,
-                n_steps=300,
-                render_freq=15,
+                n_steps=240,
+                render_freq=30,
             )
 
         elif phase == 1:
@@ -155,8 +155,8 @@ class GR1TeleopServer(GR1MuJoCoBase):
             self.dispatch_action(
                 self.qpos_to_action_32(q_reach_l),
                 q_reach_l,
-                n_steps=300,
-                render_freq=15,
+                n_steps=240,
+                render_freq=30,
             )
 
         elif phase == 2:
@@ -164,7 +164,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             pos_i_l, pos_t_l, pos_w_l = (
                 cube_pos + [0, 0.02, 0],
                 cube_pos + [0, 0, 0],
-                cube_pos + [0, 0, 0.06],
+                cube_pos + [0, 0, 0],
             )
             q_reach_l = self.solve_ik(
                 pos_w_l, quat_down, pos_i_l, pos_t_l, posture_cost=1e-6
@@ -174,7 +174,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             for g_id in [50, 52, 54, 56]:
                 q_grasp[g_id] = -1.1
             self.dispatch_action(
-                self.qpos_to_action_32(q_grasp), q_grasp, n_steps=300, render_freq=15
+                self.qpos_to_action_32(q_grasp), q_grasp, n_steps=240, render_freq=30
             )
 
         elif phase == 3:
@@ -182,7 +182,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             pos_i_up, pos_t_up, pos_w_up = (
                 cube_pos + [0, 0.02, 0.25],
                 cube_pos + [0, 0, 0.25],
-                cube_pos + [0, 0, 0.31],
+                cube_pos + [0, 0, 0.25],
             )
             q_lift = self.solve_ik(
                 pos_w_up, quat_down, pos_i_up, pos_t_up, posture_cost=1e-6
@@ -191,7 +191,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
             for g_id in [50, 52, 54, 56]:
                 q_lift[g_id] = -1.1
             self.dispatch_action(
-                self.qpos_to_action_32(q_lift), q_lift, n_steps=300, render_freq=15
+                self.qpos_to_action_32(q_lift), q_lift, n_steps=240, render_freq=30
             )
 
         self._log_phase(phase + 1)
