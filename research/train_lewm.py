@@ -29,6 +29,22 @@ from lewm_data_plugin import LEWMDataPlugin
 from metrics import MetricsCallback
 
 
+class RewardPredictor(torch.nn.Module):
+    """RA-LeWM MLP Head for predicting future rewards from World Model latents."""
+
+    def __init__(self, input_dim, hidden_dim=512):
+        super().__init__()
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(input_dim, hidden_dim),
+            torch.nn.LayerNorm(hidden_dim),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, x):
+        return self.mlp(x)
+
+
 def lejepa_forward(self, batch, stage, cfg):
     """encode observations, predict next states, compute losses."""
     ctx_len = cfg.wm.history_size
@@ -78,11 +94,33 @@ def lejepa_forward(self, batch, stage, cfg):
     pred_emb = self.model.predict(ctx_emb, ctx_act)  # pred
 
     # LeWM loss (Force SIGReg to float32 for SVD stability)
-    output["pred_loss"] = (pred_emb - tgt_emb).pow(2).mean()
+    raw_pred_loss = (pred_emb - tgt_emb).pow(2).mean(dim=-1)
+
+    if "progress" in batch:
+        R = batch["progress"].to(pred_emb.dtype)
+        # Reward at start of prediction vs targets
+        R_t = R[:, ctx_len - 1].unsqueeze(1)
+        R_tk = R[:, ctx_len:]
+
+        # Exponential Mask Weighting
+        delta_R = R_tk - R_t
+        kappa = cfg.get("rabc_kappa", 0.01)
+        w_i = torch.exp(kappa * delta_R)
+        output["pred_loss"] = (raw_pred_loss * w_i).mean()
+
+        # Reward Supervision (Value Predictor)
+        pred_reward = self.model.reward_head(pred_emb).squeeze(-1)
+        output["reward_loss"] = torch.nn.functional.mse_loss(pred_reward, R_tk)
+    else:
+        output["pred_loss"] = raw_pred_loss.mean()
+
     output["sigreg_loss"] = self.sigreg(emb.float().transpose(0, 1))
     output["loss"] = output["pred_loss"] + cfg.loss.sigreg.weight * output[
         "sigreg_loss"
     ].to(output["pred_loss"].dtype)
+
+    if "reward_loss" in output:
+        output["loss"] = output["loss"] + output["reward_loss"]
 
     losses_dict = {f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k}
     self.log_dict(losses_dict, on_step=True, sync_dist=True)
@@ -223,6 +261,10 @@ def run(cfg):
         projector=projector,
         pred_proj=predictor_proj,
     )
+
+    # 🌟 RA-LeWM Reward Head 🌟
+    reward_head = RewardPredictor(input_dim=embed_dim, hidden_dim=512)
+    world_model.reward_head = reward_head
 
     optimizers = {
         "model_opt": {

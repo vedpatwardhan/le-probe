@@ -65,6 +65,15 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             self.cached_actions = torch.from_numpy(np.array(self.hf_dataset["action"]))
             print("⚡ Using native action column from RAM cache.")
 
+        # Progress / Rewards
+        self.cached_progress = None
+        self.has_progress = "progress_sparse" in self.hf_dataset.column_names
+        if self.has_progress:
+            self.cached_progress = torch.from_numpy(
+                np.array(self.hf_dataset["progress_sparse"])
+            )
+            print("📈 Using progress_sparse column from RAM cache.")
+
         # 4. LRU Decoder Cache (Worker-local)
         self._decoders = {}
 
@@ -127,6 +136,9 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         # Native Actions
         if self.has_native_actions:
             batch["action"] = self.cached_actions[idx : idx + self.num_steps]
+
+        if self.has_progress:
+            batch["progress"] = self.cached_progress[idx : idx + self.num_steps]
 
         # 3. Direct Video Decoding (High Performance)
         for target_key in self.keys_to_load:
