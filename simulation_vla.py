@@ -69,7 +69,11 @@ class GR1VLAClient(GR1MuJoCoBase):
             img_resized = np.array(
                 Image.fromarray(img_raw).resize((224, 224), Image.Resampling.LANCZOS)
             )
-            obs[cam] = pack_np(img_resized)
+            # ✅ PROTOCOL ALIGNMENT: LeRobot expects (C, H, W) PyTorch-style tensors
+            img_chw = np.transpose(img_resized, (2, 0, 1))
+
+            # ✅ PROTOCOL ALIGNMENT: LeRobot expects keys prefixed with 'observation.images.'
+            obs[f"observation.images.{cam}"] = pack_np(img_chw)
         return obs
 
     def run(self, instruction="Pick up the red cube", max_chunks=10):

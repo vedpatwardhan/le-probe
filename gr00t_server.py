@@ -136,7 +136,7 @@ class GR00TInferenceServer:
                     np.frombuffer(d["data"], dtype=d["dtype"]).reshape(d["shape"])
                 )
 
-                # Images
+                # Images (Handshake Protocol: Align with simulation_vla.py keys and CHW shape)
                 cams = [
                     "world_top",
                     "world_left",
@@ -146,13 +146,23 @@ class GR00TInferenceServer:
                 ]
                 img_list = []
                 for cam in cams:
-                    img = unpack_np(req.get(cam))
+                    # Try prefixed key first, then fallback to raw name
+                    key = f"observation.images.{cam}"
+                    val = req.get(key) if key in req else req.get(cam)
+
+                    if val is None:
+                        raise ValueError(
+                            f"Missing camera data for: {cam} (tried keys: {key}, {cam})"
+                        )
+
+                    img = unpack_np(val)
                     img_list.append(img)
 
                 all_imgs_np = np.stack(img_list)
+                # ✅ PROTOCOL ALIGNMENT: Data is now already (C, H, W) from client
                 all_images_t = torch.as_tensor(
                     all_imgs_np, dtype=torch.uint8, device=DEVICE
-                ).permute(0, 3, 1, 2)
+                )
 
                 # State
                 state_np = unpack_np(req.get("state"))
