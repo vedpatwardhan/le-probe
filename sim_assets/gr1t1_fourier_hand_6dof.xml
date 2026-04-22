@@ -156,14 +156,14 @@
                           <body name="left_hand_pitch_link" pos="0 0 0" euler="0 0 0">
                             <joint name="left_wrist_pitch_joint" axis="0 1 0" range="-0.61 0.61" />
                             <geom mesh="left_hand_pitch_link" pos="0 0 0" euler="0 0 0" />
-                            <body name="left_end_effector_link" pos="0 0 -0.023" euler="0 0 3.14159">
+                            <body name="left_end_effector_link" pos="0 0 -0.023" euler="0 0 0">
                               <body name="L_hand_base_link" pos="0 0 0" euler="0 0 0">
                                 <geom mesh="L_hand_base_link" pos="0 0 0" euler="0 0 0" />
                                 <geom type="capsule" fromto="0.01 -0.01 -0.02 -0.01 0.01 -0.08" size="0.03" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
-                                <body name="L_thumb_proximal_yaw_link" pos="0.022 -0.0155 -0.022892" euler="3.1416 0 0">
+                                <body name="L_thumb_proximal_yaw_link" pos="0.022 -0.0155 -0.022992" euler="0 0 0">
                                   <joint name="L_thumb_proximal_yaw_joint" axis="0 0 1" range="-1.676 0" />
                                   <geom mesh="L_thumb_proximal_yaw_link" pos="0 0 0" euler="0 0 0" />
-                                  <body name="L_thumb_proximal_pitch_link" pos="0.02175 -7.414E-05 0" euler="1.5708 0 -0.0057076">
+                                  <body name="L_thumb_proximal_pitch_link" pos="0.021749 -0.00016321 0" euler="-1.5708 0 -0.0052052">
                                     <joint name="L_thumb_proximal_pitch_joint" axis="0 0 1" range="0 1.159" />
                                     <geom mesh="L_thumb_proximal_pitch_link" pos="0 0 0" euler="0 0 0" />
                                     <geom type="capsule" fromto="0 0 0 0.06 0 0" size="0.012" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
@@ -171,44 +171,44 @@
                                       <joint name="L_thumb_distal_joint" axis="0 0 1" range="0 1.267" />
                                       <geom mesh="L_thumb_distal_link" pos="0 0 0" euler="0 0 0" />
                                       <geom type="capsule" fromto="0 0 0 0.03 0 0" size="0.01" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
-                                      <body name="L_thumb_tip_link" pos="0.030 -0.0015 0" euler="0 0 0" />
+                                      <body name="L_thumb_tip_link" pos="0.0305 -0.001 0" euler="0 0 0" />
                                     </body>
                                   </body>
                                 </body>
-                                <body name="L_index_proximal_link" pos="0.026868 -0.0123 -0.093989" euler="3.1416 -1.5708 0">
+                                <body name="L_index_proximal_link" pos="0.026868 -0.0123 -0.093989" euler="0 1.5184 0">
                                   <joint name="L_index_proximal_joint" axis="0 0 1" range="-1.602 0" />
                                   <geom mesh="L_index_proximal_link" pos="0 0 0" euler="0 0 0" />
-                                  <body name="L_index_intermediate_link" pos="0.031533 -0.0054444 0" euler="0 0 0">
+                                  <body name="L_index_intermediate_link" pos="0.031533 -0.0054444 0" euler="0 0.00014037 -0.0018338">
                                     <joint name="L_index_intermediate_joint" axis="0 0 1" range="-1.791 0" />
                                     <geom mesh="L_index_intermediate_link" pos="0 0 0" euler="0 0 0" />
                                     <geom type="capsule" fromto="0 0 0 0.039 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="L_index_tip_link" pos="0.0390 -0.0020 0" euler="0 0 0" />
                                   </body>
                                 </body>
-                                <body name="L_middle_proximal_link" pos="0.0085 -0.0123 -0.095992" euler="3.1416 -1.5708 0">
+                                <body name="L_middle_proximal_link" pos="0.0085 -0.0123 -0.095992" euler="0 1.5708 0">
                                   <joint name="L_middle_proximal_joint" axis="0 0 1" range="-1.603 0" />
                                   <geom mesh="L_middle_proximal_link" pos="0 0 0" euler="0 0 0" />
-                                  <body name="L_middle_intermediate_link" pos="0.031521 -0.0055139 0" euler="0 0 0">
+                                  <body name="L_middle_intermediate_link" pos="0.031521 -0.0055139 0" euler="0 0.00015517 0.0048744">
                                     <joint name="L_middle_intermediate_joint" axis="0 0 1" range="-1.791 0" />
                                     <geom mesh="L_middle_intermediate_link" pos="0 0 0" euler="0 0 0" />
                                     <geom type="capsule" fromto="0 0 0 0.047 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="L_middle_tip_link" pos="0.047 -0.0025 0" euler="0 0 0" />
                                   </body>
                                 </body>
-                                <body name="L_ring_proximal_link" pos="-0.010211 -0.0123 -0.095924" euler="0 -1.5708 3.1416">
+                                <body name="L_ring_proximal_link" pos="-0.010211 -0.0123 -0.095924" euler="3.1416 1.5184 3.1416">
                                   <joint name="L_ring_proximal_joint" axis="0 0 1" range="-1.602 0" />
                                   <geom mesh="L_ring_proximal_link" pos="0 0 0" euler="0 0 0" />
-                                  <body name="L_ring_intermediate_link" pos="0.031531 -0.0054567 0.00025" euler="0 0 0">
+                                  <body name="L_ring_intermediate_link" pos="0.031531 -0.0054567 0.00025" euler="0 0.00014037 -0.0025338">
                                     <joint name="L_ring_intermediate_joint" axis="0 0 1" range="-1.798 0" />
                                     <geom mesh="L_ring_intermediate_link" pos="0 0 0" euler="0 0 0" />
                                     <geom type="capsule" fromto="0 0 0 0.0385 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
                                     <body name="L_ring_tip_link" pos="0.0385 -0.0015 0" euler="0 0 0" />
                                   </body>
                                 </body>
-                                <body name="L_pinky_proximal_link" pos="-0.028228 -0.0123 -0.094012" euler="0 -1.5708 3.1416">
+                                <body name="L_pinky_proximal_link" pos="-0.028228 -0.0123 -0.094012" euler="3.1416 1.4661 3.1416">
                                   <joint name="L_pinky_proximal_joint" axis="0 0 1" range="-1.602 0" />
                                   <geom mesh="L_pinky_proximal_link" pos="0 0 0" euler="0 0 0" />
-                                  <body name="L_pinky_intermediate_link" pos="0.031532 -0.005451 0" euler="0 0 0">
+                                  <body name="L_pinky_intermediate_link" pos="0.031532 -0.005451 0" euler="0 0.00032164 -0.011403">
                                     <joint name="L_pinky_intermediate_joint" axis="0 0 1" range="-1.796 0" />
                                     <geom mesh="L_pinky_intermediate_link" pos="0 0 0" euler="0 0 0" />
                                     <geom type="capsule" fromto="0 0 0 0.033 0 0" size="0.008" group="0" rgba="1 0 0 0" solref="0.005 1" solimp="0.99 0.99 0.001" />
