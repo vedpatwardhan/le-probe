@@ -42,7 +42,7 @@ class GR00TInferenceServer:
 
     def __init__(
         self,
-        embodiment_tag="gr1",
+        embodiment_tag="new_embodiment",
         port=5555,
         weights_path="nvidia/GR00T-N1.5-3B",
     ):
@@ -76,6 +76,18 @@ class GR00TInferenceServer:
         print(f"🔍 Protocol Detected: {self.normalization_mapping}")
 
         self.policy.config.embodiment_tag = embodiment_tag
+
+        # Embodiment ID Mapping
+        self.embodiment_mapping = {
+            "new_embodiment": 31,
+            "oxe_droid": 17,
+            "agibot_genie1": 26,
+            "gr1": 24,
+            "so100": 2,
+            "unitree_g1": 3,
+        }
+        self.emb_id = self.embodiment_mapping.get(embodiment_tag, 0)
+        print(f"🆔 Embodiment ID set to: {self.emb_id} ({embodiment_tag})")
         self.preprocessor, self.postprocessor = make_pre_post_processors(
             policy_cfg=self.policy.config
         )
@@ -180,7 +192,7 @@ class GR00TInferenceServer:
                     OBS_STATE: state_t,
                     "task": instruction,
                     "embodiment_id": torch.tensor(
-                        [24], dtype=torch.long, device=DEVICE
+                        [self.emb_id], dtype=torch.long, device=DEVICE
                     ),
                 }
 
@@ -194,7 +206,10 @@ class GR00TInferenceServer:
                 # Protocol-Specific Post-Processing: Canonical Min-Max Handshake
                 # VLA FIX: To avoid temporal chunk loss, we ensure the action dim is preserved.
                 # If using IDENTITY, we can bypass the postprocessor for actions to keep (16, 32).
+                # Post-processing: IDENTITY bypass for new_embodiment
                 if self.is_identity:
+                    # In IDENTITY mode, the model predicts the values in the dataset range directly.
+                    # We return them raw so the client can handle unscaling.
                     actions_t = action_chunk
                 else:
                     actions_t = self.postprocessor(action_chunk)
