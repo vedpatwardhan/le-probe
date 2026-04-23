@@ -10,8 +10,8 @@ import argparse
 from transformers import PreTrainedModel
 from lerobot.policies.groot.modeling_groot import GrootPolicy
 from lerobot.policies.factory import make_pre_post_processors
-from lerobot.utils.constants import OBS_IMAGES, OBS_STATE
-from gr1_config import JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
+from lerobot.utils.constants import OBS_STATE
+from lerobot.utils.random_utils import set_seed
 
 # -----------------------------------------------------------------------------
 # 1. HARDWARE & COMPATIBILITY
@@ -47,6 +47,8 @@ class GR00TInferenceServer:
         weights_path="nvidia/GR00T-N1.5-3B",
     ):
         print(f"--- GR00T N1.5 Server (Protocol: Universal Handshake) ---")
+        set_seed(1000)
+        print("🎲 Deterministic Seeding active (Seed: 1000)")
         self.port = port
         self.weights_path = weights_path
         self.tokenizer = None
@@ -89,11 +91,12 @@ class GR00TInferenceServer:
         self.emb_id = self.embodiment_mapping.get(embodiment_tag, 0)
         print(f"🆔 Embodiment ID set to: {self.emb_id} ({embodiment_tag})")
 
-        # Official Processor Factory
+        # Official Processor Factory (Resumes Stats from Checkpoint)
         self.preprocessor, self.postprocessor = make_pre_post_processors(
-            policy_cfg=self.policy.config
+            policy_cfg=self.policy.config,
+            pretrained_path=self.weights_path,
         )
-        print("✅ Pre/Post Processors Initialized from Policy Config.")
+        print("✅ Pre/Post Processors Resumed from Checkpoint (Official Factory).")
 
     def construct_raw_batch(self, req, instruction):
         """Replicates LeRobot Dataset/Trainer batch construction (Flat Dict for Pipeline)."""
