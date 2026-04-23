@@ -206,13 +206,6 @@ class GR00TInferenceServer:
                     batch, processed_batch, action_chunk, actions_t, instruction
                 )
                 socket.send(
-                    msgpack.packb({"action": final_actions.tolist()}, use_bin_type=True)
-                )
-
-                self.log_diagnostics(
-                    batch, processed_batch, action_chunk, actions_t, instruction
-                )
-                socket.send(
                     msgpack.packb({"action": actions_np.tolist()}, use_bin_type=True)
                 )
 
