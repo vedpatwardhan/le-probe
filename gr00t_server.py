@@ -109,28 +109,41 @@ class GR00TInferenceServer:
         else:
             print("🚀 IDENTITY Protocol detected. Skipping redundant normalization.")
 
-    def log_diagnostics(self, processed_batch, actions_np, instruction):
+    def log_diagnostics(
+        self, batch, processed_batch, action_chunk, actions_t, instruction
+    ):
         try:
-            proc_state_np = processed_batch[OBS_STATE].cpu().detach().numpy()
+            # Helper to convert tensors/dicts of tensors to serializable lists
+            def to_serializable(data):
+                if isinstance(data, torch.Tensor):
+                    return data.detach().cpu().numpy().tolist()
+                if isinstance(data, dict):
+                    return {k: to_serializable(v) for k, v in data.items()}
+                if isinstance(data, (np.ndarray, np.generic)):
+                    return data.tolist()
+                return data
+
             log_entry = {
                 "timestamp": time.time(),
-                "metrics": {
-                    "input_norm_range": [
-                        float(np.min(proc_state_np)),
-                        float(np.max(proc_state_np)),
-                    ],
-                    "instruction": instruction,
-                    "mapping": str(self.normalization_mapping),
+                "instruction": instruction,
+                "protocol": str(self.normalization_mapping),
+                "lifecycle": {
+                    "raw_batch": to_serializable(batch),
+                    "processed_batch": to_serializable(processed_batch),
+                    "action_chunk_raw": to_serializable(action_chunk),
+                    "action_t_final": to_serializable(actions_t),
                 },
-                "output_stats": [float(np.min(actions_np)), float(np.max(actions_np))],
             }
+
+            # Use a specific filename for the lifecycle log
             log_file = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "vla_server_diag.json"
+                os.path.dirname(os.path.abspath(__file__)), "vla_lifecycle_audit.json"
             )
+            # Append each inference step as a new line (JSONL style for large files)
             with open(log_file, "a") as f:
                 f.write(json.dumps(log_entry) + "\n")
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️ Diagnostic logging failed: {e}")
 
     def run(self, host="0.0.0.0"):
         context = zmq.Context()
@@ -230,7 +243,9 @@ class GR00TInferenceServer:
                     f"[{time.strftime('%H:%M:%S')}] 🧠 Inference ({self.normalization_mapping.get('ACTION', 'BASE')}). Norm Range: [{processed_batch[OBS_STATE].min():.2f}, {processed_batch[OBS_STATE].max():.2f}] | Actions: {actions_np.shape}"
                 )
 
-                self.log_diagnostics(processed_batch, actions_np, instruction)
+                self.log_diagnostics(
+                    batch, processed_batch, action_chunk, actions_t, instruction
+                )
                 socket.send(
                     msgpack.packb({"action": actions_np.tolist()}, use_bin_type=True)
                 )
