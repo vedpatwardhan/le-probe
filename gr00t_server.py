@@ -96,13 +96,13 @@ class GR00TInferenceServer:
         print("✅ Pre/Post Processors Initialized from Policy Config.")
 
     def construct_raw_batch(self, req, instruction):
-        """Replicates LeRobot Dataset/Trainer batch construction (Nested EnvTransition)."""
+        """Replicates LeRobot Dataset/Trainer batch construction (Flat Dict for Pipeline)."""
         unpack_np = lambda d: (
             np.frombuffer(d["data"], dtype=d["dtype"]).reshape(d["shape"])
         )
 
-        # 1. Observation Dict
-        obs_dict = {}
+        # 1. Flat Batch Dict
+        batch = {}
         cams = ["world_top", "world_left", "world_right", "world_center", "world_wrist"]
         for cam in cams:
             key = f"observation.images.{cam}"
@@ -110,24 +110,19 @@ class GR00TInferenceServer:
             if val is None:
                 raise ValueError(f"Missing camera data for: {cam}")
             img_np = unpack_np(val)
-            obs_dict[key] = torch.as_tensor(
+            batch[key] = torch.as_tensor(
                 img_np, dtype=torch.uint8, device=DEVICE
             ).unsqueeze(0)
 
         state_np = unpack_np(req.get("state"))
-        obs_dict[OBS_STATE] = torch.tensor(
+        batch[OBS_STATE] = torch.tensor(
             state_np, dtype=torch.float32, device=DEVICE
         ).unsqueeze(0)
 
-        # 2. Construct Nested Transition
-        transition = {
-            "observation": obs_dict,
-            "complementary_data": {
-                "task": instruction,
-                # embodiment_id is overwritten by GrootPackInputsStep based on tag
-            },
-        }
-        return transition
+        # 2. Add complementary data keys (will be nested by batch_to_transition)
+        batch["task"] = instruction
+
+        return batch
 
     def log_diagnostics(
         self, batch, processed_batch, action_chunk, actions_t, instruction
