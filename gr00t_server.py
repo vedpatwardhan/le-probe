@@ -88,26 +88,46 @@ class GR00TInferenceServer:
         }
         self.emb_id = self.embodiment_mapping.get(embodiment_tag, 0)
         print(f"🆔 Embodiment ID set to: {self.emb_id} ({embodiment_tag})")
+
+        # Official Processor Factory
         self.preprocessor, self.postprocessor = make_pre_post_processors(
             policy_cfg=self.policy.config
         )
+        print("✅ Pre/Post Processors Initialized from Policy Config.")
 
-        self.preprocessor, self.postprocessor = make_pre_post_processors(
-            policy_cfg=self.policy.config
+    def construct_raw_batch(self, req, instruction):
+        """Replicates LeRobot Dataset/Trainer batch construction (Nested EnvTransition)."""
+        unpack_np = lambda d: (
+            np.frombuffer(d["data"], dtype=d["dtype"]).reshape(d["shape"])
         )
 
-        # Protocol-Aware Handshake: Only force Min-Max if not in IDENTITY mode
-        self.is_identity = self.normalization_mapping.get("STATE") == "IDENTITY"
-        if not self.is_identity:
-            for step in self.preprocessor.steps:
-                if hasattr(step, "normalize_min_max"):
-                    print(
-                        f"  🛠️ Enforcing {step.__class__.__name__}.normalize_min_max = True"
-                    )
-                    step.normalize_min_max = True
-            print("✅ Pre/Post Processors Initialized to Canonical Standard.")
-        else:
-            print("🚀 IDENTITY Protocol detected. Skipping redundant normalization.")
+        # 1. Observation Dict
+        obs_dict = {}
+        cams = ["world_top", "world_left", "world_right", "world_center", "world_wrist"]
+        for cam in cams:
+            key = f"observation.images.{cam}"
+            val = req.get(key) if key in req else req.get(cam)
+            if val is None:
+                raise ValueError(f"Missing camera data for: {cam}")
+            img_np = unpack_np(val)
+            obs_dict[key] = torch.as_tensor(
+                img_np, dtype=torch.uint8, device=DEVICE
+            ).unsqueeze(0)
+
+        state_np = unpack_np(req.get("state"))
+        obs_dict[OBS_STATE] = torch.tensor(
+            state_np, dtype=torch.float32, device=DEVICE
+        ).unsqueeze(0)
+
+        # 2. Construct Nested Transition
+        transition = {
+            "observation": obs_dict,
+            "complementary_data": {
+                "task": instruction,
+                # embodiment_id is overwritten by GrootPackInputsStep based on tag
+            },
+        }
+        return transition
 
     def log_diagnostics(
         self, batch, processed_batch, action_chunk, actions_t, instruction
@@ -157,90 +177,41 @@ class GR00TInferenceServer:
                 req = msgpack.unpackb(message, raw=False)
                 instruction = req.get("instruction", "Pick up the red cube")
 
-                unpack_np = lambda d: (
-                    np.frombuffer(d["data"], dtype=d["dtype"]).reshape(d["shape"])
-                )
+                # 1. Construct Raw Batch
+                batch = self.construct_raw_batch(req, instruction)
 
-                # Images (Handshake Protocol: Align with simulation_vla.py keys and CHW shape)
-                cams = [
-                    "world_top",
-                    "world_left",
-                    "world_right",
-                    "world_center",
-                    "world_wrist",
-                ]
-                img_list = []
-                for cam in cams:
-                    # Try prefixed key first, then fallback to raw name
-                    key = f"observation.images.{cam}"
-                    val = req.get(key) if key in req else req.get(cam)
-
-                    if val is None:
-                        raise ValueError(
-                            f"Missing camera data for: {cam} (tried keys: {key}, {cam})"
-                        )
-
-                    img = unpack_np(val)
-                    img_list.append(img)
-
-                all_imgs_np = np.stack(img_list)
-                # ✅ PROTOCOL ALIGNMENT: Data is now already (C, H, W) from client
-                all_images_t = torch.as_tensor(
-                    all_imgs_np, dtype=torch.uint8, device=DEVICE
-                )
-
-                # State
-                state_np = unpack_np(req.get("state"))
-                state_t = torch.tensor(
-                    state_np, dtype=torch.float32, device=DEVICE
-                ).unsqueeze(0)
-
-                # Batch
-                batch = {
-                    f"{OBS_IMAGES}.world_top": all_images_t[0].unsqueeze(0),
-                    f"{OBS_IMAGES}.world_left": all_images_t[1].unsqueeze(0),
-                    f"{OBS_IMAGES}.world_right": all_images_t[2].unsqueeze(0),
-                    f"{OBS_IMAGES}.world_center": all_images_t[3].unsqueeze(0),
-                    f"{OBS_IMAGES}.world_wrist": all_images_t[4].unsqueeze(0),
-                    OBS_STATE: state_t,
-                    "task": instruction,
-                    "embodiment_id": torch.tensor(
-                        [self.emb_id], dtype=torch.long, device=DEVICE
-                    ),
-                }
-
+                # 2. Pre-process (Canonical Callstack)
                 processed_batch = self.preprocessor(batch)
 
+                # 3. Model Inference
                 with torch.inference_mode():
-                    action_chunk = self.policy.predict_action_chunk(
-                        processed_batch
-                    )  # [1, 16, 32]
+                    action_chunk = self.policy.predict_action_chunk(processed_batch)
 
-                # Protocol-Specific Post-Processing: Canonical Min-Max Handshake
-                # VLA FIX: To avoid temporal chunk loss, we ensure the action dim is preserved.
-                # If using IDENTITY, we can bypass the postprocessor for actions to keep (16, 32).
-                # Post-processing: IDENTITY bypass for new_embodiment
-                if self.is_identity:
-                    # In IDENTITY mode, the model predicts the values in the dataset range directly.
-                    # We return them raw so the client can handle unscaling.
-                    actions_t = action_chunk
+                # 4. Post-process (Canonical Callstack)
+                # Note: postprocessor handles tensor -> EnvTransition -> processing -> tensor conversion
+                actions_t = self.postprocessor(action_chunk)
+
+                # Convert to numpy for transport
+                actions_np = actions_t.cpu().numpy()
+
+                # LOGGING: Support both chunked and single-step returns
+                if actions_np.ndim == 3:
+                    final_actions = actions_np[0]
+                elif actions_np.ndim == 2:
+                    final_actions = actions_np
                 else:
-                    actions_t = self.postprocessor(action_chunk)
+                    # Single step case (B, D) -> (D,)
+                    final_actions = actions_np[0]
 
-                # DEBUG: Trace the temporal chunk loss
                 print(
-                    f"DEBUG: Raw Chunk {action_chunk.shape} | Post-Proc {actions_t.shape}"
+                    f"[{time.strftime('%H:%M:%S')}] 🧠 Inference (Aligned Stack). Actions: {final_actions.shape}"
                 )
 
-                if actions_t.ndim == 3:
-                    actions_np = actions_t[0].cpu().numpy()
-                elif actions_t.ndim == 2:
-                    actions_np = actions_t.cpu().numpy()
-                else:
-                    actions_np = actions_t.cpu().numpy()
-
-                print(
-                    f"[{time.strftime('%H:%M:%S')}] 🧠 Inference ({self.normalization_mapping.get('ACTION', 'BASE')}). Norm Range: [{processed_batch[OBS_STATE].min():.2f}, {processed_batch[OBS_STATE].max():.2f}] | Actions: {actions_np.shape}"
+                self.log_diagnostics(
+                    batch, processed_batch, action_chunk, actions_t, instruction
+                )
+                socket.send(
+                    msgpack.packb({"action": final_actions.tolist()}, use_bin_type=True)
                 )
 
                 self.log_diagnostics(

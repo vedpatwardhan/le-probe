@@ -104,31 +104,34 @@ class GR1VLAClient(GR1MuJoCoBase):
                         f"   🚀 Executing Chunk ({chunk_idx+1}/{max_chunks}): {actions_np.shape[0]} temporal steps..."
                     )
 
-                    for i, norm_action in enumerate(actions_np):
-                        # ✅ PROTOCOL ALIGNMENT: Pass normalized action directly to base.
-                        # The base.process_target_32 handles the unscaling internally
-                        # to ensure bit-perfect parity with simulation_replay.py.
-                        self.process_target_32(norm_action)
+                    # Experiment: Only take the first action
+                    first_action = actions_np[0]
+                    print(
+                        f"   🚀 Executing ONLY first action of chunk for full duration..."
+                    )
 
-                        # Record for joint-level audit
-                        audit_history.append(
-                            {
-                                "chunk": chunk_idx,
-                                "frame": i,
-                                "brain_slots": norm_action.tolist(),
-                                "sim_joints": self.get_state_32().tolist(),
-                            }
-                        )
+                    # Protocol Alignment: Process only this one target
+                    self.process_target_32(first_action)
 
-                        # Smooth Trajectory Threading
-                        do_reset = i == 0
-                        self.dispatch_action(
-                            norm_action,
-                            self.last_target_q,
-                            n_steps=100,
-                            render_freq=10,
-                            reset_start=do_reset,
-                        )
+                    # Record for audit (single entry for the chunk)
+                    audit_history.append(
+                        {
+                            "chunk": chunk_idx,
+                            "frame": 0,
+                            "brain_slots": first_action.tolist(),
+                            "sim_joints": self.get_state_32().tolist(),
+                        }
+                    )
+
+                    # Execute for 1600 steps (16 frames * 100 steps/frame)
+                    # This holds the model's primary intent for the full 1.6s
+                    self.dispatch_action(
+                        first_action,
+                        self.last_target_q,
+                        n_steps=240,
+                        render_freq=30,
+                        reset_start=True,
+                    )
                 else:
                     print(f"❌ VLA Server Error: {resp.get('error', 'Unknown error')}")
                     break
