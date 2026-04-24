@@ -176,19 +176,57 @@ class GoalMapper:
         # CHOICE: Use the Reward Head for task-specific optimization
         with torch.no_grad():
             # (BS, T_horizon, D) -> (BS, T_horizon, 1) -> (BS, T_horizon)
-            rewards = self.model.reward_head(all_preds).squeeze(-1)
+            # -----------------------------------------------------------------
+            # 1. PRIMARY REWARD: Predicted Proximity to Cube (0.0 to 10.0)
+            # -----------------------------------------------------------------
+            # Scaled by 10.0 so the ~7.0 delta of an episode translates to
+            # a massive cost reduction, effectively drowning out the smoothness penalty.
+            reward_pred = self.model.reward_head(all_preds).squeeze(-1)
+            reward_weight = 10.0
+            dist = (10.0 - reward_pred) * reward_weight
 
-            # Cost = Negative Reward (since CEM minimizes cost)
-            # We take the MAX reward found across the horizon (Best reachable state)
-            dist = -rewards.max(dim=-1).values
+            # -----------------------------------------------------------------
+            # 2. GLOBAL COMPASS: Euclidean distance to Latent Goal Success
+            # -----------------------------------------------------------------
+            # Provides a steady gradient from any distance, matching the
+            # 'Smart Reward' logic used during training.
+            if self.goal_latent is not None:
+                # all_preds: (BS, T, D), goal_latent: (N_goals, 1, D)
+                # Compare every step in horizon to the final successful goal state
+                goal_target = self.goal_latent.squeeze(1)  # (N_goals, D)
 
-            # 🌟 PHYSICAL GRACE PATCH: Smoothness Penalty 🌟
-            # 1. Delta from Current State (BS, D)
-            current_state = flat_hist_actions[:, -1, :]
-            first_plan_action = flat_plan_actions[:, 0, :]
-            jump_start = torch.mean((first_plan_action - current_state) ** 2, dim=-1)
+                # Calculate min dist to any successful latent frame in the gallery
+                # dists shape: (BS, T, N_goals)
+                dists_to_latents = torch.cdist(all_preds, goal_target)
+                min_latent_dist = dists_to_latents.min(dim=-1).values.mean(
+                    dim=-1
+                )  # (BS,)
 
-            # 2. Delta within the Plan Horizon (BS, T-1, D)
+                # Global Compass Weight: Pulls the arm toward the cube's neighborhood
+                dist = dist + min_latent_dist * 5.0
+
+            # -----------------------------------------------------------------
+            # 3. ACTION SAFETY: Boundary Enforcement (Protocol Safety)
+            # -----------------------------------------------------------------
+            # Penalize the solver for proposing poses outside [-1, 1]
+            # This prevents the 'Flailing' seen in Run 9.
+            out_of_bounds = torch.sum(
+                torch.clamp(torch.abs(flat_plan_actions) - 1.0, min=0.0) ** 2,
+                dim=(-1, -2),
+            )
+            dist = dist + out_of_bounds * 500.0
+
+            # -----------------------------------------------------------------
+            # 4. PHYSICAL GRACE: Smoothness Penalty
+            # -----------------------------------------------------------------
+            # a. Jitter from Last Real Pose (Start of plan)
+            # flat_hist_actions: (BS, T_hist, D)
+            last_real_action = flat_hist_actions[:, -1, :]
+            jump_start = torch.mean(
+                (flat_plan_actions[:, 0, :] - last_real_action) ** 2, dim=-1
+            )
+
+            # b. Delta within the Plan Horizon (BS, T-1, D)
             if T_horizon > 1:
                 jitters = torch.mean(
                     (flat_plan_actions[:, 1:, :] - flat_plan_actions[:, :-1, :]) ** 2,
@@ -198,11 +236,9 @@ class GoalMapper:
             else:
                 jump_internal = 0.0
 
-            # Combined Smoothness Cost (Weight: 500.0)
-            # Prevents 'teleporting' to reward peaks at the cost of physical stability
-            smoothness_weight = 500.0
+            # Smoothness Weight (150.0): Maintains stability without paralyzing reach.
+            smoothness_weight = 150.0
             dist = dist + (jump_start + jump_internal) * smoothness_weight
 
         # 7. Unflatten back to (B, S) for the Solver
-        # Scaled by 100 to match the diagnostic sweep's threshold logic
-        return dist.view(B, S) * 100.0
+        return dist.view(B, S)

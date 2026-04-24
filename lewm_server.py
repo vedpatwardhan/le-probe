@@ -81,7 +81,7 @@ class LEWMInferenceServer:
         self.solver = CEMSolver(
             model=self.agent,
             num_samples=1000,
-            var_scale=1.0,
+            var_scale=2.0,
             n_steps=1,
             topk=100,
             device=DEVICE,
