@@ -14,6 +14,7 @@ patch_size: 14
 encoder_scale: tiny
 dump_object: True
 use_pretrained_cube: True
+rabc_kappa: 0.01
 
 trainer:
   max_epochs: 100

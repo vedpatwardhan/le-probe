@@ -139,11 +139,16 @@ def run(cfg):
     # 1. Initialize the Data Plugin (LeRobot -> LeWorldModel Shim)
     # We prioritize the 'processed' dataset for significant training speedups.
     # Note: Even if a checkpoint reloads an old repo_id, we override it here for performance.
-    repo_id = "vedpatwardhan/gr1_pickup_compact_h264"
+    repo_id = cfg.data.dataset.get("repo_id", "vedpatwardhan/gr1_pickup_grasp")
     print(f"📦 Initializing Data Plugin for: {repo_id}")
 
     # Standard keys to load if not specified in config
-    default_keys = ["observation.state", "observation.images.world_center", "action"]
+    default_keys = [
+        "observation.state",
+        "observation.images.world_center",
+        "action",
+        "progress_sparse",
+    ]
     keys_to_load = cfg.data.get("keys_to_load") or default_keys
 
     dataset = LEWMDataPlugin(
