@@ -28,7 +28,7 @@ class GoalMapper:
     """
 
     def __init__(self, model_path, dataset_root, img_size=224):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.dataset_root = Path(dataset_root)
         self.img_size = img_size
 

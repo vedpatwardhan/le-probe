@@ -33,7 +33,8 @@ from stable_worldmodel.solver.cem import CEMSolver
 from gr1_protocol import StandardScaler
 
 # Configuration
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.set_default_device(DEVICE)
 PORT = 5555
 
 
@@ -128,7 +129,10 @@ class LEWMInferenceServer:
                     self.history["actions"].append(norm_state)
 
                 pixels_stacked = (
-                    torch.stack(self.history["pixels"]).unsqueeze(0).unsqueeze(0)
+                    torch.stack(self.history["pixels"])
+                    .unsqueeze(0)
+                    .unsqueeze(0)
+                    .to(DEVICE)
                 )
                 actions_stacked = (
                     torch.tensor(np.stack(self.history["actions"]), dtype=torch.float32)
@@ -144,9 +148,17 @@ class LEWMInferenceServer:
                     last_executed_action = actions_stacked[
                         :, :, -1:, :
                     ]  # (1, 1, 1, 32)
-                    init_guess = last_executed_action.expand(
-                        -1, -1, 8, -1
-                    ).to(DEVICE)  # Repeat for horizon 8 and force to DEVICE
+
+                    # (1, 1, 1, 32) -> (1, 32) -> (8, 32) -> (1, 8, 32)
+                    # Use .repeat() instead of .expand() to avoid memory aliasing errors in CEM
+                    init_guess = (
+                        last_executed_action.squeeze(0)
+                        .squeeze(0)
+                        .repeat(8, 1)
+                        .unsqueeze(0)
+                        .to(DEVICE)
+                        .clone()
+                    )
 
                     outputs = self.solver.solve(
                         {"pixels": pixels_stacked, "action": actions_stacked},
