@@ -81,26 +81,13 @@ class LEWMInferenceServer:
             device=DEVICE,
         )
         self.solver.configure(
-            action_space=MockSpace(shape=(1, 64)),
+            action_space=MockSpace(shape=(1, 32)),
             n_envs=1,
             config=MockConfig(horizon=8),
         )
 
         # 5. State Buffering
         self.history = {"pixels": [], "actions": []}
-
-    def map_sim_to_model_state(self, state_32):
-        """Standard Identity Mapping: v17 Oracle was trained on 0-31 raw compact wire."""
-        state_64 = np.zeros(64, dtype=np.float32)
-        state_64[:32] = state_32
-        return state_64
-
-    def map_model_to_sim_actions(self, actions_64):
-        """Standard Identity Mapping: v17 Oracle outputs 32-dim intent in the first half of 64-dim head."""
-        horizon = actions_64.shape[0]
-        # v17 was trained with gr1_pickup_large (32-dim actions)
-        # We take the first 32 dimensions directly.
-        return actions_64[:, :32]
 
     def run(self, host="0.0.0.0"):
         context = zmq.Context()
@@ -129,7 +116,7 @@ class LEWMInferenceServer:
                     self.history["pixels"].pop(0)
 
                 while len(self.history["actions"]) < 3:
-                    self.history["actions"].append(np.zeros(64, dtype=np.float32))
+                    self.history["actions"].append(np.zeros(32, dtype=np.float32))
 
                 pixels_stacked = (
                     torch.stack(self.history["pixels"]).unsqueeze(0).unsqueeze(0)
@@ -148,30 +135,29 @@ class LEWMInferenceServer:
                         {"pixels": pixels_stacked, "action": actions_stacked}
                     )
 
-                best_plan_64 = outputs["actions"].cpu().numpy()
-                if best_plan_64.ndim == 4:
-                    best_plan_64 = best_plan_64[0, 0]  # (B, S, T, D) -> (T, D)
-                elif best_plan_64.ndim == 3:
-                    best_plan_64 = best_plan_64[0]  # (S, T, D) -> (T, D)
+                best_plan = outputs["actions"].cpu().numpy()
+                if best_plan.ndim == 4:
+                    best_plan = best_plan[0, 0]  # (B, S, T, D) -> (T, D)
+                elif best_plan.ndim == 3:
+                    best_plan = best_plan[0]  # (S, T, D) -> (T, D)
 
                 plan_time = time.time() - start_time
-                best_plan_32 = self.map_model_to_sim_actions(best_plan_64)
 
                 # Diagnostic Logging: Action Stats
                 print(
                     f"🧠 Planning Stats -> Solve Time: {plan_time:.2f}s, "
-                    f"Max Action: {np.abs(best_plan_32).max():.4f}, "
-                    f"Mean Action: {np.abs(best_plan_32).mean():.4f}"
+                    f"Max Action: {np.abs(best_plan).max():.4f}, "
+                    f"Mean Action: {np.abs(best_plan).mean():.4f}"
                 )
 
-                self.history["actions"].append(best_plan_64[0])
+                self.history["actions"].append(best_plan[0])
                 if len(self.history["actions"]) > 3:
                     self.history["actions"].pop(0)
 
                 socket.send(
                     msgpack.packb(
                         {
-                            "action": best_plan_32.tolist(),
+                            "action": best_plan.tolist(),
                             "diagnostics": {"plan_time_ms": int(plan_time * 1000)},
                         },
                         use_bin_type=True,
