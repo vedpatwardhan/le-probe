@@ -198,9 +198,9 @@ class GoalMapper:
             else:
                 jump_internal = 0.0
 
-            # Combined Smoothness Cost (Weight: 25.0)
+            # Combined Smoothness Cost (Weight: 500.0)
             # Prevents 'teleporting' to reward peaks at the cost of physical stability
-            smoothness_weight = 25.0
+            smoothness_weight = 500.0
             dist = dist + (jump_start + jump_internal) * smoothness_weight
 
         # 7. Unflatten back to (B, S) for the Solver

@@ -80,7 +80,7 @@ class LEWMInferenceServer:
         self.solver = CEMSolver(
             model=self.agent,
             num_samples=1000,
-            var_scale=3.0,
+            var_scale=1.0,
             n_steps=1,
             topk=100,
             device=DEVICE,
@@ -140,15 +140,46 @@ class LEWMInferenceServer:
                 print("🧠 Step: Planning (8,000 parallel samples)...")
                 start_time = time.time()
                 with torch.inference_mode():
+                    # 🚀 WARM-START CEM: Pass previous action as initial guess
+                    last_executed_action = actions_stacked[
+                        :, :, -1:, :
+                    ]  # (1, 1, 1, 32)
+                    init_guess = last_executed_action.expand(
+                        -1, -1, 8, -1
+                    )  # Repeat for horizon 8
+
                     outputs = self.solver.solve(
-                        {"pixels": pixels_stacked, "action": actions_stacked}
+                        {"pixels": pixels_stacked, "action": actions_stacked},
+                        init_action=init_guess,
                     )
 
                 best_plan = outputs["actions"].cpu().numpy()
+                target_action = best_plan[0, 0, 0]  # (32,)
+
+                # 🛡️ THE GOVERNOR: Delta Capping & Smoothing 🛡️
+                if len(self.history["actions"]) > 0:
+                    prev_action = self.history["actions"][
+                        -1
+                    ]  # This is already a numpy array
+
+                    # 1. Delta Capping (Max 0.05 normalized units per step)
+                    max_delta = 0.05
+                    delta = target_action - prev_action
+                    clipped_delta = np.clip(delta, -max_delta, max_delta)
+                    target_action = prev_action + clipped_delta
+
+                    # 2. Action Smoothing (Exponential Moving Average)
+                    # Blends 90% new intent with 10% previous pose to kill high-frequency jitter
+                    alpha = 0.9
+                    target_action = alpha * target_action + (1 - alpha) * prev_action
+
+                # Update the plan with our smoothed/clipped action for execution
                 if best_plan.ndim == 4:
                     best_plan = best_plan[0, 0]  # (B, S, T, D) -> (T, D)
                 elif best_plan.ndim == 3:
                     best_plan = best_plan[0]  # (S, T, D) -> (T, D)
+
+                best_plan[0] = target_action
 
                 plan_time = time.time() - start_time
 
