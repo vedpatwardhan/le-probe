@@ -54,16 +54,19 @@ class GR1LEWMClient(GR1MuJoCoBase):
     def run(self, instruction="Pick up the red cube", max_steps=1000):
         print(f"🚀 Starting Omni-MPC Autonomous Mission: '{instruction}'")
 
-        step_idx = 0
-        while step_idx < max_steps:
-            # 1. Perception
-            obs_payload = self.capture_observation(instruction)
+        # Audit History for Parity verification
+        audit_history = []
 
-            # 2. Planning (Requesting the next optimized chunk)
-            print(
-                f"[{time.strftime('%H:%M:%S')}] 🧠 Requesting MPC Plan (Universal Gallery)..."
-            )
-            try:
+        step_idx = 0
+        try:
+            while step_idx < max_steps:
+                # 1. Perception
+                obs_payload = self.capture_observation(instruction)
+
+                # 2. Planning (Requesting the next optimized chunk)
+                print(
+                    f"[{time.strftime('%H:%M:%S')}] 🧠 Requesting MPC Plan (Universal Gallery)..."
+                )
                 self.client.send(msgpack.packb(obs_payload, use_bin_type=True))
                 resp = msgpack.unpackb(self.client.recv(), raw=False)
 
@@ -92,6 +95,20 @@ class GR1LEWMClient(GR1MuJoCoBase):
                             rr.Scalar(float(np.abs(curr_action_norm).max())),
                         )
 
+                        # Detailed Joint-Level Rerun (Helps identify oscillating joints)
+                        for j_idx, val in enumerate(curr_action_norm):
+                            rr.log(f"client/joints/j{j_idx:02d}", rr.Scalar(float(val)))
+
+                        # Record for audit
+                        audit_history.append(
+                            {
+                                "step": step_idx,
+                                "action_norm": curr_action_norm.tolist(),
+                                "action_raw": curr_action_raw.tolist(),
+                                "sim_state": self.get_state_32().tolist(),
+                            }
+                        )
+
                         self.process_target_32(curr_action_raw)
                         self.dispatch_action(
                             curr_action_raw,
@@ -103,10 +120,21 @@ class GR1LEWMClient(GR1MuJoCoBase):
                 else:
                     print(f"❌ Server Error: {resp.get('error')}")
                     break
-            except Exception as e:
-                print(f"❌ Connection Error: {e}")
-                traceback.print_exc()
-                break
+        except KeyboardInterrupt:
+            print("\n🛑 Mission interrupted by user.")
+        except Exception as e:
+            print(f"❌ Mission Error: {e}")
+            traceback.print_exc()
+        finally:
+            # Save Detailed Audit (Matching simulation_vla.py pattern)
+            os.makedirs("inference_history_lewm", exist_ok=True)
+            audit_path = "inference_history_lewm/joint_level_audit.json"
+            import json
+
+            with open(audit_path, "w") as f:
+                json.dump(audit_history, f)
+            print(f"💾 Full joint-level audit saved to: {audit_path}")
+            print("🏁 Mission Complete. Exit.")
 
 
 if __name__ == "__main__":
