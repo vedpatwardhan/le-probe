@@ -182,6 +182,27 @@ class GoalMapper:
             # We take the MAX reward found across the horizon (Best reachable state)
             dist = -rewards.max(dim=-1).values
 
+            # 🌟 PHYSICAL GRACE PATCH: Smoothness Penalty 🌟
+            # 1. Delta from Current State (BS, D)
+            current_state = flat_hist_actions[:, -1, :]
+            first_plan_action = flat_plan_actions[:, 0, :]
+            jump_start = torch.mean((first_plan_action - current_state) ** 2, dim=-1)
+
+            # 2. Delta within the Plan Horizon (BS, T-1, D)
+            if T_horizon > 1:
+                jitters = torch.mean(
+                    (flat_plan_actions[:, 1:, :] - flat_plan_actions[:, :-1, :]) ** 2,
+                    dim=-1,
+                )
+                jump_internal = torch.mean(jitters, dim=1)
+            else:
+                jump_internal = 0.0
+
+            # Combined Smoothness Cost (Weight: 25.0)
+            # Prevents 'teleporting' to reward peaks at the cost of physical stability
+            smoothness_weight = 25.0
+            dist = dist + (jump_start + jump_internal) * smoothness_weight
+
         # 7. Unflatten back to (B, S) for the Solver
         # Scaled by 100 to match the diagnostic sweep's threshold logic
         return dist.view(B, S) * 100.0

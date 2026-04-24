@@ -51,7 +51,7 @@ class GR1LEWMClient(GR1MuJoCoBase):
             "world_center": pack_np(img),
         }
 
-    def run(self, instruction="Pick up the red cube", max_steps=10):
+    def run(self, instruction="Pick up the red cube", max_steps=50):
         print(f"🚀 Starting Omni-MPC Autonomous Mission: '{instruction}'")
 
         # Audit History for Parity verification
