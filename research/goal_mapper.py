@@ -18,6 +18,7 @@ from module import ARPredictor
 from gr1_modules import GR1Embedder, GR1MLP
 from le_wm.utils import get_img_preprocessor
 from research.goal_utils import get_goal_pixels, get_episode_video_path
+from research.train_lewm import RewardPredictor
 
 
 class GoalMapper:
@@ -63,6 +64,11 @@ class GoalMapper:
             )
             .to(self.device)
             .eval()
+        )
+
+        # 🌟 RA-LeWM Reward Head Integration 🌟
+        self.model.reward_head = (
+            RewardPredictor(input_dim=192, hidden_dim=512).to(self.device).eval()
         )
 
         # Load Weights
@@ -163,29 +169,17 @@ class GoalMapper:
             curr_emb = torch.cat([curr_emb, last_pred], dim=1)
             pred_latents.append(last_pred)
 
-        # 6. Dense Latent Distance (Check all steps for progress)
-        # Combine all predictions: (BS, T_horizon, D)
-        all_preds = torch.cat(pred_latents, dim=1)
-        BS, T, D = all_preds.shape
+        # 6. Optimized Planning Cost Logic
+        # all_preds: (BS, T_horizon, D)
 
-        goal_latents = self.goal_latent.view(-1, D)  # (G, D)
-        num_goals = goal_latents.size(0)
+        # CHOICE: Use the Reward Head for task-specific optimization
+        with torch.no_grad():
+            # (BS, T_horizon, D) -> (BS, T_horizon, 1) -> (BS, T_horizon)
+            rewards = self.model.reward_head(all_preds).squeeze(-1)
 
-        if num_goals > 1 and B == 1:
-            # 🚀 OMNI-GOAL MODE (Production Utility)
-            # Efficiently compute distance for all time steps at once: (BS, T, G, D)
-            diff = all_preds.unsqueeze(2) - goal_latents.view(1, 1, num_goals, D)
-            # Find min distance across BOTH Goals and Time
-            # dist shape: (BS, T, G) -> (BS,)
-            dist = torch.norm(diff, dim=-1).min(dim=-1).values.min(dim=-1).values
-        elif num_goals == B and B > 1:
-            # 🎯 TARGETED BATCH MODE (Vectorized Audit)
-            goal_vec = goal_latents.repeat_interleave(S, dim=0).view(BS, 1, D)
-            dist = torch.norm(all_preds - goal_vec, dim=-1).min(dim=-1).values  # (BS,)
-        else:
-            # SINGLE-GOAL MODE (Standard MPC fallback)
-            goal_vec = goal_latents[0:1].view(1, 1, D)
-            dist = torch.norm(all_preds - goal_vec, dim=-1).min(dim=-1).values  # (BS,)
+            # Cost = Negative Reward (since CEM minimizes cost)
+            # We take the MAX reward found across the horizon (Best reachable state)
+            dist = -rewards.max(dim=-1).values
 
         # 7. Unflatten back to (B, S) for the Solver
-        return dist.view(B, S) * 100.0
+        return dist.view(B, S)
