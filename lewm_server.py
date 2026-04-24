@@ -146,7 +146,7 @@ class LEWMInferenceServer:
                     ]  # (1, 1, 1, 32)
                     init_guess = last_executed_action.expand(
                         -1, -1, 8, -1
-                    )  # Repeat for horizon 8
+                    ).to(DEVICE)  # Repeat for horizon 8 and force to DEVICE
 
                     outputs = self.solver.solve(
                         {"pixels": pixels_stacked, "action": actions_stacked},
