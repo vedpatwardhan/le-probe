@@ -21,7 +21,7 @@ if str(CORTEX_GR1) not in sys.path:
 from research.goal_mapper import GoalMapper
 from research.goal_utils import get_episode_video_path, extract_frame_at_index
 
-REPO_ID = "vedpatwardhan/gr1_pickup_processed"
+REPO_ID = "vedpatwardhan/gr1_pickup_grasp"
 
 
 def harvest(model_path, dataset_root, output_path):

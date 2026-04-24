@@ -182,4 +182,5 @@ class GoalMapper:
             dist = -rewards.max(dim=-1).values
 
         # 7. Unflatten back to (B, S) for the Solver
-        return dist.view(B, S)
+        # Scaled by 100 to match the diagnostic sweep's threshold logic
+        return dist.view(B, S) * 100.0
