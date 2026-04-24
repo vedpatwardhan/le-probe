@@ -170,7 +170,8 @@ class GoalMapper:
             pred_latents.append(last_pred)
 
         # 6. Optimized Planning Cost Logic
-        # all_preds: (BS, T_horizon, D)
+        # Combine all predictions: (BS, T_horizon, D)
+        all_preds = torch.cat(pred_latents, dim=1)
 
         # CHOICE: Use the Reward Head for task-specific optimization
         with torch.no_grad():
