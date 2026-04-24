@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import time
 from pathlib import Path
+import pandas as pd
+from huggingface_hub import hf_hub_download
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 try:
@@ -67,12 +69,39 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
 
         # Progress / Rewards
         self.cached_progress = None
-        self.has_progress = "progress_sparse" in self.hf_dataset.column_names
-        if self.has_progress:
-            self.cached_progress = torch.from_numpy(
-                np.array(self.hf_dataset["progress_sparse"])
-            )
-            print("📈 Using progress_sparse column from RAM cache.")
+        self.has_progress = False
+
+        reward_cols = ["progress_sparse", "progress", "reward"]
+        for col in reward_cols:
+            if col in self.hf_dataset.column_names:
+                self.cached_progress = torch.from_numpy(np.array(self.hf_dataset[col]))
+                self.has_progress = True
+                print(f"📈 Using {col} column from RAM cache.")
+                break
+
+        # Fallback to side-car parquet file (common for research datasets on Colab)
+        if not self.has_progress:
+            reward_file = self.root / "progress_sparse.parquet"
+            if not reward_file.exists():
+                try:
+                    print(f"📥 Downloading side-car reward file from {self.repo_id}...")
+                    reward_path = hf_hub_download(
+                        repo_id=self.repo_id,
+                        filename="progress_sparse.parquet",
+                        repo_type="dataset",
+                    )
+                    reward_file = Path(reward_path)
+                except Exception as e:
+                    print(f"⚠️ Could not download progress_sparse.parquet: {e}")
+
+            if reward_file.exists():
+                df = pd.read_parquet(reward_file)
+                for col in reward_cols:
+                    if col in df.columns:
+                        self.cached_progress = torch.from_numpy(df[col].values).float()
+                        self.has_progress = True
+                        print(f"📈 Loaded {col} from side-car file: {reward_file.name}")
+                        break
 
         # 4. LRU Decoder Cache (Worker-local)
         self._decoders = {}

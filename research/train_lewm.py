@@ -147,7 +147,6 @@ def run(cfg):
         "observation.state",
         "observation.images.world_center",
         "action",
-        "progress_sparse",
     ]
     keys_to_load = cfg.data.get("keys_to_load") or default_keys
 

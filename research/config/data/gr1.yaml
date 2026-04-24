@@ -7,9 +7,7 @@ dataset:
     - action
     - proprio
     - state
-    - progress_sparse
   keys_to_cache:
     - action
     - proprio
     - state
-    - progress_sparse
