@@ -89,7 +89,7 @@ class LEWMInferenceServer:
         self.solver.configure(
             action_space=MockSpace(shape=(1, 32)),
             n_envs=1,
-            config=MockConfig(horizon=16),
+            config=MockConfig(horizon=32),  # 🚀 Horizon 32: Full episode lookahead
         )
 
         # 5. State Buffering
@@ -154,7 +154,7 @@ class LEWMInferenceServer:
                     init_guess = (
                         last_executed_action.squeeze(0)
                         .squeeze(0)
-                        .repeat(16, 1)  # Updated to match horizon 16
+                        .repeat(32, 1)  # Updated to match horizon 32
                         .unsqueeze(0)
                         .to(DEVICE)
                         .clone()
