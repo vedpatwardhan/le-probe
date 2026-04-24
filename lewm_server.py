@@ -77,11 +77,11 @@ class LEWMInferenceServer:
         self.agent.goal_latent = torch.stack(goal_list).to(DEVICE)
         print(f"🚀 Brain Prime: Loaded all {len(goal_list)} goals for Omni-MPC.")
 
-        # 4. Setup Calibrated Solver (1k Samples)
+        # 4. CEM Solver Hyperparameters
         self.solver = CEMSolver(
             model=self.agent,
             num_samples=1000,
-            var_scale=2.0,
+            var_scale=1.0,
             n_steps=1,
             topk=100,
             device=DEVICE,
@@ -89,7 +89,7 @@ class LEWMInferenceServer:
         self.solver.configure(
             action_space=MockSpace(shape=(1, 32)),
             n_envs=1,
-            config=MockConfig(horizon=8),
+            config=MockConfig(horizon=16),
         )
 
         # 5. State Buffering
@@ -154,7 +154,7 @@ class LEWMInferenceServer:
                     init_guess = (
                         last_executed_action.squeeze(0)
                         .squeeze(0)
-                        .repeat(8, 1)
+                        .repeat(16, 1)  # Updated to match horizon 16
                         .unsqueeze(0)
                         .to(DEVICE)
                         .clone()
@@ -180,10 +180,13 @@ class LEWMInferenceServer:
                     clipped_delta = np.clip(delta, -max_delta, max_delta)
                     target_action = prev_action + clipped_delta
 
-                    # 2. Action Smoothing (Exponential Moving Average)
                     # Blends 90% new intent with 10% previous pose to kill high-frequency jitter
                     alpha = 0.9
                     target_action = alpha * target_action + (1 - alpha) * prev_action
+
+                    # 3. 🛡️ FINAL HARD CLAMP (Strict [-1, 1] Protocol Enforcement)
+                    # Prevents EMA/Delta-capping from leaking outside physical bounds
+                    target_action = np.clip(target_action, -1.0, 1.0)
 
                 # Update the plan with our smoothed/clipped action for execution
                 if best_plan.ndim == 4:

@@ -145,8 +145,10 @@ class GoalMapper:
             hist_actions_5d.repeat_interleave(S, dim=0).to(self.device).float()
         )
 
-        # 4. Prepare Plan Actions (BS, T, D)
-        flat_plan_actions = (
+        # 4. Prepare Plan Actions (BS, T, D) with Activation Squashing
+        # 🚀 THE SQUASHER: Ensure actions are strictly in [-1, 1] range
+        # using tanh for smooth gradients and physical validity.
+        flat_plan_actions = torch.tanh(
             actions.view(B * S, -1, actions.size(-1)).to(self.device).float()
         )
         all_actions = torch.cat([flat_hist_actions, flat_plan_actions], dim=1)
@@ -193,31 +195,35 @@ class GoalMapper:
             if self.goal_latent is not None:
                 # all_preds: (BS, T, D), goal_latent: (N_goals, 1, D)
                 # Compare every step in horizon to the final successful goal state
-                goal_target = self.goal_latent.squeeze(1)  # (N_goals, D)
+                # goal_target shape: (N_goals, D) -> (1, N_goals, D)
+                goal_target = (
+                    self.goal_latent.squeeze(1).unsqueeze(0).to(all_preds.dtype)
+                )
 
-                # Calculate min dist to any successful latent frame in the gallery
-                # dists shape: (BS, T, N_goals)
-                dists_to_latents = torch.cdist(all_preds, goal_target)
-                min_latent_dist = dists_to_latents.min(dim=-1).values.mean(
-                    dim=-1
-                )  # (BS,)
+                # all_preds shape: (BS, T, D)
+                # We want dist from every step in T to every goal in N_goals
+                # To do this efficiently, we flatten BS * T
+                flat_preds = all_preds.reshape(-1, all_preds.size(-1))  # (BS*T, D)
 
-                # Global Compass Weight: Pulls the arm toward the cube's neighborhood
-                dist = dist + min_latent_dist * 5.0
+                # dists shape: (BS*T, N_goals)
+                dists_to_latents = torch.cdist(flat_preds, goal_target.squeeze(0))
+
+                # Reshape back to (BS, T, N_goals), find min goal dist per step
+                # Shape: (BS, T)
+                min_latent_dist_per_step = (
+                    dists_to_latents.view(all_preds.size(0), all_preds.size(1), -1)
+                    .min(dim=-1)
+                    .values
+                )
+
+                # Global Compass Weight: Reduce to 0.5 to let the Reward Head lead.
+                dist = dist + min_latent_dist_per_step * 0.5
+
+            # Reduce dist to (BS,) by averaging over horizon
+            dist = dist.mean(dim=-1)
 
             # -----------------------------------------------------------------
-            # 3. ACTION SAFETY: Boundary Enforcement (Protocol Safety)
-            # -----------------------------------------------------------------
-            # Penalize the solver for proposing poses outside [-1, 1]
-            # This prevents the 'Flailing' seen in Run 9.
-            out_of_bounds = torch.sum(
-                torch.clamp(torch.abs(flat_plan_actions) - 1.0, min=0.0) ** 2,
-                dim=(-1, -2),
-            )
-            dist = dist + out_of_bounds * 500.0
-
-            # -----------------------------------------------------------------
-            # 4. PHYSICAL GRACE: Smoothness Penalty
+            # 3. PHYSICAL GRACE: Smoothness Penalty (STABILIZED)
             # -----------------------------------------------------------------
             # a. Jitter from Last Real Pose (Start of plan)
             # flat_hist_actions: (BS, T_hist, D)
@@ -236,8 +242,8 @@ class GoalMapper:
             else:
                 jump_internal = 0.0
 
-            # Smoothness Weight (150.0): Maintains stability without paralyzing reach.
-            smoothness_weight = 150.0
+            # Smoothness Weight (300.0): Doubled to aggressively kill high-frequency flailing.
+            smoothness_weight = 300.0
             dist = dist + (jump_start + jump_internal) * smoothness_weight
 
         # 7. Unflatten back to (B, S) for the Solver
