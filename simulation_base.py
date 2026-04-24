@@ -449,6 +449,8 @@ class GR1MuJoCoBase:
         # Constrain cube randomization to table bounds (X: 0.25-0.65, Y: ±0.25)
         # Using [0.27, 0.63] and ±0.23 for a small safety margin from the edges
         rx, ry = np.random.uniform(0.27, 0.63), np.random.uniform(-0.23, 0.23)
+        rx = 0.55
+        ry = 0.125
         print(f"rx: {rx}, ry: {ry}")
         cube_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint")
         cube_q_idx = self.model.jnt_qposadr[cube_id]

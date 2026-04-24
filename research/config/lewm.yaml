@@ -66,4 +66,4 @@ loss:
       knots: 17
       num_proj: 1024
   reward:
-    weight: 0.1
+    weight: 0.02
