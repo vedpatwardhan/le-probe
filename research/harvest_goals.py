@@ -61,7 +61,7 @@ def harvest(model_path, dataset_root, output_path):
             # 3. Store full context
             gallery["diagnostics"][i] = {
                 "pixels": torch.stack(start_frames).cpu(),
-                "action": torch.zeros(4, 64),
+                "action": torch.zeros(4, 32),
             }
 
         except Exception:

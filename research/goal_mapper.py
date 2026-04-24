@@ -50,7 +50,7 @@ class GoalMapper:
             heads=16,
             mlp_dim=2048,
         )
-        self.action_encoder = GR1Embedder(input_dim=64, emb_dim=192)
+        self.action_encoder = GR1Embedder(input_dim=32, emb_dim=192)
         self.projector = GR1MLP(input_dim=192, output_dim=192, hidden_dim=2048)
         self.projector_proj = GR1MLP(input_dim=192, output_dim=192, hidden_dim=2048)
 

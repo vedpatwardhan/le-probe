@@ -62,7 +62,7 @@ def run_diagnostic(model_path, gallery_path="goal_gallery.pth", batch_size=10):
         device=device,
     )
     solver.configure(
-        action_space=MockSpace(shape=(1, 64)),
+        action_space=MockSpace(shape=(1, 32)),
         n_envs=batch_size,
         config=MockConfig(horizon=15),
     )
@@ -76,7 +76,7 @@ def run_diagnostic(model_path, gallery_path="goal_gallery.pth", batch_size=10):
 
         if actual_batch_size != batch_size:
             solver.configure(
-                action_space=MockSpace(shape=(1, 64)),
+                action_space=MockSpace(shape=(1, 32)),
                 n_envs=actual_batch_size,
                 config=MockConfig(horizon=15),
             )
@@ -95,7 +95,7 @@ def run_diagnostic(model_path, gallery_path="goal_gallery.pth", batch_size=10):
         # B. Initial Cost (Current observations vs Goal)
         with torch.no_grad():
             initial_cost = mapper.get_cost(
-                info_dict, torch.zeros(actual_batch_size, 1, 15, 64).to(device)
+                info_dict, torch.zeros(actual_batch_size, 1, 15, 32).to(device)
             )
 
         # C. Vectorized Planning
