@@ -109,18 +109,29 @@ def lejepa_forward(self, batch, stage, cfg):
         output["pred_loss"] = (raw_pred_loss * w_i).mean()
 
         # Reward Supervision (Value Predictor)
-        pred_reward = self.model.reward_head(pred_emb).squeeze(-1)
-        output["reward_loss"] = torch.nn.functional.mse_loss(pred_reward, R_tk)
+        # Align reward prediction with the future latents (steps ctx_len:)
+        # Since pred_emb is [1, 2, 3] and ctx_len is 3, we take the last steps
+        future_pred_emb = pred_emb[:, (ctx_len - n_preds) :]
+        pred_reward = self.model.reward_head(future_pred_emb).squeeze(-1)
+
+        # Ensure target shape matches prediction
+        target_reward = R_tk.to(pred_reward.dtype)
+        output["reward_loss"] = torch.nn.functional.mse_loss(pred_reward, target_reward)
     else:
         output["pred_loss"] = raw_pred_loss.mean()
 
     output["sigreg_loss"] = self.sigreg(emb.float().transpose(0, 1))
-    output["loss"] = output["pred_loss"] + cfg.loss.sigreg.weight * output[
-        "sigreg_loss"
-    ].to(output["pred_loss"].dtype)
+
+    # Combined Loss with weighting
+    reward_weight = cfg.loss.get("reward", {}).get("weight", 0.1)
+    sigreg_weight = cfg.loss.sigreg.weight
+
+    output["loss"] = output["pred_loss"] + sigreg_weight * output["sigreg_loss"].to(
+        output["pred_loss"].dtype
+    )
 
     if "reward_loss" in output:
-        output["loss"] = output["loss"] + output["reward_loss"]
+        output["loss"] = output["loss"] + reward_weight * output["reward_loss"]
 
     losses_dict = {f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k}
     self.log_dict(losses_dict, on_step=True, sync_dist=True)

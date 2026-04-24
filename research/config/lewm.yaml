@@ -65,3 +65,5 @@ loss:
     kwargs:
       knots: 17
       num_proj: 1024
+  reward:
+    weight: 0.1
