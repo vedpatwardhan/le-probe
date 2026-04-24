@@ -26,7 +26,6 @@ import time
 import argparse
 import traceback
 import json
-import rerun as rr
 
 # Local imports
 from research.goal_mapper import GoalMapper
@@ -189,13 +188,9 @@ class LEWMInferenceServer:
                 socket.send(msgpack.packb({"error": str(e)}, use_bin_type=True))
 
     def log_diagnostics(self, raw_image, best_plan, plan_time, instruction):
-        """High-fidelity logging for 'Wild Movement' debugging."""
+        """Pure JSONL logging for 'Wild Movement' debugging."""
         try:
-            # 1. Rerun Visuals
-            rr.set_time_seconds("inference_time", time.time())
-            rr.log("server/best_action_max", rr.Scalar(float(np.abs(best_plan).max())))
-
-            # 2. Lifecycle Audit (JSONL)
+            # Lifecycle Audit (JSONL)
             log_entry = {
                 "timestamp": time.time(),
                 "instruction": instruction,

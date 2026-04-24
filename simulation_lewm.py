@@ -51,7 +51,7 @@ class GR1LEWMClient(GR1MuJoCoBase):
             "world_center": pack_np(img),
         }
 
-    def run(self, instruction="Pick up the red cube", max_steps=1000):
+    def run(self, instruction="Pick up the red cube", max_steps=10):
         print(f"🚀 Starting Omni-MPC Autonomous Mission: '{instruction}'")
 
         # Audit History for Parity verification
@@ -88,18 +88,7 @@ class GR1LEWMClient(GR1MuJoCoBase):
                         # --- 🔌 PROTOCOL HANDSHAKE: Unscale to Radians ---
                         curr_action_raw = self.scaler.unscale_action(curr_action_norm)
 
-                        # Rerun Telemetry
-                        rr.set_time_sequence("step", step_idx)
-                        rr.log(
-                            "client/action_max",
-                            rr.Scalar(float(np.abs(curr_action_norm).max())),
-                        )
-
-                        # Detailed Joint-Level Rerun (Helps identify oscillating joints)
-                        for j_idx, val in enumerate(curr_action_norm):
-                            rr.log(f"client/joints/j{j_idx:02d}", rr.Scalar(float(val)))
-
-                        # Record for audit
+                        # Record for audit (All numbers go to JSON, not Rerun)
                         audit_history.append(
                             {
                                 "step": step_idx,
