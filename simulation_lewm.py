@@ -11,12 +11,15 @@ import msgpack
 import time
 import argparse
 import rerun as rr
+import traceback
 from simulation_base import GR1MuJoCoBase
+from gr1_protocol import StandardScaler
 
 
 class GR1LEWMClient(GR1MuJoCoBase):
     def __init__(self, server_host="localhost", server_port=5555):
         super().__init__()
+        self.scaler = StandardScaler()
 
         # ZMQ Context
         self.context = zmq.Context()
@@ -65,23 +68,36 @@ class GR1LEWMClient(GR1MuJoCoBase):
                 resp = msgpack.unpackb(self.client.recv(), raw=False)
 
                 if "action" in resp:
-                    plan = np.array(resp["action"], dtype=np.float32)  # (Horizon, 32)
+                    # Received normalized plan (Horizon, 32) in [-1, 1]
+                    plan_norm = np.array(resp["action"], dtype=np.float32)
                     diag = resp.get("diagnostics", {})
 
                     print(
                         "   🚀 Executing first action from plan (Solve Time: "
-                        f"{diag.get('plan_time_ms')}ms, Horizon: {plan.shape[0]})"
+                        f"{diag.get('plan_time_ms')}ms, Horizon: {plan_norm.shape[0]})"
                     )
 
-                    # MPC Chunking: Execute 5 steps before re-planning to save ZMQ overhead
-                    chunk_size = min(5, len(plan))
-                    print(f"   🚀 Executing {chunk_size}-action chunk...")
-
+                    # MPC Chunking: Execute 5 steps before re-planning
+                    chunk_size = min(5, len(plan_norm))
                     for i in range(chunk_size):
-                        curr_action = plan[i]
-                        self.process_target_32(curr_action)
+                        curr_action_norm = plan_norm[i]
+
+                        # --- 🔌 PROTOCOL HANDSHAKE: Unscale to Radians ---
+                        curr_action_raw = self.scaler.unscale_action(curr_action_norm)
+
+                        # Rerun Telemetry
+                        rr.set_time_sequence("step", step_idx)
+                        rr.log(
+                            "client/action_max",
+                            rr.Scalar(float(np.abs(curr_action_norm).max())),
+                        )
+
+                        self.process_target_32(curr_action_raw)
                         self.dispatch_action(
-                            curr_action, self.last_target_q, n_steps=50, render_freq=10
+                            curr_action_raw,
+                            self.last_target_q,
+                            n_steps=50,
+                            render_freq=10,
                         )
                         step_idx += 1
                 else:
@@ -89,6 +105,7 @@ class GR1LEWMClient(GR1MuJoCoBase):
                     break
             except Exception as e:
                 print(f"❌ Connection Error: {e}")
+                traceback.print_exc()
                 break
 
 

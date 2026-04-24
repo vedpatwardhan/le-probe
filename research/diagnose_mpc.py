@@ -32,6 +32,8 @@ class MockConfig:
 class MockSpace:
     def __init__(self, shape):
         self.shape = shape
+        self.low = -1.0
+        self.high = 1.0
 
 
 def run_diagnostic(model_path, gallery_path="goal_gallery.pth", batch_size=10):

@@ -25,10 +25,13 @@ import numpy as np
 import time
 import argparse
 import traceback
+import json
+import rerun as rr
 
 # Local imports
 from research.goal_mapper import GoalMapper
 from stable_worldmodel.solver.cem import CEMSolver
+from gr1_protocol import StandardScaler
 
 # Configuration
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -44,11 +47,14 @@ class MockConfig:
 class MockSpace:
     def __init__(self, shape):
         self.shape = shape
+        self.low = -1.0
+        self.high = 1.0
 
 
 class LEWMInferenceServer:
     def __init__(self, model_path, gallery_path="goal_gallery.pth"):
         print("--- Initializing Oracle MPC Server (Gallery Only) ---")
+        self.scaler = StandardScaler()
 
         gallery_file = Path(gallery_path)
         if not gallery_file.exists():
@@ -106,7 +112,10 @@ class LEWMInferenceServer:
                     )
 
                 raw_image = unpack_np(req.get("world_center"))
-                sim_state = unpack_np(req.get("state"))
+                raw_sim_state = unpack_np(req.get("state"))
+
+                # Grounding: Normalize the current state for history alignment
+                norm_state = self.scaler.scale_state(raw_sim_state)
 
                 batch = self.agent.transform({"pixels": raw_image})
                 image_t = batch["pixels"].to(DEVICE)
@@ -115,8 +124,9 @@ class LEWMInferenceServer:
                 if len(self.history["pixels"]) > 3:
                     self.history["pixels"].pop(0)
 
+                # Action History: Ground the model in the current normalized pose
                 while len(self.history["actions"]) < 3:
-                    self.history["actions"].append(np.zeros(32, dtype=np.float32))
+                    self.history["actions"].append(norm_state)
 
                 pixels_stacked = (
                     torch.stack(self.history["pixels"]).unsqueeze(0).unsqueeze(0)
@@ -150,6 +160,15 @@ class LEWMInferenceServer:
                     f"Mean Action: {np.abs(best_plan).mean():.4f}"
                 )
 
+                # --- 📡 Rerun Telemetry & Audit ---
+                self.log_diagnostics(
+                    raw_image=raw_image,
+                    best_plan=best_plan,
+                    plan_time=plan_time,
+                    instruction=req.get("instruction", "Unknown"),
+                )
+
+                # Update history with the first action of the plan (which is normalized)
                 self.history["actions"].append(best_plan[0])
                 if len(self.history["actions"]) > 3:
                     self.history["actions"].pop(0)
@@ -168,6 +187,30 @@ class LEWMInferenceServer:
                 print(f"❌ Server Error: {e}")
                 traceback.print_exc()
                 socket.send(msgpack.packb({"error": str(e)}, use_bin_type=True))
+
+    def log_diagnostics(self, raw_image, best_plan, plan_time, instruction):
+        """High-fidelity logging for 'Wild Movement' debugging."""
+        try:
+            # 1. Rerun Visuals
+            rr.set_time_seconds("inference_time", time.time())
+            rr.log("server/best_action_max", rr.Scalar(float(np.abs(best_plan).max())))
+
+            # 2. Lifecycle Audit (JSONL)
+            log_entry = {
+                "timestamp": time.time(),
+                "instruction": instruction,
+                "solve_time": plan_time,
+                "action_max": float(np.abs(best_plan).max()),
+                "action_mean": float(np.abs(best_plan).mean()),
+                "first_action_norm": best_plan[0].tolist(),
+                "first_action_raw": self.scaler.unscale_action(best_plan[0]).tolist(),
+            }
+            log_file = os.path.join(ROOT_DIR, "lewm_lifecycle_audit.json")
+            with open(log_file, "a") as f:
+                f.write(json.dumps(log_entry) + "\n")
+
+        except Exception as e:
+            print(f"⚠️ Diagnostic logging failed: {e}")
 
 
 if __name__ == "__main__":
