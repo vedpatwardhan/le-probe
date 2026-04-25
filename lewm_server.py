@@ -81,14 +81,14 @@ class LEWMInferenceServer:
         # 4. CEM Solver Hyperparameters
         self.solver = CEMSolver(
             model=self.agent,
-            num_samples=8000,
+            num_samples=1000,
             var_scale=0.2,
             n_steps=2,
-            topk=500,
+            topk=100,
             device=DEVICE,
         )
         self.solver.configure(
-            action_space=MockSpace(shape=(1, 32)),
+            action_space=MockSpace(shape=(32,)),
             n_envs=1,
             config=MockConfig(horizon=1, init_var=0.2),
         )
