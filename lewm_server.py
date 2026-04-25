@@ -88,7 +88,7 @@ class LEWMInferenceServer:
             device=DEVICE,
         )
         self.solver.configure(
-            action_space=MockSpace(shape=(32,)),
+            action_space=MockSpace(shape=(1, 32)),
             n_envs=1,
             config=MockConfig(horizon=1, init_var=0.2),
         )
