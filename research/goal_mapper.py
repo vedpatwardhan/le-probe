@@ -66,10 +66,12 @@ class GoalMapper:
             .eval()
         )
 
-        # 🌟 RA-LeWM Reward Head Integration 🌟
         self.model.reward_head = (
             RewardPredictor(input_dim=192, hidden_dim=512).to(self.device).eval()
         )
+
+        # 🧊 Dynamic Freeze Anchor (Initial Pose)
+        self.frozen_pose = None
 
         # Load Weights
         print(f"🧠 Loading Oracle Weights: {Path(model_path).name}")
@@ -107,8 +109,40 @@ class GoalMapper:
         return self.model.predict(*args, **kwargs)
 
     def manifold_squash(self, actions):
-        """Linearly clamps actions to [-1, 1] to ensure they stay In-Distribution (ID) for the World Model."""
-        return torch.clamp(actions, -1.0, 1.0)
+        """
+        PRECISION MANIFOLD MAPPING:
+        1. Restricts sampling to Right Arm (16-22), Right Hand (23-28), and Waist (29-31).
+        2. Freezes Left Arm/Hand (0-12) and Head (13-15) to -1.0.
+        3. Applies buffered remapping to Right Arm joints (17-20).
+        """
+        # 1. Freeze Left Side and Head (Indices 0-15)
+        # We set these to the frozen_pose (Initial Pose).
+        # Error if not set, as we must never default to -1.0.
+        if self.frozen_pose is None:
+            raise ValueError(
+                "❌ GoalMapper Error: frozen_pose not set before planning!"
+            )
+
+        actions[..., 0:16] = self.frozen_pose[..., 0:16]
+
+        # 2. Global Safety Clamp for Active Joints
+        actions = torch.clamp(actions, -1.0, 1.0)
+
+        # 3. Right Arm Precision Mapping (Indices 17, 18, 19, 20)
+        # Buffered Ranges (Orig Min/Max + 20% Range Buffer):
+        arm_min = torch.tensor([-0.312, -0.098, -0.156, -0.098], device=actions.device)
+        arm_max = torch.tensor([1.172, 0.098, 0.236, 0.098], device=actions.device)
+
+        # Select the joints for all steps in the plan
+        arm_joints = actions[..., 17:21]
+
+        # Apply the linear transformation
+        remapped_arm = arm_min + (arm_joints + 1.0) * (arm_max - arm_min) / 2.0
+
+        # Re-insert into the action vector
+        actions[..., 17:21] = remapped_arm
+
+        return actions
 
     @torch.no_grad()
     def get_cost(self, obs_dict, actions):

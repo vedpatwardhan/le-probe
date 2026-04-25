@@ -26,6 +26,7 @@ import time
 import argparse
 import traceback
 import json
+from gymnasium.spaces import Box
 
 # Local imports
 from research.goal_mapper import GoalMapper
@@ -56,6 +57,7 @@ class LEWMInferenceServer:
     def __init__(self, model_path, gallery_path="goal_gallery.pth"):
         print("--- Initializing Oracle MPC Server (Gallery Only) ---")
         self.scaler = StandardScaler()
+        self.initial_pose = None
 
         gallery_file = Path(gallery_path)
         if not gallery_file.exists():
@@ -88,9 +90,9 @@ class LEWMInferenceServer:
             device=DEVICE,
         )
         self.solver.configure(
-            action_space=MockSpace(shape=(1, 32)),
+            action_space=Box(low=-1.0, high=1.0, shape=(4, 32)),
             n_envs=1,
-            config=MockConfig(horizon=1, init_var=0.2),
+            config=MockConfig(horizon=4, init_var=0.2),
         )
 
         # 5. State Buffering
@@ -117,6 +119,16 @@ class LEWMInferenceServer:
 
                 # Grounding: Normalize the current state for history alignment
                 norm_state = self.scaler.scale_state(raw_sim_state)
+
+                # 🧊 DYNAMIC FREEZE ANCHOR: Capture initial pose on first step
+                if self.initial_pose is None:
+                    self.initial_pose = norm_state.copy()
+                    self.agent.frozen_pose = torch.tensor(
+                        self.initial_pose, device=DEVICE
+                    ).float()
+                    print(
+                        f"🧊 Initial Pose Anchored: Left Shoulder Pitch = {self.initial_pose[0]:.4f}"
+                    )
 
                 batch = self.agent.transform({"pixels": raw_image})
                 image_t = batch["pixels"].to(DEVICE)
@@ -150,16 +162,20 @@ class LEWMInferenceServer:
                         :, :, -1:, :
                     ]  # (1, 1, 1, 32)
 
-                    # (1, 1, 1, 32) -> (1, 32) -> (8, 32) -> (1, 8, 32)
+                    # (1, 1, 1, 32) -> (1, 32) -> (4, 32) -> (1, 4, 32)
                     # Use .repeat() instead of .expand() to avoid memory aliasing errors in CEM
                     init_guess = (
                         last_executed_action.squeeze(0)
                         .squeeze(0)
-                        .repeat(32, 1)  # Updated to match horizon 32
-                        .unsqueeze(0)
+                        .repeat(4, 1)  # Updated to match horizon 4
                         .to(DEVICE)
-                        .clone()
+                        .float()
                     )
+
+                    # 🧊 FREEZE SAMPLING SPACE (0-15) 🧊
+                    # We ensure the solver starts with the joints frozen to their initial pose
+                    init_guess[:, 0:16] = self.agent.frozen_pose[0:16]
+                    init_guess = init_guess.unsqueeze(0)
 
                     outputs = self.solver.solve(
                         {"pixels": pixels_stacked, "action": actions_stacked},
@@ -167,33 +183,42 @@ class LEWMInferenceServer:
                     )
 
                 best_plan = outputs["actions"].cpu().numpy()
-                target_action = best_plan[0, 0, 0]  # (32,)
-
-                # 🛡️ THE GOVERNOR: Delta Capping & Smoothing 🛡️
-                if len(self.history["actions"]) > 0:
-                    prev_action = self.history["actions"][
-                        -1
-                    ]  # This is already a numpy array
-
-                    # 1. Delta Capping (Max 0.05 normalized units per step)
-                    max_delta = 0.05
-                    delta = target_action - prev_action
-                    clipped_delta = np.clip(delta, -max_delta, max_delta)
-                    target_action = prev_action + clipped_delta
-
-                    # Blends 90% new intent with 10% previous pose to kill high-frequency jitter
-                    alpha = 0.9
-                    target_action = alpha * target_action + (1 - alpha) * prev_action
-
-                    # 3. 🛡️ FINAL HARD CLAMP (Strict [-1, 1] Protocol Enforcement)
-                    # Prevents EMA/Delta-capping from leaking outside physical bounds
-                    target_action = np.clip(target_action, -1.0, 1.0)
-
-                # Update the plan with our smoothed/clipped action for execution
                 if best_plan.ndim == 4:
                     best_plan = best_plan[0, 0]  # (B, S, T, D) -> (T, D)
                 elif best_plan.ndim == 3:
                     best_plan = best_plan[0]  # (S, T, D) -> (T, D)
+
+                # 🧊 MANIFOLD ENFORCEMENT (0-15) 🧊
+                # Explicitly zero out any leakage for the frozen joints in the full plan
+                best_plan[:, 0:16] = self.initial_pose[0:16]
+
+                target_action = best_plan[0]  # (32,)
+
+                # 🛡️ THE GOVERNOR: Delta Capping & Smoothing 🛡️
+                if len(self.history["actions"]) > 0:
+                    prev_action = self.history["actions"][-1]
+
+                    # 1. Delta Capping (Max 0.05 normalized units per step)
+                    # We ONLY apply delta capping to the active joints (16-31)
+                    max_delta = 0.05
+                    delta = target_action[16:] - prev_action[16:]
+                    clipped_delta = np.clip(delta, -max_delta, max_delta)
+                    target_action[16:] = prev_action[16:] + clipped_delta
+
+                    # 2. 🛡️ PRECISION MAPPING & PROTOCOL ENFORCEMENT 🛡️
+                    arm_min = np.array([-0.312, -0.098, -0.156, -0.098])
+                    arm_max = np.array([1.172, 0.098, 0.236, 0.098])
+
+                    target_action[17:21] = (
+                        arm_min
+                        + (target_action[17:21] + 1.0) * (arm_max - arm_min) / 2.0
+                    )
+
+                    # Ensure indices 0-15 remain exactly at their initial pose
+                    target_action[0:16] = self.initial_pose[0:16]
+
+                    # Final safety clip for active joints
+                    target_action[16:] = np.clip(target_action[16:], -1.0, 1.0)
 
                 best_plan[0] = target_action
 
