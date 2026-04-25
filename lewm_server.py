@@ -39,8 +39,9 @@ PORT = 5555
 
 
 class MockConfig:
-    def __init__(self, horizon):
+    def __init__(self, horizon, init_var=1.0):
         self.horizon = horizon
+        self.init_var = init_var
         self.action_block = 1
 
 
