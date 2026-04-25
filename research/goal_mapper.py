@@ -106,6 +106,10 @@ class GoalMapper:
         """Proxy to the internal World Model's prediction logic."""
         return self.model.predict(*args, **kwargs)
 
+    def manifold_squash(self, actions):
+        """Linearly clamps actions to [-1, 1] to ensure they stay In-Distribution (ID) for the World Model."""
+        return torch.clamp(actions, -1.0, 1.0)
+
     @torch.no_grad()
     def get_cost(self, obs_dict, actions):
         """
@@ -145,36 +149,9 @@ class GoalMapper:
             hist_actions_5d.repeat_interleave(S, dim=0).to(self.device).float()
         )
 
-        # 4. Prepare Plan Actions (BS, T, D) with Activation Squashing
-        # 🚀 THE MANIFOLD SQUASHER: Enforce joint-specific bounds (Dataset + 50% Slack)
+        # 4. Prepare Plan Actions (BS, T, D) with MANIFOLD SQUASHING
         raw_actions = actions.view(B * S, -1, actions.size(-1)).to(self.device).float()
-
-        # Define Manifold Bounds (Right Arm: 16-22)
-        lower_bounds = torch.full((32,), -1.0, device=self.device)
-        upper_bounds = torch.full((32,), 1.0, device=self.device)
-
-        # Apply empirical manifold bounds for Right Arm (Capped at [-1, 1] physical limits)
-        # Format: (idx, low, high)
-        manifold_limits = [
-            (16, -1.0, 0.544),  # Pitch (Capped at -1.0)
-            (17, -0.306, 1.0),  # Roll (Capped at 1.0)
-            (18, -0.101, 0.103),  # Yaw (Tight)
-            (19, -0.151, 0.172),  # Elbow
-            (20, -0.101, 0.103),  # Wrist Yaw
-            (21, -0.347, 0.420),  # Wrist Roll
-            (22, -0.576, 0.570),  # Wrist Pitch
-        ]
-        for idx, low, high in manifold_limits:
-            lower_bounds[idx] = max(-1.0, low)
-            upper_bounds[idx] = min(1.0, high)
-
-        lower_bounds = lower_bounds.view(1, 1, 32)
-        upper_bounds = upper_bounds.view(1, 1, 32)
-
-        # Map tanh(-inf, inf) -> [-1, 1] then rescale to [lower, upper]
-        flat_plan_actions = lower_bounds + (upper_bounds - lower_bounds) * 0.5 * (
-            torch.tanh(raw_actions) + 1.0
-        )
+        flat_plan_actions = self.manifold_squash(raw_actions)
         all_actions = torch.cat([flat_hist_actions, flat_plan_actions], dim=1)
 
         # 5. Sliding Window Rollout (Flattened BS space)
