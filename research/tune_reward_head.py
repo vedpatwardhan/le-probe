@@ -63,12 +63,14 @@ def train_reward_head(checkpoint_path, repo_id, epochs=20, lr=1e-4, batch_size=3
             row = self.df.iloc[idx]
             raw_img = row["observation.images.world_center"]
 
-            # Direct reconstruction from nested Parquet structure
-            img_np = np.array([np.array(c) for c in raw_img], dtype=np.uint8)
-
-            # Standardize to (C, H, W)
-            if img_np.shape == (224, 224, 3):
-                img_np = img_np.transpose(2, 0, 1)
+            # Manual reconstruction by channel to break object-array nesting
+            img_np = np.stack(
+                [
+                    np.array(raw_img[0].tolist(), dtype=np.uint8),
+                    np.array(raw_img[1].tolist(), dtype=np.uint8),
+                    np.array(raw_img[2].tolist(), dtype=np.uint8),
+                ]
+            )
 
             batch = self.transform({"pixels": img_np})
             return batch["pixels"], torch.tensor([row["progress"]], dtype=torch.float32)
