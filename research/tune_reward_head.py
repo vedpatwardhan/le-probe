@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 # Project Imports
 import sys
+from huggingface_hub import snapshot_download
 
 sys.path.append("cortex-gr1")
 sys.path.append("cortex-gr1/research")
@@ -136,5 +137,22 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch_size", type=int, default=32)
     args = parser.parse_args()
+
+    # Automatic HF Fetch Logic
+    if not os.path.exists(args.snapshots):
+        print(f"📂 Local snapshots not found at {args.snapshots}")
+        print(f"📥 Fetching from Hugging Face: vedpatwardhan/gr1_reward_pred...")
+        try:
+            # Download to the expected local path
+            snapshot_download(
+                repo_id="vedpatwardhan/gr1_reward_pred",
+                repo_type="dataset",
+                local_dir=args.snapshots,
+            )
+            print(f"✅ Download complete. Files saved to {args.snapshots}")
+        except Exception as e:
+            print(f"❌ Error downloading from HF: {e}")
+            print("💡 Please ensure you are logged in with 'huggingface-cli login'")
+            sys.exit(1)
 
     train_reward_head(args.ckpt, args.snapshots, args.epochs, args.lr, args.batch_size)
