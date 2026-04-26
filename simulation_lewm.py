@@ -12,6 +12,7 @@ import time
 import argparse
 import rerun as rr
 import traceback
+from PIL import Image
 from simulation_base import GR1MuJoCoBase
 from gr1_protocol import StandardScaler
 
@@ -45,10 +46,14 @@ class GR1LEWMClient(GR1MuJoCoBase):
         self.renderer.update_scene(self.data, camera="world_center")
         img = self.renderer.render()
 
+        img_resized = np.array(
+            Image.fromarray(img).resize((224, 224), Image.Resampling.LANCZOS)
+        )
+
         return {
             "instruction": instruction,
             "state": pack_np(state),
-            "world_center": pack_np(img),
+            "observation.images.world_center": pack_np(img_resized),
         }
 
     def run(self, instruction="Pick up the red cube", max_steps=100):

@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+import pandas as pd
 
 # Project Imports
 import sys
@@ -24,7 +25,7 @@ if lewm_root not in sys.path:
 from goal_mapper import GoalMapper
 
 
-def compare_models(naive_ckpt, tuned_ckpt, json_files):
+def compare_models(naive_ckpt, v1_ckpt, v2_ckpt, df):
     device = torch.device(
         "cuda"
         if torch.cuda.is_available()
@@ -32,31 +33,38 @@ def compare_models(naive_ckpt, tuned_ckpt, json_files):
     )
     print(f"🚀 Comparing on device: {device}")
 
-    # 1. Load Both Models
-    print(f"🏗️  Loading Naive Model: {naive_ckpt}")
-    mapper_naive = GoalMapper(model_path=naive_ckpt, dataset_root=".")
-    model_naive = mapper_naive.model.to(device).eval()
+    # 1. Load All Models
+    def load_model(ckpt, name):
+        print(f"🏗️  Loading {name}: {ckpt}")
+        mapper = GoalMapper(model_path=ckpt, dataset_root=".")
+        return mapper.model.to(device).eval(), mapper.transform
 
-    print(f"🏗️  Loading Tuned Model: {tuned_ckpt}")
-    mapper_tuned = GoalMapper(model_path=tuned_ckpt, dataset_root=".")
-    model_tuned = mapper_tuned.model.to(device).eval()
+    model_naive, transform = load_model(naive_ckpt, "Naive Model")
+    model_v1, _ = load_model(v1_ckpt, "Tuned V1")
+    model_v2, _ = load_model(v2_ckpt, "Tuned V2")
 
-    # 2. Files already provided in signature
-    print(f"📦 Auditing {len(json_files)} snapshots.")
+    # 2. Dataset size
+    print(f"📦 Auditing {len(df)} snapshots from Parquet.")
 
     results = []
 
-    # 3. Batch Processing (to be faster)
-    for json_file in tqdm(json_files, desc="Auditing Snapshots"):
-        with open(json_file, "r") as f:
-            data = json.load(f)
+    # 3. Process Dataset Rows
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="Auditing Snapshots"):
+        gt_reward = float(row.get("progress", 0.0))
+        raw_img = row["observation.images.world_center"]
 
-        gt_reward = float(data.get("progress", 0.0))
-        img_list = data["observation.images.world_center"]
-        img_np = np.array(img_list, dtype=np.uint8).transpose(1, 2, 0)
+        # Manual reconstruction by channel to break object-array nesting
+        img_np = np.stack(
+            [
+                np.array(raw_img[0].tolist(), dtype=np.uint8),
+                np.array(raw_img[1].tolist(), dtype=np.uint8),
+                np.array(raw_img[2].tolist(), dtype=np.uint8),
+            ],
+            axis=-1,
+        )
 
-        # Transform (same for both)
-        batch = mapper_naive.transform({"pixels": img_np})
+        # Transform (same for all)
+        batch = transform({"pixels": img_np})
         pixel_tensor = (
             batch["pixels"].to(device).unsqueeze(0).unsqueeze(0)
         )  # (1, 1, C, H, W)
@@ -64,89 +72,94 @@ def compare_models(naive_ckpt, tuned_ckpt, json_files):
         with torch.no_grad():
             # Naive Pred
             info_n = model_naive.encode({"pixels": pixel_tensor})
-            pred_n = model_naive.reward_head(info_n["emb"]).item()
+            pred_n = model_naive.reward_head(info_n["emb"]).squeeze(-1).item()
 
-            # Tuned Pred
-            info_t = model_tuned.encode({"pixels": pixel_tensor})
-            pred_t = model_tuned.reward_head(info_t["emb"]).item()
+            # V1 Pred
+            info_v1 = model_v1.encode({"pixels": pixel_tensor})
+            pred_v1 = model_v1.reward_head(info_v1["emb"]).squeeze(-1).item()
 
-        results.append({"gt": gt_reward, "naive": pred_n, "tuned": pred_t})
+            # V2 Pred
+            info_v2 = model_v2.encode({"pixels": pixel_tensor})
+            pred_v2 = model_v2.reward_head(info_v2["emb"]).squeeze(-1).item()
+
+        results.append({"gt": gt_reward, "naive": pred_n, "v1": pred_v1, "v2": pred_v2})
 
     # 4. Calculate Stats
     gt_arr = np.array([r["gt"] for r in results])
     naive_arr = np.array([r["naive"] for r in results])
-    tuned_arr = np.array([r["tuned"] for r in results])
+    v1_arr = np.array([r["v1"] for r in results])
+    v2_arr = np.array([r["v2"] for r in results])
 
-    naive_mse = np.mean((gt_arr - naive_arr) ** 2)
-    tuned_mse = np.mean((gt_arr - tuned_arr) ** 2)
+    def get_metrics(pred):
+        mse = np.mean((gt_arr - pred) ** 2)
+        mae = np.mean(np.abs(gt_arr - pred))
+        return mse, mae
 
-    naive_mae = np.mean(np.abs(gt_arr - naive_arr))
-    tuned_mae = np.mean(np.abs(gt_arr - tuned_arr))
+    n_mse, n_mae = get_metrics(naive_arr)
+    v1_mse, v1_mae = get_metrics(v1_arr)
+    v2_mse, v2_mae = get_metrics(v2_arr)
 
-    print("\n" + "=" * 40)
-    print("📊 GLOBAL AUDIT RESULTS")
-    print("=" * 40)
-    print(f"NAIVE MODEL (Original):")
-    print(f"  - MSE: {naive_mse:.4f}")
-    print(f"  - MAE: {naive_mae:.4f}")
-    print(f"TUNED MODEL (Calibrated):")
-    print(f"  - MSE: {tuned_mse:.4f}")
-    print(f"  - MAE: {tuned_mae:.4f}")
-    print("=" * 40)
-    print(f"🔥 Error Reduction: {((naive_mse - tuned_mse)/naive_mse)*100:.2f}%")
-    print("=" * 40)
+    print("\n" + "=" * 60)
+    print("📊 COMPREHENSIVE THREE-WAY AUDIT")
+    print("=" * 60)
+    print(f"{'Model':<25} | {'MSE':<10} | {'MAE':<10}")
+    print("-" * 60)
+    print(f"{'NAIVE (Original)':<25} | {n_mse:<10.4f} | {n_mae:<10.4f}")
+    print(f"{'TUNED V1 (Buggy)':<25} | {v1_mse:<10.4f} | {v1_mae:<10.4f}")
+    print(f"{'TUNED V2 (Calibrated)':<25} | {v2_mse:<10.4f} | {v2_mae:<10.4f}")
+    print("=" * 60)
+    print(f"🔥 V2 Improvement over Naive: {((n_mse - v2_mse)/n_mse)*100:.2f}%")
+    print(f"📈 V2 Improvement over V1: {((v1_mse - v2_mse)/v1_mse)*100:.2f}%")
+    print("=" * 60)
 
     # 5. Generate Comparison Plots
-    plt.figure(figsize=(15, 10))
+    plt.figure(figsize=(20, 12))
 
     # Scatter Plots
-    plt.subplot(2, 2, 1)
-    plt.scatter(gt_arr, naive_arr, alpha=0.3, color="red")
-    plt.plot([0, 10], [0, 10], "k--", alpha=0.5)
-    plt.title("Naive Model: GT vs Pred (Scatter)")
-    plt.xlabel("Ground Truth Reward")
-    plt.ylabel("Predicted Reward")
+    def plot_scatter(idx, pred, title, color):
+        plt.subplot(2, 3, idx)
+        plt.scatter(gt_arr, pred, alpha=0.3, color=color)
+        plt.plot([0, 10], [0, 10], "k--", alpha=0.5)
+        plt.title(title)
+        plt.xlabel("Ground Truth Reward")
+        plt.ylabel("Predicted Reward")
+        plt.grid(True)
 
-    plt.subplot(2, 2, 2)
-    plt.scatter(gt_arr, tuned_arr, alpha=0.3, color="green")
-    plt.plot([0, 10], [0, 10], "k--", alpha=0.5)
-    plt.title("Tuned Model: GT vs Pred (Scatter)")
-    plt.xlabel("Ground Truth Reward")
-    plt.ylabel("Predicted Reward")
+    plot_scatter(1, naive_arr, "Naive Model", "red")
+    plot_scatter(2, v1_arr, "Tuned V1 (Buggy)", "orange")
+    plot_scatter(3, v2_arr, "Tuned V2 (Calibrated)", "green")
 
     # Distribution Plots
     plt.subplot(2, 1, 2)
-    bins = np.linspace(-1, 11, 50)
+    bins = np.linspace(-1, 11, 60)
     plt.hist(gt_arr, bins=bins, alpha=0.3, label="Ground Truth", color="blue")
-    plt.hist(naive_arr, bins=bins, alpha=0.3, label="Naive Pred", color="red")
-    plt.hist(tuned_arr, bins=bins, alpha=0.3, label="Tuned Pred", color="green")
-    plt.title("Reward Distributions (GT vs Naive vs Tuned)")
+    plt.hist(naive_arr, bins=bins, alpha=0.2, label="Naive Pred", color="red")
+    plt.hist(v1_arr, bins=bins, alpha=0.2, label="V1 Pred", color="orange")
+    plt.hist(v2_arr, bins=bins, alpha=0.4, label="V2 Pred (Final)", color="green")
+    plt.title("Reward Distributions (GT vs Naive vs V1 vs V2)")
     plt.xlabel("Reward Value")
     plt.ylabel("Frequency")
     plt.legend()
     plt.grid(True)
 
     plt.tight_layout()
-    plt.savefig("reward_comparison_audit.png")
-    print("\n📈 Comprehensive audit plot saved to reward_comparison_audit.png")
+    plt.savefig("reward_comparison_audit_v2.png")
+    print("\n📈 Comprehensive V2 audit plot saved to reward_comparison_audit_v2.png")
 
 
 if __name__ == "__main__":
-    # Combined Audit: Failures + Successes
-    snapshot_dirs = [
-        "cortex-gr1/datasets/vedpatwardhan/gr1_reward_pred",  # 1000 Failures
-        "cortex-gr1/datasets/vedpatwardhan/gr1_success_gold",  # 200 Successes
-    ]
+    parquet_path = Path("cortex-gr1/datasets/vedpatwardhan/gr1_reward_pred/dataset.parquet")
 
-    # Collect all JSON files from all specified directories
-    all_json_files = []
-    for s_dir in snapshot_dirs:
-        path = Path(s_dir)
-        if path.exists():
-            all_json_files.extend(list(path.glob("*.json")))
+    if not parquet_path.exists():
+        print(f"❌ Error: Parquet dataset not found at {parquet_path}")
+        sys.exit(1)
+
+    print(f"📊 Loading consolidated dataset: {parquet_path}")
+    df = pd.read_parquet(parquet_path)
 
     compare_models(
         naive_ckpt="gr1-epoch=99-step=004400.ckpt",
-        tuned_ckpt="gr1_reward_tuned.ckpt",
-        json_files=all_json_files,
+        v1_ckpt="gr1_reward_tuned.ckpt",
+        v2_ckpt="gr1_reward_tuned_v2.ckpt",
+        df=df,
     )

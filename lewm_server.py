@@ -114,7 +114,7 @@ class LEWMInferenceServer:
                         d["shape"]
                     )
 
-                raw_image = unpack_np(req.get("world_center"))
+                raw_image = unpack_np(req.get("observation.images.world_center"))
                 raw_sim_state = unpack_np(req.get("state"))
 
                 # Grounding: Normalize the current state for history alignment
