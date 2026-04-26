@@ -1,0 +1,136 @@
+import os
+import json
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
+import numpy as np
+from tqdm import tqdm
+
+# Project Imports
+import sys
+
+sys.path.append("cortex-gr1")
+sys.path.append("cortex-gr1/research")
+sys.path.append("cortex-gr1/le_wm")
+
+from goal_mapper import GoalMapper
+
+
+class SnapshotDataset(Dataset):
+    def __init__(self, snapshots_dir, transform):
+        self.snapshots_dir = Path(snapshots_dir)
+        self.json_files = sorted([f for f in self.snapshots_dir.glob("*.json")])
+        self.transform = transform
+        print(f"📦 Dataset initialized with {len(self.json_files)} snapshots.")
+
+    def __len__(self):
+        return len(self.json_files)
+
+    def __getitem__(self, idx):
+        with open(self.json_files[idx], "r") as f:
+            data = json.load(f)
+
+        # Extract and Transform Image (C, H, W) -> (H, W, C) for transform -> (C, H, W) normalized
+        img_list = data["observation.images.world_center"]
+        img_np = np.array(img_list, dtype=np.uint8).transpose(1, 2, 0)
+
+        batch = self.transform({"pixels": img_np})
+        pixel_tensor = batch["pixels"]  # (C, H, W) normalized
+
+        reward = float(data.get("progress", 0.0))
+
+        return pixel_tensor, torch.tensor([reward], dtype=torch.float32)
+
+
+def train_reward_head(
+    checkpoint_path, snapshots_dir, epochs=20, lr=1e-4, batch_size=32
+):
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available() else "cpu"
+    )
+    print(f"🚀 Training on device: {device}")
+
+    # 1. Load Model
+    print(f"🏗️  Loading Model from {checkpoint_path}...")
+    mapper = GoalMapper(model_path=checkpoint_path, dataset_root=".")
+    model = mapper.model.to(device)
+
+    # 2. Freeze everything except reward_head
+    for param in model.parameters():
+        param.requires_grad = False
+
+    for param in model.reward_head.parameters():
+        param.requires_grad = True
+
+    print("❄️  JEPA Backbone Frozen. 🔥 Reward Head ACTIVE.")
+
+    # 3. Setup Data
+    dataset = SnapshotDataset(snapshots_dir, mapper.transform)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    # 4. Optimizer & Loss
+    optimizer = optim.Adam(model.reward_head.parameters(), lr=lr)
+    criterion = nn.MSELoss()
+
+    # 5. Training Loop
+    model.eval()  # Keep backbone in eval mode (normalization, etc.)
+    model.reward_head.train()
+
+    print(f"🏋️  Starting Fine-Tuning for {epochs} epochs...")
+    for epoch in range(epochs):
+        epoch_loss = 0
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}")
+
+        for pixels, targets in pbar:
+            pixels, targets = pixels.to(device), targets.to(device)
+
+            optimizer.zero_grad()
+
+            with torch.no_grad():
+                # Encode pixels to latents using frozen JEPA
+                # model.encode expects (B, T, C, H, W)
+                img_input = pixels.unsqueeze(1)  # Add time dim: (B, 1, C, H, W)
+                info = model.encode({"pixels": img_input})
+                z = info["emb"]  # (B, 1, D)
+
+            # Predict reward
+            pred_reward = model.reward_head(z).squeeze(1)  # (B, 1)
+
+            loss = criterion(pred_reward, targets)
+            loss.backward()
+            optimizer.step()
+
+            epoch_loss += loss.item()
+            pbar.set_postfix({"loss": loss.item()})
+
+        avg_loss = epoch_loss / len(dataloader)
+        print(f"📈 Epoch {epoch+1} Average Loss: {avg_loss:.6f}")
+
+    # 6. Save Updated Weights
+    # We save as a new checkpoint to avoid messing with the original
+    output_path = "gr1_reward_tuned.ckpt"
+
+    # Preserve the original structure but update the state_dict
+    full_ckpt = torch.load(checkpoint_path, map_location="cpu")
+    full_ckpt["state_dict"] = {k: v.cpu() for k, v in model.state_dict().items()}
+
+    torch.save(full_ckpt, output_path)
+    print(f"✅ Fine-tuning complete! Saved to {output_path}")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ckpt", type=str, default="gr1-epoch=99-step=004400.ckpt")
+    parser.add_argument("--snapshots", type=str, default="cortex-gr1/snapshots")
+    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--batch_size", type=int, default=32)
+    args = parser.parse_args()
+
+    train_reward_head(args.ckpt, args.snapshots, args.epochs, args.lr, args.batch_size)

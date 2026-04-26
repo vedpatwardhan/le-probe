@@ -375,6 +375,7 @@ class GR1MuJoCoBase:
         }
 
     def render_and_record(self, action_32):
+        """Captures camera views, logs to Rerun, and records to dataset if active."""
         views = {}
         rr.set_time("sim_step", sequence=self.render_step_idx)
 
@@ -382,9 +383,7 @@ class GR1MuJoCoBase:
             self.renderer.update_scene(self.data, camera=name)
             rgb = self.renderer.render()
             views[name] = rgb
-            if self.rerun_count % 2 == 0:
-                rr.log(name, rr.Image(rgb))
-
+            rr.log(name, rr.Image(rgb))
             self._post_render_hook(name, rgb)
             self.frame_indices[name] += 1
 
