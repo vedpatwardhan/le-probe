@@ -12,9 +12,15 @@ from tqdm import tqdm
 import sys
 from huggingface_hub import snapshot_download
 
-sys.path.append("cortex-gr1")
-sys.path.append("cortex-gr1/research")
-sys.path.append("cortex-gr1/le_wm")
+# Ensure absolute paths for Colab/Remote execution
+import os
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir) # cortex-gr1 root
+
+if project_root not in sys.path:
+    sys.path.append(project_root)
+if script_dir not in sys.path:
+    sys.path.append(script_dir)
 
 from goal_mapper import GoalMapper
 
