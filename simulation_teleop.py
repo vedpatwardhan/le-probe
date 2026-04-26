@@ -134,7 +134,13 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 }
 
                 # 4. Save to Next Available Index
-                snap_dir = os.path.join(os.path.dirname(__file__), "snapshots")
+                # Standardized Path: datasets/vedpatwardhan/gr1_reward_pred
+                snap_dir = os.path.join(
+                    os.path.dirname(__file__),
+                    "datasets",
+                    "vedpatwardhan",
+                    "gr1_reward_pred",
+                )
                 os.makedirs(snap_dir, exist_ok=True)
                 existing = [f for f in os.listdir(snap_dir) if f.endswith(".json")]
                 next_idx = len(existing)

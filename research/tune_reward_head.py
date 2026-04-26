@@ -127,7 +127,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=str, default="gr1-epoch=99-step=004400.ckpt")
-    parser.add_argument("--snapshots", type=str, default="cortex-gr1/snapshots")
+    parser.add_argument(
+        "--snapshots",
+        type=str,
+        default="cortex-gr1/datasets/vedpatwardhan/gr1_reward_pred",
+    )
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch_size", type=int, default=32)
