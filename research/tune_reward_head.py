@@ -69,7 +69,8 @@ def train_reward_head(checkpoint_path, repo_id, epochs=20, lr=1e-4, batch_size=3
                     np.array(raw_img[0].tolist(), dtype=np.uint8),
                     np.array(raw_img[1].tolist(), dtype=np.uint8),
                     np.array(raw_img[2].tolist(), dtype=np.uint8),
-                ]
+                ],
+                axis=-1,
             )
 
             batch = self.transform({"pixels": img_np})
