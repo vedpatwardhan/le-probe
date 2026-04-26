@@ -1,153 +1,149 @@
 import os
 import json
+import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from pathlib import Path
 import numpy as np
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-
-# Project Imports
-import sys
+from pathlib import Path
 from huggingface_hub import snapshot_download
+import sys
 
-# Ensure absolute paths for Colab/Remote execution
-import os
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(script_dir) # cortex-gr1 root
-
+# Add project root to sys.path for absolute imports on Colab
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
-if script_dir not in sys.path:
-    sys.path.append(script_dir)
 
 from goal_mapper import GoalMapper
 
 
-class SnapshotDataset(Dataset):
-    def __init__(self, snapshots_dir, transform):
-        self.snapshots_dir = Path(snapshots_dir)
-        self.json_files = sorted([f for f in self.snapshots_dir.glob("*.json")])
-        self.transform = transform
-        print(f"📦 Dataset initialized with {len(self.json_files)} snapshots.")
-
-    def __len__(self):
-        return len(self.json_files)
-
-    def __getitem__(self, idx):
-        with open(self.json_files[idx], "r") as f:
-            data = json.load(f)
-
-        # Extract and Transform Image (C, H, W) -> (H, W, C) for transform -> (C, H, W) normalized
-        img_list = data["observation.images.world_center"]
-        img_np = np.array(img_list, dtype=np.uint8).transpose(1, 2, 0)
-
-        batch = self.transform({"pixels": img_np})
-        pixel_tensor = batch["pixels"]  # (C, H, W) normalized
-
-        reward = float(data.get("progress", 0.0))
-
-        return pixel_tensor, torch.tensor([reward], dtype=torch.float32)
-
-
-def train_reward_head(
-    checkpoint_path, snapshots_dir, epochs=20, lr=1e-4, batch_size=32
-):
+def train_reward_head(checkpoint_path, epochs=20, lr=1e-4):
     device = torch.device(
         "cuda"
         if torch.cuda.is_available()
         else "mps" if torch.backends.mps.is_available() else "cpu"
     )
-    print(f"🚀 Training on device: {device}")
+    print(f"🚀 Training on {device}")
 
-    # 1. Load Model
-    print(f"🏗️  Loading Model from {checkpoint_path}...")
+    # 1. Load the Base Model
+    print(f"🏗️  Loading Base Model: {checkpoint_path}")
     mapper = GoalMapper(model_path=checkpoint_path, dataset_root=".")
     model = mapper.model.to(device)
 
-    # 2. Freeze everything except reward_head
+    # Freeze everything except the Reward Head
     for param in model.parameters():
         param.requires_grad = False
-
     for param in model.reward_head.parameters():
         param.requires_grad = True
 
-    print("❄️  JEPA Backbone Frozen. 🔥 Reward Head ACTIVE.")
+    # 2. Collect Dataset (Local first, then HF)
+    snapshot_dirs = [
+        "cortex-gr1/datasets/vedpatwardhan/gr1_reward_pred",  # Main consolidated repo
+    ]
 
-    # 3. Setup Data
-    full_dataset = SnapshotDataset(snapshots_dir, mapper.transform)
-    train_size = int(0.9 * len(full_dataset))
-    val_size = len(full_dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(
-        full_dataset, [train_size, val_size]
-    )
+    # Automatic HF Fetch if missing
+    if not any(os.path.exists(d) for d in snapshot_dirs):
+        print(
+            f"📂 Snapshots not found locally. Fetching from HF: vedpatwardhan/gr1_reward_pred..."
+        )
+        local_dir = "cortex-gr1/datasets/vedpatwardhan/gr1_reward_pred"
+        snapshot_download(
+            repo_id="vedpatwardhan/gr1_reward_pred",
+            repo_type="dataset",
+            local_dir=local_dir,
+        )
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    json_files = []
+    for s_dir in snapshot_dirs:
+        path = Path(s_dir)
+        if path.exists():
+            json_files.extend(list(path.glob("*.json")))
 
-    print(f"📊 Split: {train_size} training samples, {val_size} validation samples.")
+    if not json_files:
+        print("❌ Error: No snapshots found. Check paths or HF login.")
+        return
 
-    # 4. Optimizer & Loss
-    optimizer = optim.Adam(model.reward_head.parameters(), lr=lr)
+    print(f"📦 Combined Dataset: {len(json_files)} snapshots.")
+    random.shuffle(json_files)
+
+    # 90/10 Split
+    split_idx = int(0.9 * len(json_files))
+    train_files = json_files[:split_idx]
+    val_files = json_files[split_idx:]
+
+    optimizer = optim.AdamW(model.reward_head.parameters(), lr=lr)
     criterion = nn.MSELoss()
 
-    # 5. Training Loop
-    print(f"🏋️  Starting Fine-Tuning for {epochs} epochs...")
+    # 3. Training Loop
     for epoch in range(epochs):
-        # --- Training Phase ---
-        model.reward_head.train()
+        model.train()
         train_loss = 0
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [Train]")
+        pbar = tqdm(train_files, desc=f"Epoch {epoch+1}/{epochs}")
 
-        for pixels, targets in pbar:
-            pixels, targets = pixels.to(device), targets.to(device)
+        for json_file in pbar:
+            with open(json_file, "r") as f:
+                data = json.load(f)
 
+            # Extract Image (C, H, W)
+            img_list = data["observation.images.world_center"]
+            img_np = np.array(img_list, dtype=np.uint8)
+            if img_np.shape[-1] == 3:
+                img_np = img_np.transpose(2, 0, 1)
+
+            # Transform
+            batch = mapper.transform({"pixels": img_np})
+            img_input = (
+                batch["pixels"].unsqueeze(0).unsqueeze(0).to(device)
+            )  # (1, 1, C, H, W)
+
+            # Ground Truth
+            gt_reward = torch.tensor([[data["progress"]]], dtype=torch.float32).to(
+                device
+            )
+
+            # Forward
             optimizer.zero_grad()
+            outputs = model(img_input)
+            pred_reward = outputs["reward"]
 
-            with torch.no_grad():
-                img_input = pixels.unsqueeze(1)
-                info = model.encode({"pixels": img_input})
-                z = info["emb"]
-
-            pred_reward = model.reward_head(z).squeeze(1)
-            loss = criterion(pred_reward, targets)
+            loss = criterion(pred_reward, gt_reward)
             loss.backward()
             optimizer.step()
 
             train_loss += loss.item()
-            pbar.set_postfix({"loss": loss.item()})
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
-        avg_train_loss = train_loss / len(train_loader)
-
-        # --- Validation Phase ---
-        model.reward_head.eval()
+        # Validation
+        model.eval()
         val_loss = 0
         with torch.no_grad():
-            for pixels, targets in val_loader:
-                pixels, targets = pixels.to(device), targets.to(device)
-                img_input = pixels.unsqueeze(1)
-                info = model.encode({"pixels": img_input})
-                z = info["emb"]
+            for json_file in val_files:
+                with open(json_file, "r") as f:
+                    data = json.load(f)
+                img_list = data["observation.images.world_center"]
+                img_np = np.array(img_list, dtype=np.uint8)
+                if img_np.shape[-1] == 3:
+                    img_np = img_np.transpose(2, 0, 1)
+                batch = mapper.transform({"pixels": img_np})
+                img_input = batch["pixels"].unsqueeze(0).unsqueeze(0).to(device)
+                gt_reward = torch.tensor([[data["progress"]]], dtype=torch.float32).to(
+                    device
+                )
+                outputs = model(img_input)
+                val_loss += criterion(outputs["reward"], gt_reward).item()
 
-                pred_reward = model.reward_head(z).squeeze(1)
-                val_loss += criterion(pred_reward, targets).item()
-
-        avg_val_loss = val_loss / len(val_loader)
         print(
-            f"📈 Epoch {epoch+1} | Train Loss: {avg_train_loss:.6f} | Val Loss: {avg_val_loss:.6f}"
+            f"✅ Epoch {epoch+1} Complete. Train Loss: {train_loss/len(train_files):.4f}, Val Loss: {val_loss/len(val_files):.4f}"
         )
 
-    # 6. Save Updated Weights
-    # We save as a new checkpoint to avoid messing with the original
-    output_path = "gr1_reward_tuned.ckpt"
-
-    # Preserve the original structure but update the state_dict
+    # 4. Save Final Checkpoint
+    output_path = "gr1_reward_tuned_v2.ckpt"
     full_ckpt = torch.load(checkpoint_path, map_location="cpu")
     full_ckpt["state_dict"] = {k: v.cpu() for k, v in model.state_dict().items()}
-
     torch.save(full_ckpt, output_path)
-    print(f"✅ Fine-tuning complete! Saved to {output_path}")
+    print(f"💾 Spectrum-Calibrated Reward Head (V2) saved to {output_path}")
 
 
 if __name__ == "__main__":
@@ -155,31 +151,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=str, default="gr1-epoch=99-step=004400.ckpt")
-    parser.add_argument(
-        "--snapshots",
-        type=str,
-        default="cortex-gr1/datasets/vedpatwardhan/gr1_reward_pred",
-    )
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--batch_size", type=int, default=32)
     args = parser.parse_args()
 
-    # Automatic HF Fetch Logic
-    if not os.path.exists(args.snapshots):
-        print(f"📂 Local snapshots not found at {args.snapshots}")
-        print(f"📥 Fetching from Hugging Face: vedpatwardhan/gr1_reward_pred...")
-        try:
-            # Download to the expected local path
-            snapshot_download(
-                repo_id="vedpatwardhan/gr1_reward_pred",
-                repo_type="dataset",
-                local_dir=args.snapshots,
-            )
-            print(f"✅ Download complete. Files saved to {args.snapshots}")
-        except Exception as e:
-            print(f"❌ Error downloading from HF: {e}")
-            print("💡 Please ensure you are logged in with 'huggingface-cli login'")
-            sys.exit(1)
-
-    train_reward_head(args.ckpt, args.snapshots, args.epochs, args.lr, args.batch_size)
+    train_reward_head(args.ckpt, args.epochs, args.lr)

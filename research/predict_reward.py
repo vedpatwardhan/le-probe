@@ -51,6 +51,7 @@ def predict_reward(snapshot, checkpoint_path, goal_gallery_path):
     img_np = np.array(img_list, dtype=np.uint8).transpose(
         1, 2, 0
     )  # (C, H, W) -> (H, W, C) for transform
+    print(f"DEBUG: img_np shape: {img_np.shape}")
 
     # Use OFFICIAL transform pipeline (Strict Parity)
     batch = mapper.transform({"pixels": img_np})
