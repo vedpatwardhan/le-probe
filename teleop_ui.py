@@ -118,6 +118,13 @@ def handle_reset():
         st.session_state.last_msg = ("Randomized! Sliders synced.", "🎲")
 
 
+def handle_wild_reset():
+    resp = send_command({"command": "wild_randomize"})
+    if resp and "joints" in resp:
+        sync_ui_to_joints(resp["joints"])
+        st.session_state.last_msg = ("WILD RANDOMIZED! Manifold expanded.", "🌀")
+
+
 def handle_ik_pickup(offset_cm):
     st.session_state.ik_phase = 0
     st.session_state.ik_offset = offset_cm
@@ -377,7 +384,9 @@ else:
 
 st.divider()
 
-col_sub, col_reach, col_reset, col_export, col_clr_all, col_home = st.columns(6)
+col_sub, col_reach, col_reset, col_wild, col_snap, col_export, col_clr_all, col_home = (
+    st.columns(8)
+)
 with col_sub:
     if st.button(
         "Submit Request",
@@ -406,6 +415,21 @@ with col_reset:
         use_container_width=True,
         on_click=handle_reset,
     )
+
+with col_wild:
+    st.button(
+        "Wild Randomize Env",
+        use_container_width=True,
+        on_click=handle_wild_reset,
+    )
+
+with col_snap:
+    if st.button("📸 Snapshot", use_container_width=True):
+        resp = send_command({"command": "store_snapshot"})
+        if resp and resp.get("status") == "snapshot_ok":
+            st.toast(f"Snapshot {resp.get('index')} Stored!", icon="📸")
+        else:
+            st.error("Failed to store snapshot.")
 
 with col_export:
     export_data = {}

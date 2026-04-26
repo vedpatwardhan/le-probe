@@ -493,6 +493,45 @@ class GR1MuJoCoBase:
         # Render one frame to update the UI immediately
         self.render_and_record(None)
 
+    def wild_reset(self):
+        """High-variance joint randomization while PRESERVING current cube position."""
+        print(f"🌀 WILD RANDOMIZING robot pose...")
+        self.current_phase = 0
+
+        # 1. Capture Current Cube Pose (Do not randomize)
+        cube_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint")
+        cube_q_idx = self.model.jnt_qposadr[cube_id]
+        current_cube_qpos = self.data.qpos[cube_q_idx : cube_q_idx + 7].copy()
+
+        # 2. Full-Range Joint Randomization
+        home_q = self.model.qpos0.copy()
+        home_q[cube_q_idx : cube_q_idx + 7] = current_cube_qpos
+
+        for i, j_id in enumerate(self.protocol_joint_ids):
+            if j_id != -1:
+                q_idx = self.model.jnt_qposadr[j_id]
+                # SYNC with lewm_server.py: Freeze 0-15 (Left side + Head)
+                if i < 16:
+                    # PRESERVE PREVIOUS STATE for frozen joints
+                    home_q[q_idx] = self.data.qpos[q_idx]
+                else:
+                    # EXPLORE FULL RANGE for indices 16-31 (Right side + Waist)
+                    home_q[q_idx] = np.random.uniform(
+                        self.wire_min[i], self.wire_max[i]
+                    )
+
+        # Keep base stable
+        home_q[self.root_q_idx : self.root_q_idx + 3] = [0.0, 0.0, 0.95]
+
+        # Instant Teleport
+        self.data.qpos[:] = home_q.copy()
+        self.data.qvel[:] = 0.0
+        mujoco.mj_forward(self.model, self.data)
+        self._last_interp_q = self.data.qpos.copy()
+        self.last_target_q = home_q.copy()
+
+        self.render_and_record(None)
+
     def process_target_32(self, action_32_norm):
         """Receives the normalized action and updates the target qpos."""
         self.active_joints_this_command.clear()

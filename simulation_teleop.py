@@ -6,6 +6,7 @@ import mujoco
 import os
 import json
 import argparse
+from PIL import Image
 from simulation_base import GR1MuJoCoBase
 from gr1_config import SCENE_PATH
 from gr1_protocol import StandardScaler
@@ -31,7 +32,9 @@ class GR1TeleopServer(GR1MuJoCoBase):
 
         rr.init("gr1_teleop", spawn=False)
         rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
-        print(f"🚀 Teleop Server Running on port {self.port} (Lock Posture: {self.lock_posture})")
+        print(
+            f"🚀 Teleop Server Running on port {self.port} (Lock Posture: {self.lock_posture})"
+        )
 
         while self.is_running:
             msg = socket.recv()
@@ -54,6 +57,13 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 # Server is the Source of Normalized Truth
                 norm_state = StandardScaler().scale_state(self.get_state_32())
                 send_resp({"status": "reset_ok", "joints": norm_state.tolist()})
+
+            elif cmd == "wild_randomize":
+                self.wild_reset()
+                norm_state = StandardScaler().scale_state(self.get_state_32())
+                send_resp(
+                    {"status": "wild_randomize_ok", "joints": norm_state.tolist()}
+                )
 
             elif cmd == "sync":
                 self.recorder.force_sync()
@@ -102,6 +112,41 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 self.process_target_32(action_32)
                 self.dispatch_action(action_32, self.last_target_q)
                 send_resp({"status": "step_ok"})
+
+            elif cmd == "store_snapshot":
+                # 1. Capture All Data
+                raw_state = self.get_state_32()
+                norm_state = StandardScaler().scale_state(raw_state)
+                physics = self.get_physics_state()
+
+                # 2. Capture and Resize Image (world_center)
+                self.renderer.update_scene(self.data, camera="world_center")
+                rgb = self.renderer.render()
+                img = Image.fromarray(rgb).resize((224, 224))
+                img_list = np.array(img).transpose(2, 0, 1).tolist()  # (C, H, W)
+
+                # 3. Build Payload (Strict metadata.json format)
+                snapshot = {
+                    "observation.images.world_center": img_list,
+                    "observation.state": norm_state.tolist(),
+                    "action": norm_state.tolist(),  # Use current state as dummy action
+                    "progress": (1.0 - physics["target_dist"]) * 10.0,
+                }
+
+                # 4. Save to Next Available Index
+                snap_dir = os.path.join(os.path.dirname(__file__), "snapshots")
+                os.makedirs(snap_dir, exist_ok=True)
+                existing = [f for f in os.listdir(snap_dir) if f.endswith(".json")]
+                next_idx = len(existing)
+                snap_path = os.path.join(snap_dir, f"{next_idx:04d}.json")
+
+                with open(snap_path, "w") as f:
+                    json.dump(snapshot, f)
+
+                print(
+                    f"📸 Snapshot {next_idx:04d} stored at {snap_path} (Reward: {snapshot['progress']:.4f})"
+                )
+                send_resp({"status": "snapshot_ok", "index": next_idx})
 
             else:
                 send_resp({"status": "unknown"})
