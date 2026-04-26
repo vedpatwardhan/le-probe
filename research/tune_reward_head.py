@@ -98,7 +98,7 @@ def train_reward_head(checkpoint_path, repo_id, epochs=20, lr=1e-4, batch_size=3
 
             optimizer.zero_grad()
             info = model.encode({"pixels": imgs})
-            pred_reward = model.reward_head(info["emb"])
+            pred_reward = model.reward_head(info["emb"]).squeeze(-1)
 
             loss = criterion(pred_reward, rewards)
             loss.backward()
@@ -114,7 +114,7 @@ def train_reward_head(checkpoint_path, repo_id, epochs=20, lr=1e-4, batch_size=3
             for imgs, rewards in val_loader:
                 imgs, rewards = imgs.unsqueeze(1).to(device), rewards.to(device)
                 info = model.encode({"pixels": imgs})
-                pred_reward = model.reward_head(info["emb"])
+                pred_reward = model.reward_head(info["emb"]).squeeze(-1)
                 val_loss += criterion(pred_reward, rewards).item()
 
         print(
