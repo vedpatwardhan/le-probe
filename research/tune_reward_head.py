@@ -20,7 +20,7 @@ if project_root not in sys.path:
 from goal_mapper import GoalMapper
 
 
-def train_reward_head(checkpoint_path, epochs=20, lr=1e-4):
+def train_reward_head(checkpoint_path, repo_id, epochs=20, lr=1e-4, batch_size=32):
     device = torch.device(
         "cuda"
         if torch.cuda.is_available()
@@ -32,16 +32,9 @@ def train_reward_head(checkpoint_path, epochs=20, lr=1e-4):
     local_dir = "gr1_reward_pred_data"
     parquet_file = Path(local_dir) / "dataset.parquet"
 
-    # Automatic HF Fetch if missing
     if not parquet_file.exists():
-        print(
-            f"📂 Dataset not found locally. Fetching from HF: vedpatwardhan/gr1_reward_pred..."
-        )
-        snapshot_download(
-            repo_id="vedpatwardhan/gr1_reward_pred",
-            repo_type="dataset",
-            local_dir=local_dir,
-        )
+        print(f"📂 Dataset not found locally. Fetching from HF: {repo_id}...")
+        snapshot_download(repo_id=repo_id, repo_type="dataset", local_dir=local_dir)
 
     print(f"📊 Loading Parquet Dataset: {parquet_file}...")
     df = pd.read_parquet(parquet_file)
@@ -57,48 +50,49 @@ def train_reward_head(checkpoint_path, epochs=20, lr=1e-4):
     for param in model.reward_head.parameters():
         param.requires_grad = True
 
-    # 90/10 Split
-    indices = list(range(len(df)))
-    random.shuffle(indices)
-    split_idx = int(0.9 * len(indices))
-    train_indices = indices[:split_idx]
-    val_indices = indices[split_idx:]
+    # 3. Create PyTorch Dataset & DataLoader for Batching
+    class ParquetDataset(Dataset):
+        def __init__(self, dataframe, transform):
+            self.df = dataframe
+            self.transform = transform
 
-    optimizer = optim.AdamW(model.reward_head.parameters(), lr=lr)
-    criterion = nn.MSELoss()
+        def __len__(self):
+            return len(self.df)
 
-    # 3. Training Loop
-    for epoch in range(epochs):
-        model.train()
-        train_loss = 0
-        pbar = tqdm(train_indices, desc=f"Epoch {epoch+1}/{epochs}")
-
-        for idx in pbar:
-            row = df.iloc[idx]
-
-            # Extract Image (C, H, W)
+        def __getitem__(self, idx):
+            row = self.df.iloc[idx]
             img_list = row["observation.images.world_center"]
             img_np = np.array(img_list, dtype=np.uint8)
             if img_np.shape[-1] == 3:
                 img_np = img_np.transpose(2, 0, 1)
+            batch = self.transform({"pixels": img_np})
+            return batch["pixels"], torch.tensor([row["progress"]], dtype=torch.float32)
 
-            # Transform
-            batch = mapper.transform({"pixels": img_np})
-            img_input = batch["pixels"].unsqueeze(0).unsqueeze(0).to(device)
+    dataset = ParquetDataset(df, mapper.transform)
+    train_size = int(0.9 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_ds, val_ds = torch.utils.data.random_split(dataset, [train_size, val_size])
 
-            # Ground Truth
-            gt_reward = torch.tensor([[row["progress"]]], dtype=torch.float32).to(
-                device
-            )
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size)
 
-            # Forward
+    optimizer = optim.AdamW(model.reward_head.parameters(), lr=lr)
+    criterion = nn.MSELoss()
+
+    # 4. Training Loop
+    for epoch in range(epochs):
+        model.train()
+        train_loss = 0
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}")
+
+        for imgs, rewards in pbar:
+            imgs, rewards = imgs.unsqueeze(1).to(device), rewards.to(device)
+
             optimizer.zero_grad()
-
-            # Manual forward pass (Submodule preservation)
-            info = model.encode({"pixels": img_input})
+            info = model.encode({"pixels": imgs})
             pred_reward = model.reward_head(info["emb"])
 
-            loss = criterion(pred_reward, gt_reward)
+            loss = criterion(pred_reward, rewards)
             loss.backward()
             optimizer.step()
 
@@ -109,28 +103,17 @@ def train_reward_head(checkpoint_path, epochs=20, lr=1e-4):
         model.eval()
         val_loss = 0
         with torch.no_grad():
-            for idx in val_indices:
-                row = df.iloc[idx]
-                img_list = row["observation.images.world_center"]
-                img_np = np.array(img_list, dtype=np.uint8)
-                if img_np.shape[-1] == 3:
-                    img_np = img_np.transpose(2, 0, 1)
-
-                batch = mapper.transform({"pixels": img_np})
-                img_input = batch["pixels"].unsqueeze(0).unsqueeze(0).to(device)
-                gt_reward = torch.tensor([[row["progress"]]], dtype=torch.float32).to(
-                    device
-                )
-
-                info = model.encode({"pixels": img_input})
+            for imgs, rewards in val_loader:
+                imgs, rewards = imgs.unsqueeze(1).to(device), rewards.to(device)
+                info = model.encode({"pixels": imgs})
                 pred_reward = model.reward_head(info["emb"])
-                val_loss += criterion(pred_reward, gt_reward).item()
+                val_loss += criterion(pred_reward, rewards).item()
 
         print(
-            f"✅ Epoch {epoch+1} Complete. Train Loss: {train_loss/len(train_indices):.4f}, Val Loss: {val_loss/len(val_indices):.4f}"
+            f"✅ Epoch {epoch+1} Complete. Train Loss: {train_loss/len(train_loader):.4f}, Val Loss: {val_loss/len(val_loader):.4f}"
         )
 
-    # 4. Save Final Checkpoint
+    # 5. Save Final Checkpoint
     output_path = "gr1_reward_tuned_v2.ckpt"
     full_ckpt = torch.load(checkpoint_path, map_location="cpu")
     full_ckpt["state_dict"] = {k: v.cpu() for k, v in model.state_dict().items()}
@@ -142,9 +125,11 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ckpt", type=str, default="gr1-epoch=99-step=004400.ckpt")
+    parser.add_argument("--ckpt", type=str, required=True)
+    parser.add_argument("--snapshots", type=str, required=True)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--batch_size", type=int, default=32)
     args = parser.parse_args()
 
-    train_reward_head(args.ckpt, args.epochs, args.lr)
+    train_reward_head(args.ckpt, args.snapshots, args.epochs, args.lr, args.batch_size)
