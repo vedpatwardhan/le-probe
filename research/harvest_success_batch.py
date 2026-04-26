@@ -2,6 +2,8 @@ import os
 import json
 import numpy as np
 import pandas as pd
+import torch
+from torch.utils.data import DataLoader, Dataset
 from PIL import Image
 from tqdm import tqdm
 from pathlib import Path
@@ -35,8 +37,19 @@ def harvest_spectrum_batch(dataset_repo, steps=[8, 16, 24, 31], num_episodes=200
             reward = float(sdf.iloc[global_idx]["progress_sparse"])
 
             img = frame["observation.images.world_center"]
-            img_np = np.array(img)
 
+            # img is a Torch Tensor (C, H, W). Use torchvision resize.
+            import torchvision.transforms.v2.functional as F
+
+            img_resized = F.resize(img, (224, 224), antialias=True)
+
+            img_np = (
+                (img_resized * 255).byte().numpy()
+                if img_resized.dtype == torch.float32
+                else img_resized.byte().numpy()
+            )
+
+            # Ensure (C, H, W)
             if img_np.shape[-1] == 3:
                 img_np = img_np.transpose(2, 0, 1)
 
@@ -57,4 +70,7 @@ def harvest_spectrum_batch(dataset_repo, steps=[8, 16, 24, 31], num_episodes=200
 
 
 if __name__ == "__main__":
-    harvest_spectrum_batch("cortex-gr1/datasets/vedpatwardhan/gr1_pickup_grasp")
+    # Steps: 8, 16 (Mediocre), 20 (Peak), 24, 31 (Post-Grasp)
+    harvest_spectrum_batch(
+        "cortex-gr1/datasets/vedpatwardhan/gr1_pickup_grasp", steps=[8, 16, 20, 24, 31]
+    )
