@@ -70,21 +70,29 @@ def train_reward_head(
     print("❄️  JEPA Backbone Frozen. 🔥 Reward Head ACTIVE.")
 
     # 3. Setup Data
-    dataset = SnapshotDataset(snapshots_dir, mapper.transform)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    full_dataset = SnapshotDataset(snapshots_dir, mapper.transform)
+    train_size = int(0.9 * len(full_dataset))
+    val_size = len(full_dataset) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        full_dataset, [train_size, val_size]
+    )
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+    print(f"📊 Split: {train_size} training samples, {val_size} validation samples.")
 
     # 4. Optimizer & Loss
     optimizer = optim.Adam(model.reward_head.parameters(), lr=lr)
     criterion = nn.MSELoss()
 
     # 5. Training Loop
-    model.eval()  # Keep backbone in eval mode (normalization, etc.)
-    model.reward_head.train()
-
     print(f"🏋️  Starting Fine-Tuning for {epochs} epochs...")
     for epoch in range(epochs):
-        epoch_loss = 0
-        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}")
+        # --- Training Phase ---
+        model.reward_head.train()
+        train_loss = 0
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [Train]")
 
         for pixels, targets in pbar:
             pixels, targets = pixels.to(device), targets.to(device)
@@ -92,24 +100,37 @@ def train_reward_head(
             optimizer.zero_grad()
 
             with torch.no_grad():
-                # Encode pixels to latents using frozen JEPA
-                # model.encode expects (B, T, C, H, W)
-                img_input = pixels.unsqueeze(1)  # Add time dim: (B, 1, C, H, W)
+                img_input = pixels.unsqueeze(1)
                 info = model.encode({"pixels": img_input})
-                z = info["emb"]  # (B, 1, D)
+                z = info["emb"]
 
-            # Predict reward
-            pred_reward = model.reward_head(z).squeeze(1)  # (B, 1)
-
+            pred_reward = model.reward_head(z).squeeze(1)
             loss = criterion(pred_reward, targets)
             loss.backward()
             optimizer.step()
 
-            epoch_loss += loss.item()
+            train_loss += loss.item()
             pbar.set_postfix({"loss": loss.item()})
 
-        avg_loss = epoch_loss / len(dataloader)
-        print(f"📈 Epoch {epoch+1} Average Loss: {avg_loss:.6f}")
+        avg_train_loss = train_loss / len(train_loader)
+
+        # --- Validation Phase ---
+        model.reward_head.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for pixels, targets in val_loader:
+                pixels, targets = pixels.to(device), targets.to(device)
+                img_input = pixels.unsqueeze(1)
+                info = model.encode({"pixels": img_input})
+                z = info["emb"]
+
+                pred_reward = model.reward_head(z).squeeze(1)
+                val_loss += criterion(pred_reward, targets).item()
+
+        avg_val_loss = val_loss / len(val_loader)
+        print(
+            f"📈 Epoch {epoch+1} | Train Loss: {avg_train_loss:.6f} | Val Loss: {avg_val_loss:.6f}"
+        )
 
     # 6. Save Updated Weights
     # We save as a new checkpoint to avoid messing with the original
