@@ -1,6 +1,8 @@
 # Le-Probe: Probing Embodied World Models
 
-<img src="banner.png" width="100%" height="350" style="object-fit: cover; border-radius: 12px; margin-bottom: 20px;">
+<div align="center">
+  <img src="banner.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
+</div>
 
 Le-Probe is a research framework designed to analyze and compare **LeRobot World Models (LeWM)** against traditional **Vision-Language-Action (VLA)** policies like GR00T-N1. 
 
@@ -21,16 +23,38 @@ The project was born from a comparative study of two approaches to the same task
 ### 1. VLA Success (GR00T-N1)
 We successfully trained GR00T-N1 to imitate two different movement styles. Despite early protocol mismatches, the "Parity Refactor" stabilized the inference stack, allowing GR00T to execute both behaviors reliably.
 
-| Grasp Movement | Cup Movement |
-| :---: | :---: |
-| <video width="100%" controls><source src="assets/vla_grasp.mp4" type="video/mp4"></video> | <video width="100%" controls><source src="assets/vla_cup.mp4" type="video/mp4"></video> |
+<div align="center">
+  <table>
+    <tr>
+      <th>Grasp Movement</th>
+      <th>Cup Movement</th>
+    </tr>
+    <tr>
+      <td>
+        <video width="320" controls>
+          <source src="assets/vla_grasp.mp4" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      </td>
+      <td>
+        <video width="320" controls>
+          <source src="assets/vla_cup.mp4" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      </td>
+    </tr>
+  </table>
+</div>
 
 ### 2. LeWM Challenges (The Discriminability Gap)
 LeWM, despite training with a large softrank, failed to sufficiently discriminate the goal state from non-goal states in the latent space. 
 
-| LeWM MPC Inference (Clipped) |
-| :---: |
-| <video width="100%" controls><source src="assets/lewm_grasp.mp4" type="video/mp4"></video> |
+<div align="center">
+  <video width="640" controls>
+    <source src="assets/lewm_grasp.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+</div>
 
 *   **Reward Head Intervention**: To fix this, we trained an auxiliary reward head on snapshot data. While reward prediction is now accurate, the MPC solver often fails to find trajectories as smooth or effective as the VLA baseline.
 *   **Current Status**: We are currently focused on why "good imagination" in the JEPA architecture does not always translate to "good action" in high-DoF control.
