@@ -6,8 +6,23 @@ This module handles the lifecycle of robotic data: from real-time MuJoCo teleope
 
 We have standardized on **32-frame episodes** (recorded at 10Hz) to capture the full reach-to-grasp trajectory. We maintain two primary behavioral variants:
 
-1.  **`gr1_pickup_grasp`**: Precision-oriented data focusing on biomechanically aligned finger placement and "pinch" grasps.
-2.  **`gr1_pickup_32`**: A "cup-style" movement where the hand surrounds the object, providing a robust containment baseline.
+### 1. `gr1_pickup_grasp` (Precision)
+Precision-oriented data focusing on biomechanically aligned finger placement and "pinch" grasps.
+<div align="center">
+  <video width="640" controls>
+    <source src="../assets/dataset_grasp.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+</div>
+
+### 2. `gr1_pickup_32` (Containment)
+A "cup-style" movement where the hand surrounds the object, providing a robust containment baseline.
+<div align="center">
+  <video width="640" controls>
+    <source src="../assets/dataset_cup.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+</div>
 
 ### Data Quality Auditing:
 Through bulk assessment of 150+ episodes, we identified that 32-frame windows provide the optimal balance between temporal resolution and training stability for both VLA and World Model architectures.

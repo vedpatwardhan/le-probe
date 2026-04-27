@@ -20,14 +20,40 @@ Our investigation focuses on high-DoF (32+) manipulation tasks that require mult
 
 The project was born from a comparative study of two approaches to the same task: picking up a red cube.
 
-### 1. VLA Success (GR00T-N1)
-We successfully trained GR00T-N1 to imitate two different movement styles. Despite early protocol mismatches, the "Parity Refactor" stabilized the inference stack, allowing GR00T to execute both behaviors reliably.
+### 1. Target Behaviors (Ground Truth)
+We maintained two high-quality datasets representing different manipulation priors.
 
 <div align="center">
   <table>
     <tr>
-      <th>Grasp Movement</th>
-      <th>Cup Movement</th>
+      <th>Dataset: Grasp Pattern</th>
+      <th>Dataset: Cup Pattern</th>
+    </tr>
+    <tr>
+      <td>
+        <video width="320" controls>
+          <source src="assets/dataset_grasp.mp4" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      </td>
+      <td>
+        <video width="320" controls>
+          <source src="assets/dataset_cup.mp4" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      </td>
+    </tr>
+  </table>
+</div>
+
+### 2. VLA Baseline Success (GR00T-N1)
+We successfully trained GR00T-N1 to imitate both styles. Despite early protocol mismatches, the "Parity Refactor" stabilized the inference stack, allowing GR00T to execute both behaviors reliably.
+
+<div align="center">
+  <table>
+    <tr>
+      <th>VLA: Grasp Execution</th>
+      <th>VLA: Cup Execution</th>
     </tr>
     <tr>
       <td>
@@ -46,10 +72,11 @@ We successfully trained GR00T-N1 to imitate two different movement styles. Despi
   </table>
 </div>
 
-### 2. LeWM Challenges (The Discriminability Gap)
+### 3. LeWM Challenges (The Discriminability Gap)
 LeWM, despite training with a large softrank, failed to sufficiently discriminate the goal state from non-goal states in the latent space. 
 
 <div align="center">
+  <h3>LeWM MPC Inference (Clipped)</h3>
   <video width="640" controls>
     <source src="assets/lewm_grasp.mp4" type="video/mp4">
     Your browser does not support the video tag.
