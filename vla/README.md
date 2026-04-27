@@ -6,8 +6,13 @@ This module hosts the **GR00T-N1** inference server and evaluation notebooks. Ou
 
 GR00T-N1 has been successfully stabilized to perform two distinct manipulation styles on a 32-DoF humanoid platform:
 
-1.  **Grasp Pattern**: Precision approach and pinch-grasp of the cube.
-2.  **Cup Pattern**: A "surrounding" movement optimized for containment rather than friction-based grasping.
+### 1. Grasp Pattern
+Precision approach and pinch-grasp of the cube.
+<video src="../assets/vla_grasp.mp4" controls width="100%"></video>
+
+### 2. Cup Pattern
+A "surrounding" movement optimized for containment rather than friction-based grasping.
+<video src="../assets/vla_cup.mp4" controls width="100%"></video>
 
 ### Implementation Success:
 Our 15k-step baseline was stabilized by achieving bit-perfect normalization parity with the training stack. This resolved early divergence issues where the model's reaching intent was correct but the physical execution was biased by unscaled joint values.

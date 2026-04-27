@@ -19,14 +19,19 @@ Our investigation focuses on high-DoF (32+) manipulation tasks that require mult
 The project was born from a comparative study of two approaches to the same task: picking up a red cube.
 
 ### 1. VLA Success (GR00T-N1)
-We successfully trained GR00T-N1 to imitate two different movement styles:
-*   **Grasp**: Precision finger placement for a secure pinch.
-*   **Cup**: Surrounding the object for containment, providing a robust grasp-free alternative.
+We successfully trained GR00T-N1 to imitate two different movement styles. Despite early protocol mismatches, the "Parity Refactor" stabilized the inference stack, allowing GR00T to execute both behaviors reliably.
 
-Despite early protocol mismatches and biomechanical alignment issues, the "Parity Refactor" stabilized the inference stack, allowing GR00T to execute both behaviors reliably across the 15k-step baseline.
+| Grasp Movement | Cup Movement |
+| :---: | :---: |
+| <video src="assets/vla_grasp.mp4" controls width="100%"></video> | <video src="assets/vla_cup.mp4" controls width="100%"></video> |
 
 ### 2. LeWM Challenges (The Discriminability Gap)
 LeWM, despite training with a large softrank, failed to sufficiently discriminate the goal state from non-goal states in the latent space. 
+
+| LeWM MPC Inference (Clipped) |
+| :---: |
+| <video src="assets/lewm_inference.mp4" controls width="100%"></video> |
+
 *   **Reward Head Intervention**: To fix this, we trained an auxiliary reward head on snapshot data. While reward prediction is now accurate, the MPC solver often fails to find trajectories as smooth or effective as the VLA baseline.
 *   **Current Status**: We are currently focused on why "good imagination" in the JEPA architecture does not always translate to "good action" in high-DoF control.
 

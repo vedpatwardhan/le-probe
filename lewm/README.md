@@ -5,6 +5,11 @@ This module implements the **LeWM** (LeRobot World Model) training and inference
 ## ⚠️ Current Challenges: The Discriminability Gap
 
 Our research shows that while LeWM can learn to predict video frames accurately, it struggles with the **Latent Discriminability Gap**:
+
+### Planning Audit (LeWM MPC)
+The video below shows the current state of MPC inference. Note the flailing and lack of clear progress towards the goal despite correct frame prediction in imagination.
+<video src="../assets/lewm_inference.mp4" controls width="100%"></video>
+
 - **Latent Confusion**: The world model often fails to distinguish the final goal state from intermediate states in the latent manifold, leading to "stalled" planning.
 - **Reward Head Intervention**: We use an auxiliary **Reward Predictor** to provide a clearer gradient for the MPC solver. This has shown improvement in the robot's movement intent, though smoothness still trails behind VLA baselines.
 - **High-DoF Control**: Coordinating 32 joints remains a significant challenge for the CEM solver in complex, multi-phase sequences.
