@@ -9,11 +9,11 @@ We have standardized on **32-frame episodes** (recorded at 10Hz) to capture the 
 <div align="center">
   <h3>1. `gr1_pickup_grasp` (Precision)</h3>
   <p>Precision-oriented data focusing on biomechanically aligned finger placement and "pinch" grasps.</p>
-  <video src="https://github.com/vedpatwardhan/le-probe/raw/main/assets/dataset_grasp.mp4?raw=true" controls width="100%"></video>
+  <img src="../assets/dataset_grasp.gif" width="640">
 
   <h3>2. `gr1_pickup_32` (Containment)</h3>
   <p>A "cup-style" movement where the hand surrounds the object, providing a robust containment baseline.</p>
-  <video src="https://github.com/vedpatwardhan/le-probe/raw/main/assets/dataset_cup.mp4?raw=true" controls width="100%"></video>
+  <img src="../assets/dataset_cup.gif" width="640">
 </div>
 
 ### Data Quality Auditing:
