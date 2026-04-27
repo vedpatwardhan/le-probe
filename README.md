@@ -1,4 +1,4 @@
-# Le-Probe: Probing Embodied World Models
+# Le-Probe: Probing LeWM
 
 <div align="center">
   <img src="banner.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
