@@ -1,21 +1,16 @@
-# 🌍 World Model (LeWM) & Planning
+# LeWM: LeRobot World Model & Oracle MPC
 
-> Probing behavior through latent imagination and Model Predictive Control.
+This module implements the **LeWM** (LeRobot World Model) training and inference stack, using a JEPA-based architecture for latent imagination and Oracle MPC for planning.
 
-This module contains the implementation of the **LeRobot World Model (LeWM)**, including training scripts, reward head tuning, and the MPC-based planning server.
+## ⚠️ Current Challenges: The Discriminability Gap
 
-## 🛠 Key Components
+Our research shows that while LeWM can learn to predict video frames accurately, it struggles with the **Latent Discriminability Gap**:
+- **Latent Confusion**: The world model often fails to distinguish the final goal state from intermediate states in the latent manifold, leading to "stalled" planning.
+- **Reward Head Intervention**: We use an auxiliary **Reward Predictor** to provide a clearer gradient for the MPC solver. This has shown improvement in the robot's movement intent, though smoothness still trails behind VLA baselines.
+- **High-DoF Control**: Coordinating 32 joints remains a significant challenge for the CEM solver in complex, multi-phase sequences.
 
-- **`lewm_server.py`**: The "Oracle" planning server that uses CEM (Cross-Entropy Method) to search for optimal action sequences in the latent space.
-- **`train_lewm.py`**: Official training script for the world model with SIGReg and RA-LeWM (Reward-Aware) support.
-- **`goal_mapper.py` & `goal_utils.py`**: Utilities for mapping visual observations to goal latents.
-- **`lewm_data_plugin.py`**: A specialized data loader for training World Models on LeRobot datasets.
-
-## 🔬 Research & Diagnostics
-
-- **`tune_reward_head.py`**: Fine-tunes the reward predictor on small success/failure samples.
-- **`diagnose_mpc.py`**: Visualizes the CEM search process and imagination rollouts.
-- **`harvest_goals.py`**: Extracts goal snapshots from successful episodes.
-
----
-*Part of the [Le-Probe](..) project.*
+## 🛠 Core Components
+- [`lewm_server.py`](lewm_server.py): Oracle MPC server hosting the JEPA model and CEM solver.
+- [`goal_mapper.py`](goal_mapper.py): The "Brain"—manages latent goal memory and cost manifolds.
+- [`train_lewm.py`](train_lewm.py): Unified training script for the world model and reward head.
+- [`diagnose_mpc.py`](diagnose_mpc.py): Vectorized audit tool for measuring latent improvement over 150+ episodes.

@@ -1,34 +1,36 @@
-# 📦 Dataset Management & Teleoperation
+# Dataset Management & Teleoperation
 
-> High-fidelity data collection and preprocessing for the GR-1 robot.
+This module handles the lifecycle of robotic data: from real-time MuJoCo teleoperation to LeRobot-formatted cloud datasets.
 
-This module provides the core tools for interacting with the MuJoCo simulation via human teleoperation, recording episodes into the LeRobot format, and synchronizing with the Hugging Face Hub.
+## 📊 Dataset Standards
+
+We have standardized on **32-frame episodes** (recorded at 10Hz) to capture the full reach-to-grasp trajectory. We maintain two primary behavioral variants:
+
+1.  **`gr1_pickup_grasp`**: Precision-oriented data focusing on biomechanically aligned finger placement and "pinch" grasps.
+2.  **`gr1_pickup_32`**: A "cup-style" movement where the hand surrounds the object, providing a robust containment baseline.
+
+### Data Quality Auditing:
+Through bulk assessment of 150+ episodes, we identified that 32-frame windows provide the optimal balance between temporal resolution and training stability for both VLA and World Model architectures.
 
 ## 🛠 Key Components
 
-- **`teleop_ui.py`**: A premium Streamlit dashboard for real-time joint control and phase management.
-- **`simulation_teleop.py`**: The ZMQ server driving the MuJoCo simulation and handling IK requests.
-- **`lerobot_manager.py`**: Advanced wrapper for `LeRobotDataset` with support for "Smart Rewards" and cloud sync.
-- **`simulation_replay.py`**: Validates dataset integrity by replaying recorded episodes.
-- **`upload_dataset.py`**: Streamlined utility for pushing local datasets to the Hugging Face Hub.
+- [**`teleop_ui.py`**](teleop_ui.py): Premium Streamlit dashboard with glassmorphism UI for real-time control.
+- [**`simulation_teleop.py`**](simulation_teleop.py): ZMQ server driving the MuJoCo simulation and handling 32-DoF IK requests.
+- [**`lerobot_manager.py`**](lerobot_manager.py): Core recording logic. Implements the 32-dim identity protocol and "Smart Reward" injection.
+- [**`simulation_replay.py`**](simulation_replay.py): Visual audit tool for replaying recorded episodes.
 
-## 🚀 Usage
+## 🚀 Workflows
 
-### Real-time Teleoperation
-1. Start the simulation server:
-   ```bash
-   .venv/bin/python dataset/simulation_teleop.py
-   ```
-2. Launch the dashboard:
-   ```bash
-   streamlit run dataset/teleop_ui.py
-   ```
-
-### Dataset Validation
-To verify a recorded dataset:
+### 1. Data Collection
 ```bash
-.venv/bin/python dataset/simulation_replay.py --repo_id local/gr1_pickup
+# Start Sim Server
+.venv/bin/python dataset/simulation_teleop.py
+
+# Start Dashboard
+streamlit run dataset/teleop_ui.py
 ```
 
----
-*Part of the [Le-Probe](..) project.*
+### 2. High-Performance Upload
+```bash
+.venv/bin/python dataset/upload_dataset.py --repo_id vedpatwardhan/gr1_pickup_grasp
+```

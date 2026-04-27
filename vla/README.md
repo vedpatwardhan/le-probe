@@ -1,24 +1,18 @@
-# 🧠 Vision-Language-Action (VLA) Inference
+# VLA: Vision-Language-Action Baselines
 
-> End-to-end autonomous control using state-of-the-art foundation models.
+This module hosts the **GR00T-N1** inference server and evaluation notebooks. Our VLA implementation serves as the high-performance baseline for comparing World Model (LeWM) behaviors.
 
-This module hosts the inference servers and autonomous drivers for VLA models like **GR00T**. It bridges the gap between high-level reasoning and low-level physical control.
+## 🏆 Current Performance
 
-## 🛠 Key Components
+GR00T-N1 has been successfully stabilized to perform two distinct manipulation styles on a 32-DoF humanoid platform:
 
-- **`simulation_vla.py`**: The autonomous mission driver that captures observations and executes VLA actions in the simulation.
-- **`gr00t_server.py`**: A high-performance ZMQ server for hosting the GR00T policy (typically runs on Colab/Remote GPU).
-- **`GR00T_N1_BC.ipynb`**: Training notebook for Behavioral Cloning with GR00T-N1.
-- **`GR00T_N1_E2E.ipynb`**: End-to-end evaluation pipeline.
+1.  **Grasp Pattern**: Precision approach and pinch-grasp of the cube.
+2.  **Cup Pattern**: A "surrounding" movement optimized for containment rather than friction-based grasping.
 
-## 🚀 Usage
+### Implementation Success:
+Our 15k-step baseline was stabilized by achieving bit-perfect normalization parity with the training stack. This resolved early divergence issues where the model's reaching intent was correct but the physical execution was biased by unscaled joint values.
 
-### Running an Autonomous Mission
-1. Ensure the `gr00t_server.py` is running on your GPU instance.
-2. Launch the simulation driver:
-   ```bash
-   .venv/bin/python vla/simulation_vla.py --host <server_ip> --instruction "Pick up the red cube"
-   ```
-
----
-*Part of the [Le-Probe](..) project.*
+## 📁 Key Files
+- [`gr00t_server.py`](gr00t_server.py): The ZMQ inference host.
+- [`GR00T_N1_E2E.ipynb`](GR00T_N1_E2E.ipynb): End-to-end evaluation pipeline.
+- [`GR00T_N1_BC.ipynb`](GR00T_N1_BC.ipynb): Behavioral Cloning training and audit logs.

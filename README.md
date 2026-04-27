@@ -1,47 +1,45 @@
-# Le-Probe: Probing Embodied Intelligence
+# Le-Probe: Probing Embodied World Models
 
-<img src="banner.png" width="100%" height="350" style="object-fit: cover; border-radius: 12px; margin-bottom: 20px;">
+<img src="le_probe_banner.png" width="100%" height="350" style="object-fit: cover; border-radius: 12px; margin-bottom: 20px;">
 
-> **Probing the behavior of World Models (LeWM) in high-DoF tasks.**
+Le-Probe is a research framework designed to analyze and compare **LeRobot World Models (LeWM)** against traditional **Vision-Language-Action (VLA)** policies like GR00T-N1. 
 
-Le-Probe is a research framework designed to analyze and compare the performance of **World Models** versus traditional **Vision-Language-Action (VLA)** policies in complex, multi-phase robotic tasks. 
-
-Our primary goal is to understand how latent imagination can handle high-dimensional control (32+ DoF) in tasks that require non-monotonic progress (e.g., moving away from a goal to enable a better grasp).
+Our investigation focuses on high-DoF (32+) manipulation tasks that require multi-phase coordination, specifically comparing two distinct behavioral strategies: **Grasp** and **Cup**.
 
 ## 🚀 Repository Structure
 
-The project is organized into functional modules:
+- [**`dataset/`**](./dataset): Teleoperation and high-fidelity data collection (32-frame episodes).
+- [**`vla/`**](./vla): GR00T-N1 baselines. Successfully demonstrates both Grasp and Cup behaviors.
+- [**`lewm/`**](./lewm): World model training and Oracle MPC. Currently struggles with latent discriminability.
+- [**`interpretability/`**](./interpretability): The "Search for the Why"—mechanistic analysis of LeWM failure modes.
+- [**`scripts/`**](./scripts): Maintenance, dataset compression, and reward calibration tools.
 
-- [**`dataset/`**](./dataset): Teleoperation and high-fidelity data collection.
-- [**`vla/`**](./vla): End-to-end foundation model inference (GR00T).
-- [**`lewm/`**](./lewm): World model training, imagination, and MPC planning.
-- [**`interpretability/`**](./interpretability): Probing and visualization tools (Coming Soon).
-- [**`scripts/`**](./scripts): Maintenance and migration utilities.
+## 🔬 Core Mission: VLA vs. LeWM
 
-## 🔬 Core Mission
+The project was born from a comparative study of two approaches to the same task: picking up a red cube.
 
-Current VLAs often struggle with long-horizon tasks that require intermediate sub-goals. **Le-Probe** investigates whether **LeWM** (LeRobot World Model) can provide superior robustness by:
-1. **Latent Imagination**: Visualizing future states before execution.
-2. **Oracle MPC**: Searching for optimal trajectories using a learned reward manifold.
-3. **Behavioral Probing**: Systematic analysis of failure modes in high-DoF environments.
+### 1. VLA Success (GR00T-N1)
+We successfully trained GR00T-N1 to imitate two different movement styles:
+*   **Grasp**: Precision finger placement for a secure pinch.
+*   **Cup**: Surrounding the object for containment, providing a robust grasp-free alternative.
+
+Despite early protocol mismatches and biomechanical alignment issues, the "Parity Refactor" stabilized the inference stack, allowing GR00T to execute both behaviors reliably across the 15k-step baseline.
+
+### 2. LeWM Challenges (The Discriminability Gap)
+LeWM, despite training with a large softrank, failed to sufficiently discriminate the goal state from non-goal states in the latent space. 
+*   **Reward Head Intervention**: To fix this, we trained an auxiliary reward head on snapshot data. While reward prediction is now accurate, the MPC solver often fails to find trajectories as smooth or effective as the VLA baseline.
+*   **Current Status**: We are currently focused on why "good imagination" in the JEPA architecture does not always translate to "good action" in high-DoF control.
 
 ## 🛠 Getting Started
 
-### 1. Installation
 ```bash
+# 1. Install
 git clone --recursive https://github.com/vedpatwardhan/le-probe.git
-cd le-probe
-python3 -m venv .venv
-source .venv/bin/activate
+cd le-probe && python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 2. Quick Start (Teleop)
-```bash
-# Start simulation
+# 2. Run Teleop (Data Collection)
 .venv/bin/python dataset/simulation_teleop.py
-
-# Launch Dashboard
 streamlit run dataset/teleop_ui.py
 ```
 
