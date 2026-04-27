@@ -56,7 +56,8 @@ I successfully trained GR00T-N1 to imitate both styles. Despite early protocol m
 LeWM, despite training with a large softrank, failed to sufficiently discriminate the goal state from non-goal states in the latent space. 
 
 *   **Reward Head Intervention**: To fix this, I trained an auxiliary reward head on snapshot data with a broader range than just successful trajectories. While reward prediction was much better, the MPC solver still didn't manage to actually pick up the cube and instead just got close to it and moved away.
-*   **Current Status**: I'm currently focused on why "good imagination" in the JEPA architecture does not always translate to "good action" in high-DoF control.
+*   **Current Status**: I'm currently focused on why "good imagination" in the JEPA architecture does not always translate to "good action" in high-DoF control, from the perspectives of getting goal states sufficiently discriminated from non-goal states and testing the limits of the reward head.
+*   **Approach**: The next step is to build attribution graphs for the trained model to observe possible sparse-features in the latent space, different circuits used by the prediction head and performing interventions on the same to draw stronger causal connections. This can be tested with manipulation ellipsoids to encourage more intuitive movements, training with multi-view data, etc.
 
 <div align="center">
   <b>LeWM: Grasp Execution</b>
@@ -99,8 +100,8 @@ To run the stabilized VLA policy in simulation, the model weights/configs are av
 
 | Type of Movement | Google Drive Link |
 | --- | --- |
-| **Cup** | [pretrained_model](https://drive.google.com/drive/folders/1f5p6-5p6_20PpfbONcq-n5T1P7DhHfBw?usp=sharing) |
 | **Grasp** | [pretrained_model](https://drive.google.com/drive/folders/1077_msVzs_8AQPaEbDm6XPiq8T_hxirp?usp=sharing) |
+| **Cup** | [pretrained_model](https://drive.google.com/drive/folders/1f5p6-5p6_20PpfbONcq-n5T1P7DhHfBw?usp=sharing) |
 
 
 #### Inference
