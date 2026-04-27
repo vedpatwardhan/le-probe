@@ -4,7 +4,7 @@
   <img src="banner.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
 </div>
 
-Le-Probe is a research framework designed to analyze and compare **LeRobot World Models (LeWM)** against traditional **Vision-Language-Action (VLA)** policies like GR00T-N1. 
+Le-Probe is a research framework designed to analyze and compare **LeWM** against traditional **Vision-Language-Action (VLA)** policies like GR00T-N1.
 
 Our investigation focuses on high-DoF (32+) manipulation tasks that require multi-phase coordination, specifically comparing two distinct behavioral strategies: **Grasp** and **Cup**.
 
@@ -56,7 +56,8 @@ We successfully trained GR00T-N1 to imitate both styles. Despite early protocol 
 LeWM, despite training with a large softrank, failed to sufficiently discriminate the goal state from non-goal states in the latent space. 
 
 <div align="center">
-  <h3>LeWM: Grasp Execution</h3>
+  <b>LeWM: Grasp Execution</b>
+  <hr width="320">
   <img src="assets/lewm_grasp.gif" width="320">
 </div>
 
@@ -70,11 +71,71 @@ LeWM, despite training with a large softrank, failed to sufficiently discriminat
 git clone --recursive https://github.com/vedpatwardhan/le-probe.git
 cd le-probe && python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+```
 
-# 2. Run Teleop (Data Collection)
+### 1. Data Collection & Datasets
+
+We have published three core datasets used for the above results:
+- [**`gr1_pickup_grasp`**](https://huggingface.co/datasets/vedpatwardhan/gr1_pickup_grasp): Precision "pinch" grasp trajectories.
+- [**`gr1_pickup_cup`**](https://huggingface.co/datasets/vedpatwardhan/gr1_pickup_cup): Robust "surrounding" containment trajectories.
+- [**`gr1_reward_pred`**](https://huggingface.co/datasets/vedpatwardhan/gr1_reward_pred): Multi-behavioral data used to train the Reward Head.
+
+In case you'd like to record new datasets you can use the following:
+```bash
+# Terminal 1: Simulation Server
 .venv/bin/python dataset/simulation_teleop.py
+
+# Terminal 2: Dashboard
 streamlit run dataset/teleop_ui.py
 ```
+
+### 2. VLA (GR00T-N1)
+
+#### Training
+
+The model was trained using [**`vla/GR00T_N1_BC.ipynb`**](vla/GR00T_N1_BC.ipynb)
+
+To run the stabilized VLA policy in simulation, the model weights/configs are available at the following folders:
+
+| Type of Movement | Google Drive Link |
+| --- | --- |
+| **Cup** | [Folder Link](https://drive.google.com/drive/folders/1f5p6-5p6_20PpfbONcq-n5T1P7DhHfBw?usp=sharing) |
+| **Grasp** | [Folder Link](https://drive.google.com/drive/folders/1077_msVzs_8AQPaEbDm6XPiq8T_hxirp?usp=sharing) |
+
+
+#### Inference
+
+1. **Inference Server**: Was run using [**`vla/GR00T_N1_E2E.ipynb`**](vla/GR00T_N1_E2E.ipynb) using a Pinggy tunnel.
+   ```bash
+   .venv/bin/python vla/gr00t_server.py --weights <path to pretrained_model folder>
+   ```
+
+2. **Simulation Host**:
+   ```bash
+   .venv/bin/python vla/simulation_vla.py --host <host> --port <port> --chunks <num_chunks>
+   ```
+
+### 3. LeWM + CEM/MPC
+
+#### Training
+
+The model was trained using [**`lewm/LeWM_Training.ipynb`**](lewm/LeWM_Training.ipynb). The original model was trained under the `GR-1 Pickup Grasp` section and the reward head was separately trained under the `GR-1 Reward Pred` section.
+
+Following the training, all goal states in the dataset were harvested in the latent space using [**`lewm/harvest_goals.py`**](lewm/harvest_goals.py) to save inference time.
+
+The weights of the reward-tuned model can be found at [`gr1_reward_tuned_v2.ckpt`](https://drive.google.com/file/d/12YDes7GSQRWzQ-IMHbpq_64oWEoYj96V/view?usp=sharing) and the harvested goals can be found at [`goal_gallery.pth](https://drive.google.com/file/d/1l-jdRkcwUUYxLcDiyDS6pb59M-CeZfSf/view?usp=sharing).
+
+#### Inference
+
+1. **Inference Server**: Was run using [**`lewm/LEWM_E2E.ipynb`**](lewm/LEWM_E2E.ipynb) using a Pinggy tunnel.
+   ```bash
+   .venv/bin/python lewm/lewm_server.py --model gr1_reward_tuned_v2.ckpt --gallery goal_gallery.pth
+   ```
+
+2. **Simulation Host**:
+   ```bash
+   .venv/bin/python lewm/simulation_lewm.py --host <host> --port <port>
+   ```
 
 ---
 *Developed by Ved Patwardhan.*
