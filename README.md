@@ -65,6 +65,13 @@ LeWM, despite training with a large softrank, failed to sufficiently discriminat
   <img src="assets/lewm_grasp.gif" width="320">
 </div>
 
+### 4. Architecture for Interpretability
+
+<div align="center">
+  <img src="assets/interpretability_architecture.png" width="100%" style="border-radius: 12px; margin-top: 20px;">
+  <p><i>LeWM Interpretability: Mechanistic Analysis & Causal Intervention Stack</i></p>
+</div>
+
 ## 🛠 Getting Started
 
 ```bash
