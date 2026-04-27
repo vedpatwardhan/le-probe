@@ -14,7 +14,7 @@ My current findings show that LeWM struggles with **Latent Discriminability**—
 By probing the internals of the JEPA architecture, I aim to bridge the gap between "good imagination" (visual accuracy) and "good action" (motor control), enabling World Models to handle the 32-DoF complexity of the GR-1 platform.
 
 <div align="center">
-  <img src="../assets/interpretability_architecture.png" width="100%" style="border-radius: 12px; margin-top: 20px;">
+  <img src="../assets/interpretability_architecture.png" width="70%" style="border-radius: 12px; margin-top: 20px;">
   <p><i>LeWM Interpretability: Mechanistic Analysis & Causal Intervention Stack</i></p>
 </div>
 
