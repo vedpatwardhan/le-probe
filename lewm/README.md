@@ -8,7 +8,7 @@ Our research shows that while LeWM can learn to predict video frames accurately,
 
 ### Planning Audit (LeWM MPC)
 The video below shows the current state of MPC inference. Note the flailing and lack of clear progress towards the goal despite correct frame prediction in imagination.
-<video src="../assets/lewm_inference.mp4" controls width="100%"></video>
+<video src="../assets/lewm_grasp.mp4" controls width="100%"></video>
 
 - **Latent Confusion**: The world model often fails to distinguish the final goal state from intermediate states in the latent manifold, leading to "stalled" planning.
 - **Reward Head Intervention**: We use an auxiliary **Reward Predictor** to provide a clearer gradient for the MPC solver. This has shown improvement in the robot's movement intent, though smoothness still trails behind VLA baselines.

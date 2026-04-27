@@ -30,7 +30,7 @@ LeWM, despite training with a large softrank, failed to sufficiently discriminat
 
 | LeWM MPC Inference (Clipped) |
 | :---: |
-| <video src="assets/lewm_inference.mp4" controls width="100%"></video> |
+| <video src="assets/lewm_grasp.mp4" controls width="100%"></video> |
 
 *   **Reward Head Intervention**: To fix this, we trained an auxiliary reward head on snapshot data. While reward prediction is now accurate, the MPC solver often fails to find trajectories as smooth or effective as the VLA baseline.
 *   **Current Status**: We are currently focused on why "good imagination" in the JEPA architecture does not always translate to "good action" in high-DoF control.
