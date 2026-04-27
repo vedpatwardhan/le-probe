@@ -7,11 +7,11 @@ This module handles the lifecycle of robotic data: from real-time MuJoCo teleope
 I have standardized on **32-frame episodes** (recorded at 10Hz) to capture the full reach-to-grasp trajectory. I maintain two primary behavioral variants:
 
 <div align="center">
-  <h3>1. `gr1_pickup_grasp` (Precision)</h3>
+  <h3>1. gr1_pickup_grasp</h3>
   <p>Precision-oriented data focusing on biomechanically aligned finger placement and "pinch" grasps.</p>
   <img src="../assets/dataset_grasp.gif" width="320">
 
-  <h3>2. `gr1_pickup_32` (Containment)</h3>
+  <h3>2. gr1_pickup_cup</h3>
   <p>A "cup-style" movement where the hand surrounds the object, providing a robust containment baseline.</p>
   <img src="../assets/dataset_cup.gif" width="320">
 </div>
