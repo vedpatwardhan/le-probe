@@ -30,8 +30,8 @@ We maintained two high-quality datasets representing different manipulation prio
       <th>Dataset: Cup Pattern</th>
     </tr>
     <tr>
-      <td><video src="assets/dataset_grasp.mp4" controls></video></td>
-      <td><video src="assets/dataset_cup.mp4" controls></video></td>
+      <td><video src="https://github.com/vedpatwardhan/le-probe/raw/main/assets/dataset_grasp.mp4" controls></video></td>
+      <td><video src="https://github.com/vedpatwardhan/le-probe/raw/main/assets/dataset_cup.mp4" controls></video></td>
     </tr>
   </table>
 </div>
@@ -46,8 +46,8 @@ We successfully trained GR00T-N1 to imitate both styles. Despite early protocol 
       <th>VLA: Cup Execution</th>
     </tr>
     <tr>
-      <td><video src="assets/vla_grasp.mp4" controls></video></td>
-      <td><video src="assets/vla_cup.mp4" controls></video></td>
+      <td><video src="https://github.com/vedpatwardhan/le-probe/raw/main/assets/vla_grasp.mp4" controls></video></td>
+      <td><video src="https://github.com/vedpatwardhan/le-probe/raw/main/assets/vla_cup.mp4" controls></video></td>
     </tr>
   </table>
 </div>
@@ -57,7 +57,7 @@ LeWM, despite training with a large softrank, failed to sufficiently discriminat
 
 <div align="center">
   <h3>LeWM: Grasp Execution</h3>
-  <video src="assets/lewm_grasp.mp4" controls></video>
+  <video src="https://github.com/vedpatwardhan/le-probe/raw/main/assets/lewm_grasp.mp4" controls></video>
 </div>
 
 *   **Reward Head Intervention**: To fix this, we trained an auxiliary reward head on snapshot data. While reward prediction is now accurate, the MPC solver often fails to find trajectories as smooth or effective as the VLA baseline.
