@@ -14,47 +14,7 @@ if ROOT_DIR not in sys.path:
 
 from gr1_config import COMPACT_WIRE_JOINTS
 
-st.set_page_config(page_title="Le-Probe: Advanced Teleop", layout="wide")
-
-# --- Premium Aesthetics ---
-st.markdown("""
-    <style>
-    .main {
-        background: linear-gradient(135deg, #0e1117 0%, #161b22 100%);
-    }
-    .stMetric {
-        background: rgba(255, 255, 255, 0.05);
-        padding: 15px;
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-    }
-    .stButton>button {
-        border-radius: 8px;
-        transition: all 0.3s ease;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        font-weight: 600;
-    }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0, 200, 255, 0.3);
-    }
-    div[data-testid="stSidebar"] {
-        background-color: #0d1117;
-        border-right: 1px solid rgba(255, 255, 255, 0.1);
-    }
-    h1, h2, h3 {
-        background: linear-gradient(90deg, #00d2ff 0%, #3a7bd5 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-weight: 800;
-    }
-    .stSlider > div > div > div > div {
-        background-color: #00d2ff;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+st.set_page_config(page_title="Le-Probe: Teleop Dashboard", layout="wide")
 
 
 # --- Setup ZMQ Socket ---
@@ -233,7 +193,7 @@ if "pending_sync" in st.session_state:
     sync_ui_to_joints(st.session_state.pending_sync)
     del st.session_state.pending_sync
 
-st.title("Le-Probe: Advanced Teleop Dashboard")
+st.title("Le-Probe: Teleop Dashboard")
 
 # Show any pending toasts from callbacks
 if "last_msg" in st.session_state:

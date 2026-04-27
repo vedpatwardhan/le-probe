@@ -4,7 +4,7 @@ This module handles the lifecycle of robotic data: from real-time MuJoCo teleope
 
 ## 📊 Dataset Standards
 
-We have standardized on **32-frame episodes** (recorded at 10Hz) to capture the full reach-to-grasp trajectory. We maintain two primary behavioral variants:
+I have standardized on **32-frame episodes** (recorded at 10Hz) to capture the full reach-to-grasp trajectory. I maintain two primary behavioral variants:
 
 <div align="center">
   <h3>1. `gr1_pickup_grasp` (Precision)</h3>
@@ -17,11 +17,19 @@ We have standardized on **32-frame episodes** (recorded at 10Hz) to capture the 
 </div>
 
 ### Data Quality Auditing:
-Through bulk assessment of 150+ episodes, we identified that 32-frame windows provide the optimal balance between temporal resolution and training stability for both VLA and World Model architectures.
+Through bulk assessment of 150+ episodes, I identified that 32-frame windows provide the optimal balance between temporal resolution and training stability for both VLA and World Model architectures.
+
+## 🖥 Teleoperation Interface
+
+I use a custom-built Streamlit dashboard for real-time control, IK requests, and dataset auditing.
+
+<div align="center">
+  <img src="../assets/teleop_dashboard.png" width="100%" style="border-radius: 8px;">
+</div>
 
 ## 🛠 Key Components
 
-- [**`teleop_ui.py`**](teleop_ui.py): Premium Streamlit dashboard with glassmorphism UI for real-time control.
+- [**`teleop_ui.py`**](teleop_ui.py): Streamlit dashboard for 32-DoF joint control and IK-assisted manipulation.
 - [**`simulation_teleop.py`**](simulation_teleop.py): ZMQ server driving the MuJoCo simulation and handling 32-DoF IK requests.
 - [**`lerobot_manager.py`**](lerobot_manager.py): Core recording logic. Implements the 32-dim identity protocol and "Smart Reward" injection.
 - [**`simulation_replay.py`**](simulation_replay.py): Visual audit tool for replaying recorded episodes.
