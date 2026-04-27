@@ -1,6 +1,6 @@
 # Le-Probe: Probing Embodied Intelligence
 
-<img src="le_probe_banner.png" width="100%" height="350" style="object-fit: cover; border-radius: 12px; margin-bottom: 20px;">
+<img src="banner.png" width="100%" height="350" style="object-fit: cover; border-radius: 12px; margin-bottom: 20px;">
 
 > **Probing the behavior of World Models (LeWM) in high-DoF tasks.**
 
