@@ -8,11 +8,11 @@ GR00T-N1 has been successfully stabilized to perform two distinct manipulation s
 
 ### 1. Grasp Pattern
 Precision approach and pinch-grasp of the cube.
-<video src="../assets/vla_grasp.mp4" controls width="100%"></video>
+<video width="100%" controls><source src="../assets/vla_grasp.mp4" type="video/mp4"></video>
 
 ### 2. Cup Pattern
 A "surrounding" movement optimized for containment rather than friction-based grasping.
-<video src="../assets/vla_cup.mp4" controls width="100%"></video>
+<video width="100%" controls><source src="../assets/vla_cup.mp4" type="video/mp4"></video>
 
 ### Implementation Success:
 Our 15k-step baseline was stabilized by achieving bit-perfect normalization parity with the training stack. This resolved early divergence issues where the model's reaching intent was correct but the physical execution was biased by unscaled joint values.

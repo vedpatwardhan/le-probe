@@ -23,14 +23,14 @@ We successfully trained GR00T-N1 to imitate two different movement styles. Despi
 
 | Grasp Movement | Cup Movement |
 | :---: | :---: |
-| <video src="assets/vla_grasp.mp4" controls width="100%"></video> | <video src="assets/vla_cup.mp4" controls width="100%"></video> |
+| <video width="100%" controls><source src="assets/vla_grasp.mp4" type="video/mp4"></video> | <video width="100%" controls><source src="assets/vla_cup.mp4" type="video/mp4"></video> |
 
 ### 2. LeWM Challenges (The Discriminability Gap)
 LeWM, despite training with a large softrank, failed to sufficiently discriminate the goal state from non-goal states in the latent space. 
 
 | LeWM MPC Inference (Clipped) |
 | :---: |
-| <video src="assets/lewm_grasp.mp4" controls width="100%"></video> |
+| <video width="100%" controls><source src="assets/lewm_grasp.mp4" type="video/mp4"></video> |
 
 *   **Reward Head Intervention**: To fix this, we trained an auxiliary reward head on snapshot data. While reward prediction is now accurate, the MPC solver often fails to find trajectories as smooth or effective as the VLA baseline.
 *   **Current Status**: We are currently focused on why "good imagination" in the JEPA architecture does not always translate to "good action" in high-DoF control.
