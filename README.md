@@ -1,6 +1,6 @@
 # Le-Probe: Probing Embodied World Models
 
-<img src="le_probe_banner.png" width="100%" height="350" style="object-fit: cover; border-radius: 12px; margin-bottom: 20px;">
+<img src="banner.png" width="100%" height="350" style="object-fit: cover; border-radius: 12px; margin-bottom: 20px;">
 
 Le-Probe is a research framework designed to analyze and compare **LeRobot World Models (LeWM)** against traditional **Vision-Language-Action (VLA)** policies like GR00T-N1. 
 
