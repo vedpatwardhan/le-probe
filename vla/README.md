@@ -9,11 +9,11 @@ GR00T-N1 has been successfully stabilized to perform two distinct manipulation s
 <div align="center">
   <h3>1. Grasp Pattern</h3>
   <p>Precision approach and pinch-grasp of the cube.</p>
-  <img src="../assets/vla_grasp.gif" width="640">
+  <img src="../assets/vla_grasp.gif" width="320">
 
   <h3>2. Cup Pattern</h3>
   <p>A "surrounding" movement optimized for containment rather than friction-based grasping.</p>
-  <img src="../assets/vla_cup.gif" width="640">
+  <img src="../assets/vla_cup.gif" width="320">
 </div>
 
 ### Implementation Success:

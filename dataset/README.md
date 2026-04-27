@@ -9,11 +9,11 @@ We have standardized on **32-frame episodes** (recorded at 10Hz) to capture the 
 <div align="center">
   <h3>1. `gr1_pickup_grasp` (Precision)</h3>
   <p>Precision-oriented data focusing on biomechanically aligned finger placement and "pinch" grasps.</p>
-  <img src="../assets/dataset_grasp.gif" width="640">
+  <img src="../assets/dataset_grasp.gif" width="320">
 
   <h3>2. `gr1_pickup_32` (Containment)</h3>
   <p>A "cup-style" movement where the hand surrounds the object, providing a robust containment baseline.</p>
-  <img src="../assets/dataset_cup.gif" width="640">
+  <img src="../assets/dataset_cup.gif" width="320">
 </div>
 
 ### Data Quality Auditing:

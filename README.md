@@ -57,7 +57,7 @@ LeWM, despite training with a large softrank, failed to sufficiently discriminat
 
 <div align="center">
   <h3>LeWM: Grasp Execution</h3>
-  <img src="assets/lewm_grasp.gif" width="640">
+  <img src="assets/lewm_grasp.gif" width="320">
 </div>
 
 *   **Reward Head Intervention**: To fix this, we trained an auxiliary reward head on snapshot data. While reward prediction is now accurate, the MPC solver often fails to find trajectories as smooth or effective as the VLA baseline.
