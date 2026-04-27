@@ -26,7 +26,7 @@ from stable_pretraining.optim.lr_scheduler import LinearWarmupCosineAnnealingLR
 import pkg_resources
 
 # Ensure we can import from the le_wm submodule
-LEWM_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../le_wm"))
+LEWM_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "le_wm"))
 sys.path.append(LEWM_ROOT)
 
 # Import official LeWM components

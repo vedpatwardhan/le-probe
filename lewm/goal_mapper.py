@@ -25,7 +25,7 @@ import stable_pretraining as spt
 from jepa import JEPA
 from module import ARPredictor
 from gr1_modules import GR1Embedder, GR1MLP
-from le_wm.utils import get_img_preprocessor
+from lewm.le_wm.utils import get_img_preprocessor
 from lewm.goal_utils import get_goal_pixels, get_episode_video_path
 from lewm.train_lewm import RewardPredictor
 

@@ -26,9 +26,9 @@ from tqdm import tqdm
 RESEARCH_DIR = Path(__file__).parent.absolute()
 CORTEX_GR1 = RESEARCH_DIR.parent
 sys.path.append(str(CORTEX_GR1))
-sys.path.append(str(CORTEX_GR1 / "le_wm"))
+sys.path.append(str(CORTEX_GR1 / "lewm/le_wm"))
 
-from goal_mapper import GoalMapper
+from lewm.goal_mapper import GoalMapper
 from stable_worldmodel.solver import CEMSolver
 
 
