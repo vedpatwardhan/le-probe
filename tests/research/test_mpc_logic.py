@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import pytest
 from unittest.mock import MagicMock
-from research.goal_mapper import GoalMapper
+from lewm.goal_mapper import GoalMapper
 
 
 class MockModel(torch.nn.Module):

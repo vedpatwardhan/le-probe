@@ -8,7 +8,7 @@ import os
 # Ensure the library under test is in the path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from research.lewm_data_plugin import LEWMDataPlugin
+from lewm.lewm_data_plugin import LEWMDataPlugin
 
 
 class MockLeRobotDataset:
@@ -47,7 +47,7 @@ class MockLeRobotDataset:
 @pytest.fixture
 def mock_plugin():
     # Patch the LeRobotDataset class inside the plugin module
-    with patch("research.lewm_data_plugin.LeRobotDataset") as mock_class:
+    with patch("lewm.lewm_data_plugin.LeRobotDataset") as mock_class:
         # Create a dataset with two episodes of 10 frames each
         mock_instance = MockLeRobotDataset(episodes=[10, 10])
         mock_class.return_value = mock_instance

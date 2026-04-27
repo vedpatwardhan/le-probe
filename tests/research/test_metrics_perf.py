@@ -10,7 +10,7 @@ import os
 # Ensure the library under test is in the path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-import research.metrics as metrics
+import lewm.metrics as metrics
 
 # Import the logic we just wrote (Mocking wandb to avoid network calls)
 import wandb

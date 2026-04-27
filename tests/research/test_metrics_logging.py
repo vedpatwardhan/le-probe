@@ -4,7 +4,7 @@ import pytest
 import os
 import shutil
 import unittest.mock as mock
-from research.metrics import MetricsCallback
+from lewm.metrics import MetricsCallback
 
 
 # Mock classes to simulate PyTorch Lightning structure

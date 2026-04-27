@@ -1,7 +1,7 @@
 import torch
 import os
 import pytest
-from research.metrics import MetricsCallback
+from lewm.metrics import MetricsCallback
 
 # Standard path for pre-trained weights
 CKPT_PATH = "research/checkpoints/weights.pt"

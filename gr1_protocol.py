@@ -1,4 +1,5 @@
 import numpy as np
+from gr1_config import JOINT_LIMITS_MIN, JOINT_LIMITS_MAX, COMPACT_WIRE_JOINTS
 
 
 class StandardScaler:
@@ -9,8 +10,6 @@ class StandardScaler:
 
     def __init__(self):
         # STAGE 0: RE-INITIALIZATION (Dynamic Handshake)
-        from gr1_config import JOINT_LIMITS_MIN, JOINT_LIMITS_MAX
-
         self.lmin = JOINT_LIMITS_MIN
         self.lmax = JOINT_LIMITS_MAX
 
@@ -34,7 +33,6 @@ class StandardScaler:
         # Only prints if a protocol violation is detected
         if np.any(np.abs(norm_state) > 1.01):
             bad_indices = np.where(np.abs(norm_state) > 1.01)[0]
-            from gr1_config import COMPACT_WIRE_JOINTS
 
             print(f"\n🚨 [PROTOCOL VIOLATION] Action exceeds [-1, 1] boundary!")
             for b_idx in bad_indices:

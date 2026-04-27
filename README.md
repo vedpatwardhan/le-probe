@@ -1,79 +1,49 @@
-# 🦾 cortex-gr1: Modular MuJoCo Foundation
+# Le-Probe: Probing Embodied Intelligence
 
-This repository contains the high-fidelity physics environment and inference lifecycle for the GR-1 humanoid robot, now powered by **MuJoCo** and the **Minkowski** IK solver.
+<img src="le_probe_banner.png" width="100%" height="350" style="object-fit: cover; border-radius: 12px; margin-bottom: 20px;">
 
-## 🏗️ System Architecture: The Modular Split
-The system is decoupled into specialized drivers sharing a common physical foundation.
+> **Probing the behavior of World Models (LeWM) in high-DoF tasks.**
 
-1.  **`simulation_base.py` (The Physical Core)**: The "Source of Truth" for robot physics.
-2.  **`le_wm/` (The Brain)**: A git submodule containing the JEPA (Joint-Embedding Predictive Architecture) world model.
-3.  **`train_lewm.py` (Proprioceptive Learning)**: Fine-tunes the world model on your local 64-D Rosetta datasets.
-4.  **`simulation_vla.py` (Autonomous Mission)**: A proactive **REQ Client** designed for headless/Colab execution.
-5.  **`gr00t_server.py` (VLA Inference)**: A passive inference brain that processes observations using pre-trained VLAs.
+Le-Probe is a research framework designed to analyze and compare the performance of **World Models** versus traditional **Vision-Language-Action (VLA)** policies in complex, multi-phase robotic tasks. 
 
----
+Our primary goal is to understand how latent imagination can handle high-dimensional control (32+ DoF) in tasks that require non-monotonic progress (e.g., moving away from a goal to enable a better grasp).
 
-## 🚀 Headless Autonomy (VLA Mission)
-Designed for Colab or remote environments where no UI is needed.
+## 🚀 Repository Structure
 
-### 1. Start the Inference Server
+The project is organized into functional modules:
+
+- [**`dataset/`**](./dataset): Teleoperation and high-fidelity data collection.
+- [**`vla/`**](./vla): End-to-end foundation model inference (GR00T).
+- [**`lewm/`**](./lewm): World model training, imagination, and MPC planning.
+- [**`interpretability/`**](./interpretability): Probing and visualization tools (Coming Soon).
+- [**`scripts/`**](./scripts): Maintenance and migration utilities.
+
+## 🔬 Core Mission
+
+Current VLAs often struggle with long-horizon tasks that require intermediate sub-goals. **Le-Probe** investigates whether **LeWM** (LeRobot World Model) can provide superior robustness by:
+1. **Latent Imagination**: Visualizing future states before execution.
+2. **Oracle MPC**: Searching for optimal trajectories using a learned reward manifold.
+3. **Behavioral Probing**: Systematic analysis of failure modes in high-DoF environments.
+
+## 🛠 Getting Started
+
+### 1. Installation
 ```bash
-uv run gr1_gr00t/gr00t_server.py --model nvidia/GR00T-N1.5-3B
+git clone --recursive https://github.com/vedpatwardhan/le-probe.git
+cd le-probe
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### 2. Launch the Mission Driver
+### 2. Quick Start (Teleop)
 ```bash
-uv run gr1_gr00t/simulation_vla.py --instruction "Pick up the red cube" --chunks 10
-```
+# Start simulation
+.venv/bin/python dataset/simulation_teleop.py
 
----
-
-## 🕹️ Interactive Teleop & Data Collection
-For manual joint control, IK calibration, and `LeRobot` dataset generation.
-
-### 1. Start the Teleop Sim Server (Port 5556)
-```bash
-uv run gr1_gr00t/simulation_teleop.py
-```
-
-### 2. Start the Streamlit Dashboard
-```bash
-streamlit run gr1_gr00t/teleop_ui.py
-```
-
-### 3. Record Data
-- Click **"Start Recording"** in the Dashboard.
-- Use sliders or the **🎯 IK Pickup** button to perform tasks.
-- Click **"Stop Recording"** to finalize the episode and push it to the Hub.
-
----
-
-## 📂 Key Files
-- **`gr1_config.py`**: Central registry for `XML_PATH`, `SCENE_PATH`, and joint normalization limits.
-- **`le_wm/`**: Submodule containing the JEPA architecture core.
-- **`train_lewm.py`**: The main entry point for proprioceptive fine-tuning on Rosetta-64 datasets.
-- **`sim_assets/`**: High-fidelity MuJoCo XMLs for the robot and pickup environments.
-
----
-
-## 🧠 World Model Training (JEPA)
-To teach the robot's "Brain" how its body moves and affects the world, you can fine-tune the JEPA world model on your collected `LeRobot` datasets.
-
-### 1. Initialize Submodule
-```bash
-git submodule update --init --recursive
-```
-
-### 2. Start Fine-tuning
-Trains the 64-D action predictor while leveraging pre-trained vision weights.
-```bash
-uv run train_lewm.py
+# Launch Dashboard
+streamlit run dataset/teleop_ui.py
 ```
 
 ---
-
-## ⚠️ Requirements
-- **OS**: macOS (Local) / Linux (Colab)
-- **Physics**: `mujoco`, `mink`
-- **Dependencies**: `lerobot`, `einops`, `transformers`, `huggingface-hub`
-- **Visualization**: `rerun-sdk` (Ensure Port 9876 is open/tunneled)
+*Developed by Ved Patwardhan.*

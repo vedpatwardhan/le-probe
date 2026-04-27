@@ -1,6 +1,6 @@
 import torch
 import pytest
-from research.metrics import MetricsCallback
+from lewm.metrics import MetricsCallback
 
 # Constants for synthetic data
 B, D = 128, 192

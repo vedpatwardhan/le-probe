@@ -6,7 +6,7 @@ import os
 # Ensure the library under test is in the path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from research.metrics import MetricsCallback
+from lewm.metrics import MetricsCallback
 
 
 def test_soft_rank_isotropic():

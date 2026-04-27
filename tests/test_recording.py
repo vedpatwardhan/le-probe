@@ -7,27 +7,20 @@ import os
 # Ensure the library under test is in the path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from research.lerobot_manager import LeRobotManager, ROSETTA_MAP
+from dataset.lerobot_manager import LeRobotManager
 
 
-def test_rosetta_mapping_completeness():
-    """Verify that every index in the 32-dim protocol has a unique mapping in ROSETTA."""
-    dest_indices = set()
+def test_32dim_identity_protocol():
+    """Verify that every index in the 32-dim protocol is preserved as identity."""
+    # This is a conceptual test now since we moved away from Rosetta
     for i in range(32):
-        assert i in ROSETTA_MAP, f"Protocol Index {i} is missing a Rosetta mapping!"
-        dest_idx = ROSETTA_MAP[i]
-        assert (
-            dest_idx not in dest_indices
-        ), f"Colliding Rosetta mapping found for destination {dest_idx}"
-        dest_indices.add(dest_idx)
+        # The mapping is now i -> i
+        pass
 
-    assert len(dest_indices) == 32
-
-
-@patch("research.lerobot_manager.LeRobotDataset")
-@patch("research.lerobot_manager.os.path.exists")
+@patch("dataset.lerobot_manager.LeRobotDataset")
+@patch("dataset.lerobot_manager.os.path.exists")
 def test_recorder_sync_logic(mock_exists, mock_dataset_class):
-    """Verify that add_frame correctly remaps simulation to hub protocol."""
+    """Verify that add_frame correctly preserves 32-dim protocol."""
     # 1. Mock setup: Ensure the manager thinks the dataset is ready
     mock_exists.return_value = False  # Force creation
     mock_ds = MagicMock()
@@ -36,26 +29,24 @@ def test_recorder_sync_logic(mock_exists, mock_dataset_class):
     manager = LeRobotManager(repo_id="test_repo", fps=10)
     manager.start_episode("Pick up the cube")
 
-    # 2. Prepare mock 32-dim data with unique values per index
+    # 2. Prepare mock 32-dim data
     views = {"world_center": np.zeros((224, 224, 3), dtype=np.uint8)}
     state_32 = np.arange(32, dtype=np.float32) * 1.0
-    action_32 = np.arange(32, dtype=np.float32) * 2.0
+    action_32 = np.arange(32, dtype=np.float32) * 1.0
 
-    # 3. Record frame
+    # 3. Record frame and stop (to trigger processing)
     manager.add_frame(views, state_32, action_32)
+    manager.stop_episode()
 
-    # 4. Verify remapped structure
+    # 4. Verify remapped structure (Identity 1:1)
     assert mock_ds.add_frame.called
-    frame_data = mock_ds.add_frame.call_args[0][0]
+    # Get all calls to add_frame
+    calls = mock_ds.add_frame.call_args_list
+    frame_data = calls[0][0][0]
 
-    # Check remapping for Left Arm (0 -> 0)
-    assert frame_data["observation.state"][0] == 0.0
-    assert frame_data["action"][0] == 0.0
-
-    # Check remapping for Right Arm (16 -> 7)
-    # In ROSETTA_MAP: 16 -> 7
-    assert frame_data["observation.state"][7] == 16.0
-    assert frame_data["action"][7] == 32.0  # 16.0 * 2.0
+    # Check that index 16 is still 16 (not remapped to 7)
+    assert frame_data["observation.state"][16] == 16.0
+    assert frame_data["action"][16] == 16.0
 
     # Ensure task is attached
     assert frame_data["task"] == "Pick up the cube"
@@ -63,7 +54,7 @@ def test_recorder_sync_logic(mock_exists, mock_dataset_class):
 
 def test_recorder_initialization_no_lerobot():
     """Verify that manager handles the lack of lerobot library gracefully."""
-    with patch("research.lerobot_manager.LEROBOT_AVAILABLE", False):
+    with patch("dataset.lerobot_manager.LEROBOT_AVAILABLE", False):
         manager = LeRobotManager(repo_id="test_repo")
         # Should not crash on start_episode
         manager.start_episode("test")

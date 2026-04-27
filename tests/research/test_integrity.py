@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import pytest
-from research.gr1_modules import GR1Embedder, GR1MLP
+from lewm.gr1_modules import GR1Embedder, GR1MLP
 
 
 def test_gr1_embedder_forward():
