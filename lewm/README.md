@@ -9,10 +9,7 @@ Our research shows that while LeWM can learn to predict video frames accurately,
 <div align="center">
   <h3>Planning Audit (LeWM MPC)</h3>
   <p>Note the flailing and lack of clear progress towards the goal despite correct frame prediction in imagination.</p>
-  <video width="640" controls>
-    <source src="../assets/lewm_grasp.mp4" type="video/mp4">
-    Your browser does not support the video tag.
-  </video>
+  <video src="../assets/lewm_grasp.mp4" controls></video>
 </div>
 
 - **Latent Confusion**: The world model often fails to distinguish the final goal state from intermediate states in the latent manifold, leading to "stalled" planning.

@@ -30,18 +30,8 @@ We maintained two high-quality datasets representing different manipulation prio
       <th>Dataset: Cup Pattern</th>
     </tr>
     <tr>
-      <td>
-        <video width="320" controls>
-          <source src="assets/dataset_grasp.mp4" type="video/mp4">
-          Your browser does not support the video tag.
-        </video>
-      </td>
-      <td>
-        <video width="320" controls>
-          <source src="assets/dataset_cup.mp4" type="video/mp4">
-          Your browser does not support the video tag.
-        </video>
-      </td>
+      <td><video src="assets/dataset_grasp.mp4" controls></video></td>
+      <td><video src="assets/dataset_cup.mp4" controls></video></td>
     </tr>
   </table>
 </div>
@@ -56,18 +46,8 @@ We successfully trained GR00T-N1 to imitate both styles. Despite early protocol 
       <th>VLA: Cup Execution</th>
     </tr>
     <tr>
-      <td>
-        <video width="320" controls>
-          <source src="assets/vla_grasp.mp4" type="video/mp4">
-          Your browser does not support the video tag.
-        </video>
-      </td>
-      <td>
-        <video width="320" controls>
-          <source src="assets/vla_cup.mp4" type="video/mp4">
-          Your browser does not support the video tag.
-        </video>
-      </td>
+      <td><video src="assets/vla_grasp.mp4" controls></video></td>
+      <td><video src="assets/vla_cup.mp4" controls></video></td>
     </tr>
   </table>
 </div>
@@ -76,11 +56,8 @@ We successfully trained GR00T-N1 to imitate both styles. Despite early protocol 
 LeWM, despite training with a large softrank, failed to sufficiently discriminate the goal state from non-goal states in the latent space. 
 
 <div align="center">
-  <h3>LeWM MPC Inference (Clipped)</h3>
-  <video width="640" controls>
-    <source src="assets/lewm_grasp.mp4" type="video/mp4">
-    Your browser does not support the video tag.
-  </video>
+  <h3>LeWM: Grasp Execution</h3>
+  <video src="assets/lewm_grasp.mp4" controls></video>
 </div>
 
 *   **Reward Head Intervention**: To fix this, we trained an auxiliary reward head on snapshot data. While reward prediction is now accurate, the MPC solver often fails to find trajectories as smooth or effective as the VLA baseline.
