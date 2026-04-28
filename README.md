@@ -16,12 +16,19 @@ My investigation focuses on a high-DoF (32+) manipulation task that require mult
 - [**`interpretability/`**](./interpretability): The "Search for the Why"—mechanistic analysis of LeWM failure modes.
 - [**`scripts/`**](./scripts): Maintenance, dataset compression, and reward calibration tools.
 
+## 📚 Contents
+
+- **Core Mission:** Explains the work done so far and results.
+- **Getting Started:** Installation and setup instructions to reproduce the results.
+- **Details:** Each of the sub-folders mentioned above have their own README files providing more details about the process and the results.
+
 ## 🔬 Core Mission: VLA vs. LeWM
 
-The project was born from a comparative study of two approaches to the same task: picking up a red cube.
+The project was born from a comparative study of GR00T N1 with LeWM for **picking up a red cube** from the table, but eventually turned into a mechanistic interpretability project for LeWM to understand the latent space in more detail.
 
 ### 1. Target Behaviors (Ground Truth)
-I maintained two high-quality datasets representing different manipulation priors.
+
+I've created two datasets aimed at picking up the cube with different behavioural strategies:
 
 <div align="center">
   <table>
@@ -36,8 +43,11 @@ I maintained two high-quality datasets representing different manipulation prior
   </table>
 </div>
 
+More details are available in [**`dataset/README.md`**](./dataset/README.md).
+
 ### 2. VLA Baseline Success (GR00T-N1)
-I successfully trained GR00T-N1 to imitate both styles. Despite early protocol mismatches, the "Parity Refactor" stabilized the inference stack, allowing GR00T to execute both behaviors reliably.
+
+I trained GR00T-N1 to imitate both styles using BC. While the robot isn't able to actually pick up the cube, the behaviour of the model trained with the grasp movement as opposed to the cup movement is clearly visible.
 
 More details available in [**`vla/README.md`**](./vla/README.md).
 
@@ -117,6 +127,7 @@ Given we now have an interpretable latent space, it would help identify the effe
 1. **Multi-View Data:** Currently LeWM was only trained with the front camera (`world_center`), unlike GR00T that was trained on 5 different views (`world_center`, `world_right`, `world_left`, `world_top` and `world_wrist`). Training LeWM with 5 views would require further tweaks to the pipeline but is likely to lead to more effective discrimination between goal states and non-goal states.
 2. **Reachability:** Another potential improvement could be achieved by using kinematic polytopes (using tools like PyCapacity) around the right arm in particular, to further guide the model for avoiding catastrophic failures like folding the arm behind the back or lifting it in the air. Neither of these failure modes were part of the dataset as a result of which it's likely that the model hasn't learned to avoid them and it's not feasible to have all failure modes in the dataset given the number of degrees of freedom.
 3. **Behavioural Strategies:** Currently our training was focused just on the grasp movement, but once that behaviour works reasonably well, the next goal would be training the model on the cup movement as well.
+4. **Latent Steering**: Closing the causal loop by using Feature 90 (Tactile Engagement) as a reward booster during real-time inference.
 
 ## 🛠 Getting Started
 
@@ -135,12 +146,22 @@ I have published three core datasets used for the above results:
 - [**`gr1_reward_pred`**](https://huggingface.co/datasets/vedpatwardhan/gr1_reward_pred): Multi-behavioral data used to train the Reward Head.
 
 Optionally, if you'd like to record new datasets you can use the following:
+
+#### Data Collection
 ```bash
-# Terminal 1: Simulation Server
+# Start the Rerun server
+rerun
+
+# Start Sim Server
 .venv/bin/python dataset/simulation_teleop.py
 
-# Terminal 2: Dashboard
+# Start Dashboard
 streamlit run dataset/teleop_ui.py
+```
+
+#### Dataset Upload
+```bash
+.venv/bin/python dataset/upload_dataset.py --repo_id <>
 ```
 
 ### 2. VLA (GR00T-N1)
@@ -190,6 +211,44 @@ The weights of the reward-tuned model can be found at [`gr1_reward_tuned_v2.ckpt
    ```bash
    .venv/bin/python lewm/simulation_lewm.py --host <host> --port <port>
    ```
+
+### 4. Interpretability
+
+1. **Activation Harvesting**: Collect raw latents from the frozen World Model to build the interpretability dataset:
+```bash
+# Harvests ENC and PRED latents across snapshots and LeRobot datasets
+.venv/bin/python interpretability/sae/harvest_activations.py --out activations_dual_14k.pt
+```
+
+2. **Feature Training (SAE & CLT)**: Decompose the latent space and train cross-layer transcoders:
+```bash
+# 1. Train Sparse Autoencoder on harvested latents
+.venv/bin/python interpretability/sae/train_sae.py --input activations_dual_14k.pt --dict_size 1024 --l1 1e-3
+
+# 2. Inspect SAE Features
+.venv/bin/python interpretability/sae/inspect_sae.py --latents activations_dual_14k.pt --sae sae_weights.pt
+
+# 3. Train Cross-Layer Transcoder to map features across the transformer
+.venv/bin/python interpretability/clt/train_clt.py --input activations_dual_14k.pt --dict_size 1024
+
+# 4. Inspect CLT
+.venv/bin/python interpretability/clt/inspect_clt.py --clt clt_weights.pt --data activations_dual_14k.pt
+```
+
+3. **Mechanistic Audit & Feature Discovery**: Identify "Golden Triggers" and visualize the model's internal representations:
+```bash
+# 1. Find peak activation frames for specific features (e.g., Feature 90)
+.venv/bin/python scripts/find_feature_triggers.py --feature 90
+
+# 2. Generate bit-perfect canonical triptychs for found triggers
+.venv/bin/python scripts/generate_canonical_triptychs.py
+```
+
+4. **Canonical State Reproduction**: Extract precise joint vectors and images for reproduction in the simulation:
+```bash
+# Harvests 32-dim action vectors and high-res images to le-probe/temp_repro
+.venv/bin/python scripts/reproduce_canonical_states_direct.py
+```
 
 ---
 *Developed by Ved Patwardhan.*

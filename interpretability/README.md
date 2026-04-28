@@ -1,48 +1,41 @@
 # Interpretability: Probing the Latent Mystery
 
-This module is the research frontier of **Le-Probe**. It focuses on answering the fundamental question: **"Why does the World Model fail where the VLA succeeds?"**
+As we saw in the [**`lewm/README.md`**](../lewm/README.md), LeWM struggles with **Latent Discriminability**—the inability to find a clear path to the goal in the latent manifold for our dataset.
 
-## 🔭 Research Agenda
+This motivated the need for a deeper understanding of the latent space for our model before attempting further improvements to the model and the training pipeline as a whole.
 
-My current findings show that LeWM struggles with **Latent Discriminability**—the inability to find a clear path to the goal in the latent manifold. I am building tools to probe this behavior:
+## 📐 Methodology
 
-1.  **Latent Trajectory Analysis**: Visualizing the "imagined" future states of the World Model to identify where the planner diverges from reality.
-2.  **Circuit Tracing**: Mechanistic analysis of the transformer layers to understand how reach-to-grasp intent is encoded (or lost).
-3.  **Reward Manifold Auditing**: Mapping the topology of the reward head predictions to find local minima and "dead zones" that trap the MPC solver.
+Following is the architecture used for experimenting with the trained model for interpretability,
 
----
+<div align="center">
+  <img src="assets/interpretability_architecture.png" width="70%" style="border-radius: 12px; margin-top: 20px;">
+  <p><i>LeWM Interpretability: Mechanistic Analysis & Causal Intervention Stack</i></p>
+</div>
 
-## 🏗 Toolkit Architecture
+### 🛠 Key Components
+
+- [`sae`]: Sparse Autoencoders for getting more interpretable features out of the model
+- [`clt`]: Cross-Layer Transcoders for understanding how those features compound through the network.
+- [`steering`]: Latent Steering used for interpretability (hasn't been tried yet).
+
+### 🏗 Process
 
 We have implemented a three-phase mechanistic interpretability stack that operates with **Zero-Impact Modularity** (using PyTorch hooks to avoid modifying the core `lewm` code).
 
-### 🍎 Phase I: The SAE Harvest (`/sae`)
+#### 🍎 Phase I: The SAE Harvest (`/sae`)
 To "crack" the 192d latent bottleneck, we perform a **Data Harvest**.
 - **Instrumentation**: `activation_harvester.py` attaches hooks to the `Predictor` and `Encoder`.
 - **Data Crop**: `harvest_activations.py` runs ~1,000 diverse simulation episodes.
 - **Decomposition**: `train_sae.py` trains a **Sparse Autoencoder** to map dense latents to 12,000+ monosemantic physical features (e.g., "gripper-cube contact").
 
-### ⚡ Phase II: Circuit Tracing (`/clt`)
+#### ⚡ Phase II: Circuit Tracing (`/clt`)
 Once features are isolated, we use **Cross-Layer Transcoders (CLTs)** to understand the model's logic.
 - **Mechanism**: `clt_model.py` maps features from one layer/time-step directly to the next.
 - **Goal**: Tracing "verbs" (e.g., *how* an action causes a state change) by linearizing the Predictor's internal MLP.
 
-### 🎮 Phase III: Causal Intervention (`/steering`)
-The final phase applies this knowledge to active control.
-- **Mechanism**: `latent_steering.py` allows for real-time feature ablation or amplification during the CEM unroll.
-- **Use Case**: Surgically removing "Hallucination" features or amplifying "Stability" features to guide the robot's physical intent.
-
----
-
-### 🛠 Why Custom Harvester vs. SAELens-V?
-We use a custom implementation for the **Harvest** to ensure:
-1.  **Zero-Impact Modularity**: No changes to the `le_wm` source code via external hooks.
-2.  **Simulation Integration**: Direct coupling with the MuJoCo physics step.
-3.  **JEPA Compatibility**: Handling Gaussian-regularized (SIGReg) latents which differ from standard LLM residual streams.
-
-*Note: Once harvested, the data can be exported to SAELens-V for advanced feature dashboarding and circuit analysis.*
-
 ## 🔬 Results
+
 After training the CLT, we successfully isolated three core mechanistic features that define the GR-1 pickup sequence in the `gr1_pickup_grasp` dataset:
 
 | Feature | Label | Max Act. | Episode | Frame Index | Phase Context |
@@ -69,11 +62,58 @@ Following are the plots demonstrating the transition of states triggering the ab
 </div>
 
 ## 🚀 Research Roadmap: Next Steps
+
 The discovery of these interpretable features allows us to audit the effects of key architectural changes:
 
-1.  **Multi-View Latents**: Transitioning from single-view (`world_center`) to the full 5-view stack used by GR00T. This is expected to harden Feature 358 (Spatial Lockdown) against visual occlusion.
-2.  **Reachability Constraints**: Integrating kinematic polytopes (e.g., PyCapacity) to prevent the MPC solver from exploring non-physical "folding" maneuvers that the dataset cannot currently penalize.
-3.  **Latent Steering**: Closing the causal loop by using Feature 90 (Tactile Engagement) as a reward booster during real-time inference.
+1. **Multi-View Data:** Currently LeWM was only trained with the front camera (`world_center`), unlike GR00T that was trained on 5 different views (`world_center`, `world_right`, `world_left`, `world_top` and `world_wrist`). Training LeWM with 5 views would require further tweaks to the pipeline but is likely to lead to more effective discrimination between goal states and non-goal states.
+2. **Reachability:** Another potential improvement could be achieved by using kinematic polytopes (using tools like PyCapacity) around the right arm in particular, to further guide the model for avoiding catastrophic failures like folding the arm behind the back or lifting it in the air. Neither of these failure modes were part of the dataset as a result of which it's likely that the model hasn't learned to avoid them and it's not feasible to have all failure modes in the dataset given the number of degrees of freedom.
+3. **Behavioural Strategies:** Currently our training was focused just on the grasp movement, but once that behaviour works reasonably well, the next goal would be training the model on the cup movement as well.
+4. **Latent Steering**: Closing the causal loop by using Feature 90 (Tactile Engagement) as a reward booster during real-time inference.
 
----
-*Status: Framework operational. Canonical features 90, 358, and 743 verified.*
+## 🚀 Workflows
+
+### 0. Pre-trained Artifacts
+
+- [`activations_dual_14k.pt`](https://drive.google.com/file/d/169G_KAaQXCUbFH4wu6u5eoYFU9qInb2u/view?usp=sharing): Harvested latents from ENC and PRED.
+- [`sae_weights.pt`](https://drive.google.com/file/d/12rrdjf1GKd_1OEVFzBI-lhNzc30yFYiQ/view?usp=sharing): Trained Sparse Autoencoder.
+- [`clt_weights.pt`](https://drive.google.com/file/d/1PQCZYzIGhRAh8FcxYyHV4-Sac7Ap2v_v/view?usp=sharing): Trained Cross-Layer Transcoder.
+
+### 1. Activation Harvesting
+Collect raw latents from the frozen World Model to build the interpretability dataset:
+```bash
+# Harvests ENC and PRED latents across snapshots and LeRobot datasets
+.venv/bin/python interpretability/sae/harvest_activations.py --out activations_dual_14k.pt
+```
+
+### 2. Feature Training (SAE & CLT)
+Decompose the latent space and train cross-layer transcoders:
+```bash
+# 1. Train Sparse Autoencoder on harvested latents
+.venv/bin/python interpretability/sae/train_sae.py --input activations_dual_14k.pt --dict_size 1024 --l1 1e-3
+
+# 2. Inspect SAE Features
+.venv/bin/python interpretability/sae/inspect_sae.py --latents activations_dual_14k.pt --sae sae_weights.pt
+
+# 3. Train Cross-Layer Transcoder to map features across the transformer
+.venv/bin/python interpretability/clt/train_clt.py --input activations_dual_14k.pt --dict_size 1024
+
+# 4. Inspect CLT
+.venv/bin/python interpretability/clt/inspect_clt.py --clt clt_weights.pt --data activations_dual_14k.pt
+```
+
+### 3. Mechanistic Audit & Feature Discovery
+Identify "Golden Triggers" and visualize the model's internal representations:
+```bash
+# 1. Find peak activation frames for specific features (e.g., Feature 90)
+.venv/bin/python scripts/find_feature_triggers.py --feature 90
+
+# 2. Generate bit-perfect canonical triptychs for found triggers
+.venv/bin/python scripts/generate_canonical_triptychs.py
+```
+
+### 4. Canonical State Reproduction
+Extract precise joint vectors and images for reproduction in the simulation:
+```bash
+# Harvests 32-dim action vectors and high-res images to le-probe/temp_repro
+.venv/bin/python scripts/reproduce_canonical_states_direct.py
+```
