@@ -52,7 +52,7 @@ The results with solely relying on the goal state embeddings weren't useful, but
 <div align="center">
   <b>LeWM: Grasp Execution (Reward Head Trained)</b>
   <hr width="320">
-  <img src="assets/lewm_grasp.gif" width="320">
+  <img src="../assets/lewm_grasp.gif" width="320">
 </div>
 
 ## ⚠️ Current Challenges: The Discriminability Gap
