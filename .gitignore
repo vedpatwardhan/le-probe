@@ -1,6 +1,7 @@
 __pycache__
 .DS_Store
 temp_images
+temp_repro
 brain_snapshots
 datasets
 scratch
@@ -8,3 +9,4 @@ scratch
 run_*
 phase_lifecycle.json
 teleop_settings.json
+canonical_reproduction.json

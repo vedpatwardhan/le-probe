@@ -39,6 +39,8 @@ I maintained two high-quality datasets representing different manipulation prior
 ### 2. VLA Baseline Success (GR00T-N1)
 I successfully trained GR00T-N1 to imitate both styles. Despite early protocol mismatches, the "Parity Refactor" stabilized the inference stack, allowing GR00T to execute both behaviors reliably.
 
+More details available in [**`vla/README.md`**](./vla/README.md).
+
 <div align="center">
   <table>
     <tr>
@@ -53,11 +55,13 @@ I successfully trained GR00T-N1 to imitate both styles. Despite early protocol m
 </div>
 
 ### 3. LeWM Challenges (The Discriminability Gap)
-LeWM, despite training with a large softrank, failed to sufficiently discriminate the goal state from non-goal states in the latent space. 
+LeWM, despite training with a large softrank, failed to sufficiently discriminate the goal state from non-goal states in the latent space.
 
-*   **Reward Head Intervention**: To fix this, I trained an auxiliary reward head on snapshot data with a broader range than just successful trajectories. While reward prediction was much better, the MPC solver still didn't manage to actually pick up the cube and instead just got close to it and moved away.
-*   **Current Status**: I'm currently focused on why "good imagination" in the JEPA architecture does not always translate to "good action" in high-DoF control, from the perspectives of getting goal states sufficiently discriminated from non-goal states and testing the limits of the reward head.
-*   **Approach**: The next step is to build attribution graphs for the trained model to observe possible sparse-features in the latent space, different circuits used by the prediction head and performing interventions on the same to draw stronger causal connections. This can be tested with manipulation ellipsoids to encourage more intuitive movements, training with multi-view data, etc.
+More details available in [**`lewm/README.md`**](./lewm/README.md).
+
+#### Reward Head Intervention
+
+To try and still get some sort of idea of the quality of training, I trained an auxiliary reward head on snapshot data with a broader range of trajectories predict the reward from the latent space. While reward prediction was much better, the MPC solver still didn't manage to actually pick up the cube and instead just got close to it and moved away as you can see in the video below.
 
 <div align="center">
   <b>LeWM: Grasp Execution</b>
@@ -65,12 +69,53 @@ LeWM, despite training with a large softrank, failed to sufficiently discriminat
   <img src="assets/lewm_grasp.gif" width="320">
 </div>
 
-### 4. Architecture for Interpretability
+#### Next Steps
+
+Given the behaviour somewhat works but nowhere near good enough, the next step is to try and probe into the model if we can find certain sparse features. Given that my training run of the LeWM model ended up with a softrank of about 75, it is likely possible to identify certain sparse features that influence the latent space more than others.
+
+### 4. Interpretability
+
+#### Architecture
+
+Following is the architecture used for experimenting with the trained model for interpretability,
 
 <div align="center">
   <img src="assets/interpretability_architecture.png" width="70%" style="border-radius: 12px; margin-top: 20px;">
   <p><i>LeWM Interpretability: Mechanistic Analysis & Causal Intervention Stack</i></p>
 </div>
+
+#### Results
+
+After training the CLT (details available in [**`interpretability/clt/`**](./interpretability/clt/)), there were 3 features that were firing at a large value at certain phases of the pickup in the training data (`gr1_pickup_grasp`):
+
+| Feature | Label | Max Act. | Episode | Frame Index | Phase |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **358** | **Spatial Lockdown** | **2.0461** | 111 | 27 | Lift (Post-Grip) |
+| **90** | **Tactile Engagement** | **1.5157** | 115 | 23 | Grasp (Coupling) |
+| **743** | **Alignment Precision** | **1.5508** | 19 | 25 | Grasp-to-Lift Handover |
+
+Following are the plots demonstrating the transition of states triggering the above features:
+
+<div align="center">
+  <p>Spatial Lockdown</p>
+  <img src="assets/spatial_lockdown.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
+</div>
+
+<div align="center">
+  <p>Tactile Engagement</p>
+  <img src="assets/tactile_engagement.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
+</div>
+
+<div align="center">
+  <p>Alignment Precision</p>
+  <img src="assets/alignment_precision.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
+</div>
+
+#### Next Steps
+
+Given we now have an interpretable latent space, it would help identify the effects of the following changes to the training pipeline:
+1. **Multi-View Data:** Currently LeWM was only trained with the front camera (`world_center`), unlike GR00T that was trained on 5 different views (`world_center`, `world_right`, `world_left`, `world_top` and `world_wrist`). Training LeWM with 5 views would require further tweaks to the pipeline but is likely to lead to more effective discrimination between goal states and non-goal states.
+2. **Reachability:** Another potential improvement could be achieved by using kinematic polytopes (using tools like PyCapacity) around the right arm in particular, to further guide the model for avoiding catastrophic failures like folding the arm behind the back or lifting it in the air. Neither of these failure modes were part of the dataset as a result of which it's likely that the model hasn't learned to avoid them and it's not feasible to have all failure modes in the dataset given the number of degrees of freedom.
 
 ## 🛠 Getting Started
 
