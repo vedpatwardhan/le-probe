@@ -53,12 +53,10 @@ def encode_dual_layer(model, device, batch_imgs):
 
     # 2. Predictor Path (Handoff)
     # We pass the enc_latents into the predictor with zero actions to see the "base" predictive state
-    # (Or we harvest the first layer of the transformer)
-    # For now, let's harvest the pred_proj output which is the 'future latent' space
-    dummy_act = torch.zeros(batch_x.size(0), 1, 14).to(
-        device
-    )  # 14 is typical action dim
-    pred_latents = model.predict(enc_latents.unsqueeze(1), dummy_act).squeeze(1)
+    # Note: GR1Embedder expects 32d input (Action 14d + State 18d)
+    dummy_act = torch.zeros(batch_x.size(0), 1, 32).to(device)
+    act_emb = model.action_encoder(dummy_act)  # Encode 32d -> 192d
+    pred_latents = model.predict(enc_latents.unsqueeze(1), act_emb).squeeze(1)
 
     return enc_latents.cpu(), pred_latents.cpu()
 
