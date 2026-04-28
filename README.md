@@ -4,9 +4,9 @@
   <img src="assets/banner.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
 </div>
 
-Le-Probe is a research framework designed to analyze and compare **LeWM** against traditional **Vision-Language-Action (VLA)** policies like GR00T-N1.
+Le-Probe is a project meant to analyze and compare **LeWM** against traditional **Vision-Language-Action (VLA)** policies like GR00T-N1.
 
-My investigation focuses on high-DoF (32+) manipulation tasks that require multi-phase coordination, specifically comparing two distinct behavioral strategies: **Grasp** and **Cup**.
+My investigation focuses on a high-DoF (32+) manipulation task that require multi-phase coordination, specifically comparing two distinct behavioral strategies: **Grasp** and **Cup**.
 
 ## 🚀 Repository Structure
 
@@ -116,6 +116,7 @@ Following are the plots demonstrating the transition of states triggering the ab
 Given we now have an interpretable latent space, it would help identify the effects of the following changes to the training pipeline:
 1. **Multi-View Data:** Currently LeWM was only trained with the front camera (`world_center`), unlike GR00T that was trained on 5 different views (`world_center`, `world_right`, `world_left`, `world_top` and `world_wrist`). Training LeWM with 5 views would require further tweaks to the pipeline but is likely to lead to more effective discrimination between goal states and non-goal states.
 2. **Reachability:** Another potential improvement could be achieved by using kinematic polytopes (using tools like PyCapacity) around the right arm in particular, to further guide the model for avoiding catastrophic failures like folding the arm behind the back or lifting it in the air. Neither of these failure modes were part of the dataset as a result of which it's likely that the model hasn't learned to avoid them and it's not feasible to have all failure modes in the dataset given the number of degrees of freedom.
+3. **Behavioural Strategies:** Currently our training was focused just on the grasp movement, but once that behaviour works reasonably well, the next goal would be training the model on the cup movement as well.
 
 ## 🛠 Getting Started
 

@@ -42,13 +42,38 @@ We use a custom implementation for the **Harvest** to ensure:
 
 *Note: Once harvested, the data can be exported to SAELens-V for advanced feature dashboarding and circuit analysis.*
 
-## 🔬 Goal
-By probing the internals of the JEPA architecture, I aim to bridge the gap between "good imagination" (visual accuracy) and "good action" (motor control), enabling World Models to handle the 32-DoF complexity of the GR-1 platform.
+## 🔬 Results
+After training the CLT, we successfully isolated three core mechanistic features that define the GR-1 pickup sequence in the `gr1_pickup_grasp` dataset:
+
+| Feature | Label | Max Act. | Episode | Frame Index | Phase Context |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **358** | **Spatial Lockdown** | **2.0461** | 111 | 27 | Lift (Post-Grip) |
+| **90** | **Tactile Engagement** | **1.5157** | 115 | 23 | Grasp (Coupling) |
+| **743** | **Alignment Precision** | **1.5508** | 19 | 25 | Grasp-to-Lift Handover |
+
+Following are the plots demonstrating the transition of states triggering the above features:
 
 <div align="center">
-  <img src="../assets/interpretability_architecture.png" width="70%" style="border-radius: 12px; margin-top: 20px;">
-  <p><i>LeWM Interpretability: Mechanistic Analysis & Causal Intervention Stack</i></p>
+  <p>Spatial Lockdown</p>
+  <img src="../assets/spatial_lockdown.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
 </div>
 
+<div align="center">
+  <p>Tactile Engagement</p>
+  <img src="../assets/tactile_engagement.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
+</div>
+
+<div align="center">
+  <p>Alignment Precision</p>
+  <img src="../assets/alignment_precision.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
+</div>
+
+## 🚀 Research Roadmap: Next Steps
+The discovery of these interpretable features allows us to audit the effects of key architectural changes:
+
+1.  **Multi-View Latents**: Transitioning from single-view (`world_center`) to the full 5-view stack used by GR00T. This is expected to harden Feature 358 (Spatial Lockdown) against visual occlusion.
+2.  **Reachability Constraints**: Integrating kinematic polytopes (e.g., PyCapacity) to prevent the MPC solver from exploring non-physical "folding" maneuvers that the dataset cannot currently penalize.
+3.  **Latent Steering**: Closing the causal loop by using Feature 90 (Tactile Engagement) as a reward booster during real-time inference.
+
 ---
-*Status: Framework implemented. Phase I Execution pending dataset harvest.*
+*Status: Framework operational. Canonical features 90, 358, and 743 verified.*
