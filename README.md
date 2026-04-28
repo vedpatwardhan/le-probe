@@ -214,6 +214,12 @@ The weights of the reward-tuned model can be found at [`gr1_reward_tuned_v2.ckpt
 
 ### 4. Interpretability
 
+0. **Pre-trained Artifacts**:
+
+- [`activations_dual_14k.pt`](https://drive.google.com/file/d/169G_KAaQXCUbFH4wu6u5eoYFU9qInb2u/view?usp=sharing): Harvested latents from ENC and PRED.
+- [`sae_weights.pt`](https://drive.google.com/file/d/12rrdjf1GKd_1OEVFzBI-lhNzc30yFYiQ/view?usp=sharing): Trained Sparse Autoencoder.
+- [`clt_weights.pt`](https://drive.google.com/file/d/1PQCZYzIGhRAh8FcxYyHV4-Sac7Ap2v_v/view?usp=sharing): Trained Cross-Layer Transcoder.
+
 1. **Activation Harvesting**: Collect raw latents from the frozen World Model to build the interpretability dataset:
 ```bash
 # Harvests ENC and PRED latents across snapshots and LeRobot datasets
