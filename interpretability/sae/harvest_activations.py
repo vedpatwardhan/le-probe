@@ -40,32 +40,42 @@ def get_best_device():
 
 
 @torch.no_grad()
-def encode_batch(model, device, batch_imgs):
-    """Unified encoding logic for all datasets."""
+def encode_dual_layer(model, device, batch_imgs):
+    """
+    Harvests activations from both the Encoder and the Predictor for CLT training.
+    """
     batch_x = torch.stack(batch_imgs).to(device)
-    output = model.encoder(batch_x, interpolate_pos_encoding=True)
-    pixels_emb = output.last_hidden_state[:, 0]  # CLS token
-    emb = model.projector(pixels_emb)
-    return emb.cpu()
+
+    # 1. Encoder Path
+    enc_out = model.encoder(batch_x, interpolate_pos_encoding=True)
+    pixels_emb = enc_out.last_hidden_state[:, 0]
+    enc_latents = model.projector(pixels_emb)  # (B, 192)
+
+    # 2. Predictor Path (Handoff)
+    # We pass the enc_latents into the predictor with zero actions to see the "base" predictive state
+    # (Or we harvest the first layer of the transformer)
+    # For now, let's harvest the pred_proj output which is the 'future latent' space
+    dummy_act = torch.zeros(batch_x.size(0), 1, 14).to(
+        device
+    )  # 14 is typical action dim
+    pred_latents = model.predict(enc_latents.unsqueeze(1), dummy_act).squeeze(1)
+
+    return enc_latents.cpu(), pred_latents.cpu()
 
 
 def harvest(ckpt_path, dataset_root, output_path):
     device = get_best_device()
-    print(f"🚀 Initializing Harvest | Device: {device} | CKPT: {ckpt_path}")
-
-    # 1. Load Model
-    if not os.path.exists(ckpt_path):
-        print(f"❌ Error: Model not found at {ckpt_path}")
-        return
+    print(f"🚀 Dual-Layer Harvest (CLT) | Device: {device} | CKPT: {ckpt_path}")
 
     gm = GoalMapper(ckpt_path, dataset_root)
     model = gm.model.to(device)
     model.eval()
 
-    all_latents = []
+    all_enc = []
+    all_pred = []
     batch_size = 64
 
-    # 2. Dataset Definitions
+    # Dataset Definitions
     lerobot_datasets = [
         "vedpatwardhan/gr1_pickup_cup",
         "vedpatwardhan/gr1_pickup_grasp",
@@ -74,82 +84,55 @@ def harvest(ckpt_path, dataset_root, output_path):
         dataset_root, "vedpatwardhan/gr1_reward_pred/dataset.parquet"
     )
 
-    # 3. Harvest Snapshot Parquet (FAIL FAST)
-    if not os.path.exists(reward_pred_path):
-        print(f"📡 Snapshot parquet not found. Attempting Hub fetch...")
-        try:
-            reward_pred_path = hf_hub_download(
-                repo_id="vedpatwardhan/gr1_reward_pred",
-                filename="dataset.parquet",
-                repo_type="dataset",
-                local_dir=os.path.dirname(reward_pred_path),
-            )
-        except Exception as e:
-            print(f"⚠️ Could not fetch snapshots from Hub: {e}")
-
+    # [Snapshot Harvest Code Simplified for Dual Layer]
     if os.path.exists(reward_pred_path):
         print(f"📂 Harvesting Snapshots: {reward_pred_path}")
-        try:
-            df = pd.read_parquet(reward_pred_path)
-            images = df["observation.images.world_center"].values
-            batch = []
-
-            for i, raw_img in enumerate(tqdm(images, desc="Processing snapshots")):
-                try:
-                    # Reconstruction logic from tune_reward_head.py
-                    img = np.stack(
-                        [
-                            np.array(raw_img[0].tolist(), dtype=np.uint8),
-                            np.array(raw_img[1].tolist(), dtype=np.uint8),
-                            np.array(raw_img[2].tolist(), dtype=np.uint8),
-                        ],
-                        axis=-1,
-                    )
-                except Exception:
-                    img = np.array(raw_img).astype(np.uint8)
-                    if img.ndim == 3 and img.shape[0] == 3:
-                        img = img.transpose(1, 2, 0)
-
-                batch.append(gm.transform({"pixels": img})["pixels"])
-
-                if len(batch) == batch_size or i == len(images) - 1:
-                    all_latents.append(encode_batch(model, device, batch))
-                    batch = []
-        except Exception as e:
-            print(f"❌ Error harvesting snapshots: {e}")
-            traceback.print_exc()
-
-    # 4. Harvest LeRobot Datasets
-    if LEROBOT_AVAILABLE:
-        for repo_id in lerobot_datasets:
-            ds_path = os.path.join(dataset_root, repo_id)
-            print(f"📂 Harvesting LeRobot: {repo_id}")
+        df = pd.read_parquet(reward_pred_path)
+        images = df["observation.images.world_center"].values
+        batch = []
+        for i, raw_img in enumerate(tqdm(images, desc="Snapshots")):
             try:
-                dataset = LeRobotDataset(repo_id=repo_id, root=ds_path)
+                img = np.stack(
+                    [np.array(raw_img[c].tolist(), dtype=np.uint8) for c in range(3)],
+                    axis=-1,
+                )
+            except:
+                img = np.array(raw_img).astype(np.uint8)
+                if img.ndim == 3 and img.shape[0] == 3:
+                    img = img.transpose(1, 2, 0)
+
+            batch.append(gm.transform({"pixels": img})["pixels"])
+            if len(batch) == batch_size or i == len(images) - 1:
+                e, p = encode_dual_layer(model, device, batch)
+                all_enc.append(e)
+                all_pred.append(p)
                 batch = []
 
-                for i in tqdm(range(len(dataset)), desc=f"Processing {repo_id}"):
-                    img = dataset[i]["observation.images.world_center"]
-                    if not (torch.is_tensor(img) or isinstance(img, np.ndarray)):
-                        img = np.array(img)
+    # [LeRobot Harvest Code Simplified for Dual Layer]
+    if LEROBOT_AVAILABLE:
+        for repo_id in lerobot_datasets:
+            print(f"📂 Harvesting LeRobot: {repo_id}")
+            dataset = LeRobotDataset(
+                repo_id=repo_id, root=os.path.join(dataset_root, repo_id)
+            )
+            batch = []
+            for i in tqdm(range(len(dataset)), desc=repo_id):
+                img = dataset[i]["observation.images.world_center"]
+                if not (torch.is_tensor(img) or isinstance(img, np.ndarray)):
+                    img = np.array(img)
+                batch.append(gm.transform({"pixels": img})["pixels"])
+                if len(batch) == batch_size or i == len(dataset) - 1:
+                    e, p = encode_dual_layer(model, device, batch)
+                    all_enc.append(e)
+                    all_pred.append(p)
+                    batch = []
 
-                    batch.append(gm.transform({"pixels": img})["pixels"])
-
-                    if len(batch) == batch_size or i == len(dataset) - 1:
-                        all_latents.append(encode_batch(model, device, batch))
-                        batch = []
-            except Exception as e:
-                print(f"❌ Error harvesting {repo_id}: {e}")
-                traceback.print_exc()
-
-    # 5. Save Final Activation Set
-    if all_latents:
-        final_latents = torch.cat(all_latents, dim=0)
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        torch.save(final_latents, output_path)
-        print(f"💾 Success! Saved {len(final_latents)} latents to {output_path}")
-    else:
-        print("❌ No latents were harvested.")
+    if all_enc:
+        torch.save(
+            {"enc": torch.cat(all_enc, dim=0), "pred": torch.cat(all_pred, dim=0)},
+            output_path,
+        )
+        print(f"💾 Dual-Layer Latents saved to {output_path}")
 
 
 if __name__ == "__main__":
@@ -161,8 +144,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--root", type=str, default=os.path.join(ROOT_DIR, "datasets"))
     parser.add_argument(
-        "--out", type=str, default=os.path.join(SCRIPT_DIR, "activations_14k.pt")
+        "--out", type=str, default=os.path.join(SCRIPT_DIR, "activations_dual_14k.pt")
     )
     args = parser.parse_args()
-
     harvest(args.ckpt, args.root, args.out)
