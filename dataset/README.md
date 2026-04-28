@@ -13,8 +13,8 @@ After experimenting with 12, 32 and 52 frame episodes, I have standardized on **
       <th>Dataset: Cup Pattern</th>
     </tr>
     <tr>
-      <td><img src="assets/dataset_grasp.gif" width="320"></td>
-      <td><img src="assets/dataset_cup.gif" width="320"></td>
+      <td><img src="../assets/dataset_grasp.gif" width="320"></td>
+      <td><img src="../assets/dataset_cup.gif" width="320"></td>
     </tr>
   </table>
 </div>

@@ -43,8 +43,8 @@ GR00T-N1 has been successfully stabilized to perform two distinct manipulation s
       <th>Cup Execution</th>
     </tr>
     <tr>
-      <td><img src="assets/vla_grasp.gif" width="320"></td>
-      <td><img src="assets/vla_cup.gif" width="320"></td>
+      <td><img src="../assets/vla_grasp.gif" width="320"></td>
+      <td><img src="../assets/vla_cup.gif" width="320"></td>
     </tr>
   </table>
 </div>
