@@ -57,10 +57,7 @@ def harvest(ckpt_path, dataset_root, output_path):
     if LEROBOT_AVAILABLE:
         for repo_id in lerobot_datasets:
             ds_path = os.path.join(dataset_root, repo_id)
-            if not os.path.exists(ds_path):
-                print(f"⚠️ Dataset path missing: {ds_path}. Skipping.")
-                continue
-
+            # LeRobotDataset will try to download from Hub if not found locally
             print(f"📂 Harvesting LeRobot: {repo_id}")
             try:
                 dataset = LeRobotDataset(repo_id=repo_id, root=ds_path)
@@ -88,6 +85,22 @@ def harvest(ckpt_path, dataset_root, output_path):
         print("⚠️ LeRobot not installed. Skipping Cup/Grasp datasets.")
 
     # 4. Harvest Snapshot Parquet
+    if not os.path.exists(reward_pred_path):
+        print(
+            f"📡 Snapshot parquet not found at {reward_pred_path}. Attempting to fetch from Hub..."
+        )
+        try:
+            from huggingface_hub import hf_hub_download
+
+            reward_pred_path = hf_hub_download(
+                repo_id="vedpatwardhan/gr1_reward_pred",
+                filename="dataset.parquet",
+                repo_type="dataset",
+            )
+            print(f"✅ Successfully downloaded snapshot parquet to {reward_pred_path}")
+        except Exception as e:
+            print(f"⚠️ Could not fetch snapshots from Hub: {e}")
+
     if os.path.exists(reward_pred_path):
         print(f"📂 Harvesting Snapshots: {reward_pred_path}")
         try:
