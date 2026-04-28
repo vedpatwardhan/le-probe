@@ -1,96 +1,163 @@
-import torch
-import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-import tqdm
 import os
-import sys
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import argparse
+from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
 
-# --- Path Stabilization ---
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
-# --------------------------
 
-from interpretability.sae.sae_model import SparseAutoencoder
+class SparseAutoencoder(nn.Module):
+    def __init__(self, input_dim, dict_size):
+        super().__init__()
+        self.input_dim = input_dim
+        self.dict_size = dict_size
+
+        # Encoder: x -> f
+        self.encoder = nn.Linear(input_dim, dict_size)
+        self.encoder_bias = nn.Parameter(torch.zeros(dict_size))
+
+        # Decoder: f -> x_hat
+        self.decoder = nn.Linear(dict_size, input_dim, bias=False)
+        self.decoder_bias = nn.Parameter(torch.zeros(input_dim))
+
+        # Weight Initialization
+        nn.init.kaiming_uniform_(self.encoder.weight)
+        nn.init.orthogonal_(self.decoder.weight)
+
+    def forward(self, x):
+        # f = ReLU(W_enc(x - b_dec) + b_enc)
+        x_cent = x - self.decoder_bias
+        latent = torch.relu(self.encoder(x_cent) + self.encoder_bias)
+
+        # x_hat = W_dec(f) + b_dec
+        x_hat = self.decoder(latent) + self.decoder_bias
+        return x_hat, latent
 
 
 def train_sae(
-    activation_path,
-    layer_name,
-    d_sae=12288,
-    lr=3e-4,
-    l1_coeff=0.01,
-    batch_size=4096,
-    epochs=10,
+    input_path,
+    output_path,
+    dict_size=1024,
+    l1_coeff=1e-3,
+    epochs=50,
+    batch_size=256,
+    lr=1e-3,
 ):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available() else "cpu"
+    )
+    print(f"🚀 Training SAE | Device: {device} | Input: {input_path}")
 
-    # 1. Load Data
-    print(f"📂 Loading activations from {activation_path}...")
-    data = torch.load(activation_path, map_location="cpu")
-    activations = data[layer_name].float()
+    # 1. Load Latents
+    if not os.path.exists(input_path):
+        print(f"❌ Error: Latents not found at {input_path}")
+        return
 
-    # Flatten if necessary (B, T, D) -> (B*T, D)
-    if activations.ndim == 3:
-        activations = activations.reshape(-1, activations.size(-1))
+    all_latents = torch.load(input_path, map_location="cpu")
+    if isinstance(all_latents, list):
+        all_latents = torch.cat(all_latents, dim=0)
 
-    print(f"📊 Dataset size: {activations.shape}")
-    dataset = TensorDataset(activations)
+    # Normalize latents (Unit Variance)
+    mean = all_latents.mean(dim=0)
+    std = all_latents.std(dim=0) + 1e-6
+    all_latents = (all_latents - mean) / std
+
+    dataset = TensorDataset(all_latents)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    # 2. Initialize SAE
-    d_model = activations.size(-1)
-    sae = SparseAutoencoder(d_model=d_model, d_sae=d_sae, l1_coeff=l1_coeff).to(device)
-    optimizer = optim.Adam(sae.parameters(), lr=lr)
+    # 2. Initialize Model
+    input_dim = all_latents.shape[1]
+    model = SparseAutoencoder(input_dim, dict_size).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
 
     # 3. Training Loop
-    print(f"🚀 Training SAE (Expansion: {d_sae/d_model:.1f}x)...")
     for epoch in range(epochs):
-        pbar = tqdm.tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}")
+        model.train()
         total_loss = 0
+        total_mse = 0
         total_l1 = 0
-        total_l2 = 0
 
-        for batch in pbar:
-            x = batch[0].to(device)
-
+        pbar = tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}")
+        for (x,) in pbar:
+            x = x.to(device)
             optimizer.zero_grad()
-            out = sae(x)
-            loss = out["loss"]
+
+            x_hat, f = model(x)
+
+            # Loss = MSE(x, x_hat) + lambda * L1(f)
+            mse_loss = nn.MSELoss()(x_hat, x)
+            l1_loss = f.abs().sum(dim=-1).mean()
+            loss = mse_loss + l1_coeff * l1_loss
 
             loss.backward()
             optimizer.step()
 
-            # Constrain decoder to unit norm
-            sae.normalize_decoder()
-
             total_loss += loss.item()
-            total_l1 += out["l1_loss"].item()
-            total_l2 += out["l2_loss"].item()
+            total_mse += mse_loss.item()
+            total_l1 += l1_loss.item()
 
             pbar.set_postfix(
                 {
-                    "L2": f"{out['l2_loss'].item():.4f}",
-                    "L1": f"{out['l1_loss'].item():.4f}",
+                    "mse": f"{mse_loss.item():.4f}",
+                    "l1": f"{l1_loss.item():.2f}",
+                    "sparsity": f"{(f > 0).float().mean().item():.2%}",
                 }
             )
 
-        avg_loss = total_loss / len(loader)
-        print(f"✅ Epoch {epoch+1} complete. Avg Loss: {avg_loss:.6f}")
-
-    # 4. Save SAE
-    output_path = f"sae_{layer_name}.pt"
-    torch.save(
-        {
-            "state_dict": sae.state_dict(),
-            "config": {"d_model": d_model, "d_sae": d_sae, "l1_coeff": l1_coeff},
-        },
-        output_path,
-    )
-    print(f"💾 SAE saved to {output_path}")
+    # 4. Save Model
+    save_dict = {
+        "state_dict": model.state_dict(),
+        "input_dim": input_dim,
+        "dict_size": dict_size,
+        "l1_coeff": l1_coeff,
+        "norm_stats": {"mean": mean, "std": std},
+    }
+    torch.save(save_dict, output_path)
+    print(f"💾 SAE Training Complete! Model saved to {output_path}")
 
 
 if __name__ == "__main__":
-    # Example usage
-    # train_sae("activations.pt", "latent_bottleneck")
-    print("🚂 SAE Trainer Ready.")
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--input",
+        type=str,
+        default="activations_14k.pt",
+        help="Path to harvested latents",
+    )
+    parser.add_argument(
+        "--output", type=str, default="sae_weights.pt", help="Path to save SAE weights"
+    )
+    parser.add_argument(
+        "--dict_size", type=int, default=1024, help="Number of dictionary features"
+    )
+    parser.add_argument(
+        "--l1", type=float, default=1e-3, help="L1 Sparsity coefficient"
+    )
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--lr", type=float, default=1e-3)
+
+    args = parser.parse_args()
+
+    # Ensure input path is absolute or relative to script
+    if not os.path.isabs(args.input):
+        args.input = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), args.input
+        )
+    if not os.path.isabs(args.output):
+        args.output = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), args.output
+        )
+
+    train_sae(
+        args.input,
+        args.output,
+        args.dict_size,
+        args.l1,
+        args.epochs,
+        args.batch_size,
+        args.lr,
+    )
