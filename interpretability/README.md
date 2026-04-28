@@ -9,7 +9,7 @@ This motivated the need for a deeper understanding of the latent space for our m
 Following is the architecture used for experimenting with the trained model for interpretability,
 
 <div align="center">
-  <img src="assets/interpretability_architecture.png" width="70%" style="border-radius: 12px; margin-top: 20px;">
+  <img src="../assets/interpretability_architecture.png" width="70%" style="border-radius: 12px; margin-top: 20px;">
   <p><i>LeWM Interpretability: Mechanistic Analysis & Causal Intervention Stack</i></p>
 </div>
 

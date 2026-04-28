@@ -96,7 +96,7 @@ Following is the architecture used for experimenting with the trained model for 
 
 #### Results
 
-After training the CLT (details available in [**`interpretability/clt/`**](./interpretability/clt/)), there were 3 features that were firing at a large value at certain phases of the pickup in the training data (`gr1_pickup_grasp`):
+After training the CLT (details available in [**`interpretability/README.md`**](./interpretability/README.md)), there were 3 features that were firing at a large value at certain phases of the pickup in the training data (`gr1_pickup_grasp`):
 
 | Feature | Label | Max Act. | Episode | Frame Index | Phase |
 | :--- | :--- | :--- | :--- | :--- | :--- |
