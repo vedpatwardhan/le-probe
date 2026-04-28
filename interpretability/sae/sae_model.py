@@ -2,11 +2,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class SparseAutoencoder(nn.Module):
     """
     Standard Sparse Autoencoder (SAE) for mechanistic interpretability.
     Decomposes a dense latent space into an overcomplete sparse basis.
     """
+
     def __init__(self, d_model: int, d_sae: int, l1_coeff: float = 0.001):
         super().__init__()
         self.d_model = d_model
@@ -16,7 +18,7 @@ class SparseAutoencoder(nn.Module):
         # Encoder: Linear + Bias + ReLU
         self.encoder = nn.Linear(d_model, d_sae)
         self.b_enc = nn.Parameter(torch.zeros(d_sae))
-        
+
         # Decoder: Linear (often constrained to unit norm)
         self.decoder = nn.Linear(d_sae, d_model, bias=False)
         self.b_dec = nn.Parameter(torch.zeros(d_model))
@@ -30,25 +32,25 @@ class SparseAutoencoder(nn.Module):
         """
         # Centering
         x_centered = x - self.b_dec
-        
+
         # Encode
         acts = F.relu(self.encoder(x_centered) + self.b_enc)
-        
+
         # Decode
         x_reconstruct = self.decoder(acts) + self.b_dec
-        
+
         # Loss components
         l2_loss = F.mse_loss(x_reconstruct, x)
         l1_loss = acts.abs().sum(dim=-1).mean()
-        
+
         total_loss = l2_loss + self.l1_coeff * l1_loss
-        
+
         return {
             "reconstruction": x_reconstruct,
             "activations": acts,
             "loss": total_loss,
             "l2_loss": l2_loss,
-            "l1_loss": l1_loss
+            "l1_loss": l1_loss,
         }
 
     @torch.no_grad()

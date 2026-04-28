@@ -1,89 +1,147 @@
 import os
 import sys
 import torch
+import pandas as pd
 import numpy as np
-from pathlib import Path
-import tqdm
+from tqdm import tqdm
+from PIL import Image
 
 # --- Path Stabilization ---
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+# Current file is le-probe/interpretability/sae/harvest_activations.py
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# ROOT_DIR: le-probe/
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+
+# We need lewm/ and lewm/le_wm/ on the path
+LEWM_DIR = os.path.join(ROOT_DIR, "lewm")
+LE_WM_DIR = os.path.join(LEWM_DIR, "le_wm")
+
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
+if LEWM_DIR not in sys.path:
+    sys.path.insert(0, LEWM_DIR)
+if LE_WM_DIR not in sys.path:
+    sys.path.insert(0, LE_WM_DIR)
+
+print(f"DEBUG: sys.path: {sys.path[:5]}")
 # --------------------------
 
 from lewm.goal_mapper import GoalMapper
-from simulation_base import GR1MuJoCoBase
-from interpretability.sae.activation_harvester import ActivationHarvester
 
-def run_harvest(model_path, gallery_path, output_path, num_episodes=10, steps_per_episode=100):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # 1. Initialize simulation (headless)
-    print("🎮 Initializing Simulation...")
-    sim = GR1MuJoCoBase()
-    
-    # 2. Initialize Brain
-    print("🧠 Loading LeWM Model...")
-    agent = GoalMapper(model_path, dataset_root=ROOT_DIR)
-    
-    # 3. Setup Harvester
-    harvester = ActivationHarvester()
-    # Target the latent bottleneck and the last predictor layer
-    target_layers = {
-        "latent_bottleneck": "model.projector", # The 192d projected latent
-        "predictor_out": "model.predictor.transformer.norm" # Final transformer state
-    }
-    harvester.register(agent.model, target_layers)
-    
-    all_activations = {k: [] for k in target_layers.keys()}
-    
-    try:
-        for ep in range(num_episodes):
-            print(f"🎬 Episode {ep+1}/{num_episodes}")
-            sim.reset()
-            
-            # Reset agent state (initial pose)
-            raw_sim_state = sim.get_state_32()
-            norm_state = agent.transform({"pixels": np.zeros((224, 224, 3))}) # Just to get scaler? No, scaler is in GoalMapper
-            # Actually GoalMapper has no scaler. StandardScaler is used in simulation_lewm.py
-            
-            for step in tqdm.tqdm(range(steps_per_episode)):
-                # Simplified interaction for harvesting
-                sim.renderer.update_scene(sim.data, camera="world_center")
-                img = sim.renderer.render()
-                
-                # Encode and step through model
-                batch = agent.transform({"pixels": img})
-                image_t = batch["pixels"].to(device).unsqueeze(0).unsqueeze(0) # (1, 1, 3, 224, 224)
-                
-                with torch.inference_mode():
-                    # This triggers the forward hooks
-                    info = agent.model.encode({"pixels": image_t})
-                    # We can also run a predictor step if we have actions
-                    # For simplicity, we just harvest the encoding for now
-                    # (Phase 1 focus: The Latent Bottleneck)
-                
-                # Execute random or heuristic actions to get diversity
-                action = np.random.uniform(-0.1, 0.1, 32)
-                sim.process_target_32(action)
-                sim.dispatch_action(action, sim.last_target_q, n_steps=10)
-                
-            # Flush activations to memory
-            ep_data = harvester.flush()
-            for k, v in ep_data.items():
-                all_activations[k].append(v)
-                
-    finally:
-        harvester.remove_hooks()
-    
-    # 4. Save to Disk
-    print(f"💾 Saving Harvest to {output_path}...")
-    save_dict = {k: torch.cat(v, dim=0) for k, v in all_activations.items()}
-    torch.save(save_dict, output_path)
-    print("✅ Harvest Complete.")
+try:
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    LEROBOT_AVAILABLE = True
+except ImportError:
+    LEROBOT_AVAILABLE = False
+
+
+def harvest():
+    # 1. Load Model
+    model_path = os.path.join(ROOT_DIR, "checkpoints/v17_oracle.ckpt")
+    dataset_root = os.path.join(ROOT_DIR, "datasets")
+
+    if not os.path.exists(model_path):
+        print(f"Error: Model not found at {model_path}")
+        return
+
+    print(f"🧠 Loading GoalMapper and Model from {model_path}...")
+    gm = GoalMapper(model_path, dataset_root)
+    model = gm.model
+    device = gm.device
+
+    # 2. Define Datasets
+    lerobot_datasets = [
+        "vedpatwardhan/gr1_pickup_cup",
+        "vedpatwardhan/gr1_pickup_grasp",
+    ]
+    reward_pred_path = os.path.join(
+        dataset_root, "vedpatwardhan/gr1_reward_pred/dataset.parquet"
+    )
+
+    all_latents = []
+
+    # 3. Process LeRobot Datasets
+    if LEROBOT_AVAILABLE:
+        for repo_id in lerobot_datasets:
+            print(f"📂 Harvesting LeRobot dataset: {repo_id}...")
+            dataset_path = os.path.join(dataset_root, repo_id)
+            try:
+                # Use a smaller chunk size or limit if needed, but here we want all frames
+                dataset = LeRobotDataset(repo_id=repo_id, root=dataset_path)
+
+                batch_imgs = []
+                batch_size = 32  # Reduced batch size for safety
+
+                for i in tqdm(range(len(dataset)), desc=f"Encoding {repo_id}"):
+                    frame = dataset[i]
+                    img = frame["observation.images.world_center"]
+                    if not isinstance(img, Image.Image):
+                        if isinstance(img, torch.Tensor):
+                            img = Image.fromarray(
+                                img.permute(1, 2, 0).numpy().astype(np.uint8)
+                            )
+                        elif isinstance(img, np.ndarray):
+                            if img.shape[0] == 3:
+                                img = img.transpose(1, 2, 0)
+                            img = Image.fromarray(img.astype(np.uint8))
+
+                    batch_imgs.append(gm.transform(img))
+
+                    if len(batch_imgs) == batch_size or i == len(dataset) - 1:
+                        batch_x = torch.stack(batch_imgs).to(device)
+                        with torch.no_grad():
+                            output = model.encoder(
+                                batch_x, interpolate_pos_encoding=True
+                            )
+                            pixels_emb = output.last_hidden_state[:, 0]
+                            emb = model.projector(pixels_emb)
+                            all_latents.append(emb.cpu())
+                        batch_imgs = []
+            except Exception as e:
+                print(f"❌ Error loading {repo_id}: {e}")
+    else:
+        print("⚠️ LeRobot not available. Skipping Cup and Grasp harvests.")
+
+    # 4. Process Reward Pred Dataset (Parquet)
+    if os.path.exists(reward_pred_path):
+        print(f"📂 Harvesting Reward Pred dataset: {reward_pred_path}...")
+        try:
+            df = pd.read_parquet(reward_pred_path)
+            images = df["observation.images.world_center"].values
+
+            batch_imgs = []
+            batch_size = 32
+
+            for i in tqdm(range(len(images)), desc="Encoding reward_pred"):
+                img_array = images[i]
+                if img_array.shape[0] == 3:
+                    img_array = img_array.transpose(1, 2, 0)
+
+                pil_img = Image.fromarray(img_array.astype(np.uint8))
+                batch_imgs.append(gm.transform(pil_img))
+
+                if len(batch_imgs) == batch_size or i == len(images) - 1:
+                    batch_x = torch.stack(batch_imgs).to(device)
+                    with torch.no_grad():
+                        output = model.encoder(batch_x, interpolate_pos_encoding=True)
+                        pixels_emb = output.last_hidden_state[:, 0]
+                        emb = model.projector(pixels_emb)
+                        all_latents.append(emb.cpu())
+                    batch_imgs = []
+        except Exception as e:
+            print(f"❌ Error loading reward_pred: {e}")
+
+    # 5. Save Combined Activation Dataset
+    if all_latents:
+        final_latents = torch.cat(all_latents, dim=0)
+        output_path = os.path.join(ROOT_DIR, "interpretability/sae/activations_14k.pt")
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        torch.save(final_latents, output_path)
+        print(f"💾 Saved {len(final_latents)} total latents to {output_path}")
+    else:
+        print("❌ No latents captured.")
+
 
 if __name__ == "__main__":
-    # Example usage (would be triggered by user after review)
-    # run_harvest("path/to/model.ckpt", "path/to/gallery.pth", "activations.pt")
-    print("🛠 Activation Harvester Ready.")
-    print("Usage: python interpretability/sae/harvest_activations.py --model <path>")
+    harvest()

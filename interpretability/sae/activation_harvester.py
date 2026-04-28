@@ -2,11 +2,13 @@ import torch
 from typing import Dict, List, Optional
 import numpy as np
 
+
 class ActivationHarvester:
     """
     Hook manager to collect intermediate activations from a PyTorch model.
     Designed for Zero-Impact modularity (no model code changes).
     """
+
     def __init__(self):
         self.activations: Dict[str, List[torch.Tensor]] = {}
         self.hooks = []
@@ -18,9 +20,10 @@ class ActivationHarvester:
                 out = output[0]
             else:
                 out = output
-            
+
             # Detach and move to CPU to avoid VRAM bloat during harvesting
             self.activations[name].append(out.detach().cpu())
+
         return fn
 
     def register(self, model: torch.nn.Module, layers: Dict[str, str]):
@@ -30,15 +33,15 @@ class ActivationHarvester:
         """
         for name, path in layers.items():
             self.activations[name] = []
-            
+
             # Navigate to the target submodule
             module = model
-            for part in path.split('.'):
+            for part in path.split("."):
                 if part.isdigit():
                     module = module[int(part)]
                 else:
                     module = getattr(module, part)
-            
+
             # Register the hook
             h = module.register_forward_hook(self.hook_fn(name))
             self.hooks.append(h)
@@ -50,7 +53,7 @@ class ActivationHarvester:
         for name, data in self.activations.items():
             if data:
                 results[name] = torch.cat(data, dim=0)
-                self.activations[name] = [] # Clear memory
+                self.activations[name] = []  # Clear memory
         return results
 
     def remove_hooks(self):

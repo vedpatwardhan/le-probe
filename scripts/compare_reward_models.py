@@ -1,8 +1,8 @@
-
 # --- Path Stabilization ---
 import os
 import sys
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 # --------------------------
@@ -157,7 +157,9 @@ def compare_models(naive_ckpt, v1_ckpt, v2_ckpt, df):
 
 
 if __name__ == "__main__":
-    parquet_path = Path("le-probe/datasets/vedpatwardhan/gr1_reward_pred/dataset.parquet")
+    parquet_path = Path(
+        "le-probe/datasets/vedpatwardhan/gr1_reward_pred/dataset.parquet"
+    )
 
     if not parquet_path.exists():
         print(f"❌ Error: Parquet dataset not found at {parquet_path}")

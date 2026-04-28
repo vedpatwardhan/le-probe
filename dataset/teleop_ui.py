@@ -8,6 +8,7 @@ import time
 
 # --- Path Stabilization ---
 import sys
+
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
@@ -50,7 +51,7 @@ if "physics" not in st.session_state:
 if "active_joints" not in st.session_state:
     st.session_state.active_joints = set()
     # Load default active joints from IK whitelist
-    base_path = ROOT_DIR # Point to root for assets
+    base_path = ROOT_DIR  # Point to root for assets
     with open(f"{base_path}/ik_joints.txt", "r") as f:
         default_joint_names = [
             line.strip().split("#")[0].strip() for line in f if line.strip()

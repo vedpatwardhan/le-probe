@@ -1,8 +1,8 @@
-
 # --- Path Stabilization ---
 import os
 import sys
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 # --------------------------
@@ -25,9 +25,7 @@ def get_hash(path):
 
 
 def compare_files():
-    local_path = Path(
-        "le-probe/datasets/vedpatwardhan/gr1_reward_pred/dataset.parquet"
-    )
+    local_path = Path("le-probe/datasets/vedpatwardhan/gr1_reward_pred/dataset.parquet")
     print(f"📥 Downloading from HF...")
     hf_path = hf_hub_download(
         repo_id="vedpatwardhan/gr1_reward_pred",
