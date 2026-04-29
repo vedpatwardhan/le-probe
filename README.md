@@ -121,6 +121,8 @@ Following are the plots demonstrating the transition of states triggering the ab
   <img src="assets/alignment_precision.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
 </div>
 
+For a broader analysis, a new dashboard has been added which looks at the top 15 features and explained in [**`interpretability/README.md`**](./interpretability/README.md).
+
 #### Next Steps
 
 Given we now have an interpretable latent space, it would help identify the effects of the following changes to the training pipeline:
@@ -254,6 +256,18 @@ The weights of the reward-tuned model can be found at [`gr1_reward_tuned_v2.ckpt
 ```bash
 # Harvests 32-dim action vectors and high-res images to le-probe/temp_repro
 .venv/bin/python scripts/reproduce_canonical_states_direct.py
+```
+
+4. **Mechanistic Teleoperation**: Observe the top 15 features activated by any set of actions controlled through the sliders.
+```bash
+# 1. Start the simulation
+.venv/bin/python interpretability/simulation_teleop_interpret.py
+
+# 2. Start the latent server
+.venv/bin/python interpretability/latent_server.py
+
+# 3. Start the dashboard
+.venv/bin/python interpretability/teleop_ui_interpret.py
 ```
 
 ---

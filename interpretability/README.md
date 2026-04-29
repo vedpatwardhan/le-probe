@@ -18,6 +18,9 @@ Following is the architecture used for experimenting with the trained model for 
 - [`sae`]: Sparse Autoencoders for getting more interpretable features out of the model
 - [`clt`]: Cross-Layer Transcoders for understanding how those features compound through the network.
 - [`steering`]: Latent Steering used for interpretability (hasn't been tried yet).
+- [`teleop_ui_interpret.py`]: Dashboard to view the top 15 features triggered the most by a given state-action configuration in a bar plot.
+- [`simulation_teleop_interpret.py`]: A simplified version of [`dataset/simulation_teleop.py`] for the features that are needed with static brain snapshots to complement the activation plot.
+- [`latent_server.py`]: Server used to compute features with the most activation, used by the dashboard to contruct the bar plot.
 
 ### 🏗 Process
 
@@ -59,6 +62,15 @@ Following are the plots demonstrating the transition of states triggering the ab
 <div align="center">
   <p>Alignment Precision</p>
   <img src="../assets/alignment_precision.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
+</div>
+
+## 👀 Visualization
+
+A dashboard has been added to view the top 15 features that were triggered the most for a given state-action configuration:
+
+<div align="center">
+  <p>Mechanistic Teleop Dashboard</p>
+  <img src="../assets/mechanistic_teleop.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
 </div>
 
 ## 🚀 Research Roadmap: Next Steps
@@ -116,4 +128,17 @@ Extract precise joint vectors and images for reproduction in the simulation:
 ```bash
 # Harvests 32-dim action vectors and high-res images to le-probe/temp_repro
 .venv/bin/python scripts/reproduce_canonical_states_direct.py
+```
+
+### 5. Mechanistic Teleoperation
+Observe the top 15 features activated by any set of actions controlled through the sliders.
+```bash
+# 1. Start the simulation
+.venv/bin/python interpretability/simulation_teleop_interpret.py
+
+# 2. Start the latent server
+.venv/bin/python interpretability/latent_server.py
+
+# 3. Start the dashboard
+.venv/bin/python interpretability/teleop_ui_interpret.py
 ```

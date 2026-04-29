@@ -17,11 +17,11 @@ class SparseAutoencoder(nn.Module):
 
         # Encoder: Linear + Bias + ReLU
         self.encoder = nn.Linear(d_model, d_sae)
-        self.b_enc = nn.Parameter(torch.zeros(d_sae))
+        self.encoder_bias = nn.Parameter(torch.zeros(d_sae))
 
         # Decoder: Linear (often constrained to unit norm)
         self.decoder = nn.Linear(d_sae, d_model, bias=False)
-        self.b_dec = nn.Parameter(torch.zeros(d_model))
+        self.decoder_bias = nn.Parameter(torch.zeros(d_model))
 
         # Initialize decoder weights to reasonable values
         nn.init.orthogonal_(self.decoder.weight)
@@ -31,13 +31,13 @@ class SparseAutoencoder(nn.Module):
         x: (Batch, d_model)
         """
         # Centering
-        x_centered = x - self.b_dec
+        x_centered = x - self.decoder_bias
 
         # Encode
-        acts = F.relu(self.encoder(x_centered) + self.b_enc)
+        acts = F.relu(self.encoder(x_centered) + self.encoder_bias)
 
         # Decode
-        x_reconstruct = self.decoder(acts) + self.b_dec
+        x_reconstruct = self.decoder(acts) + self.decoder_bias
 
         # Loss components
         l2_loss = F.mse_loss(x_reconstruct, x)
