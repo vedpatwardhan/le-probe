@@ -69,7 +69,6 @@ Following are the plots demonstrating the transition of states triggering the ab
 A dashboard has been added to view the top 15 features that were triggered the most for a given state-action configuration:
 
 <div align="center">
-  <p>Mechanistic Teleop Dashboard</p>
   <img src="../assets/mechanistic_teleop.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
 </div>
 
