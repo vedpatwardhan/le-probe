@@ -4,7 +4,7 @@
   <img src="assets/banner.png" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
 </div>
 
-Le-Probe is a project meant to analyze and compare **LeWM** against traditional **Vision-Language-Action (VLA)** policies like GR00T-N1.
+Le-Probe is a project meant to analyze and compare **LeWM + MPC** against traditional **Vision-Language-Action (VLA)** policies like GR00T-N1.
 
 My investigation focuses on a high-DoF (32+) manipulation task that require multi-phase coordination, specifically comparing two distinct behavioral strategies: **Grasp** and **Cup**.
 
