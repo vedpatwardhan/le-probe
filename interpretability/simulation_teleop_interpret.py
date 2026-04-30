@@ -20,7 +20,6 @@ import mujoco
 import json
 import torch
 from PIL import Image
-import matplotlib.pyplot as plt
 from simulation_base import GR1MuJoCoBase
 from gr1_config import COMPACT_WIRE_JOINTS
 from gr1_protocol import StandardScaler
@@ -130,65 +129,21 @@ class InterpretiveTeleopServer(GR1MuJoCoBase):
             self.clt.encoder(x_centered) + self.clt.b_enc
         ).squeeze()
 
-        self._render_snapshot_png(after_img, acts, self.before_img)
-
-    def _render_snapshot_png(self, after_img, acts, before_img=None):
-        """Generates a high-quality Before/After/Activation PNG on disk."""
-        plt.style.use("dark_background")
-        num_panels = 3 if before_img is not None else 2
-        fig, axes = plt.subplots(
-            1, num_panels, figsize=(6 * num_panels, 5), facecolor="#111111"
-        )
-
-        if num_panels == 3:
-            axes[0].imshow(before_img)
-            axes[0].set_title(
-                "MIND'S EYE (BEFORE ACTION)",
-                fontsize=10,
-                fontweight="bold",
-                color="#AAAAAA",
+        # 4. Save JSON for reproduction
+        snap_idx = int(self.data.time * 100)
+        json_path = os.path.join(self.snapshot_dir, f"brain_{snap_idx:05d}.json")
+        with open(json_path, "w") as f:
+            # We save qpos (full state) and action_32 (intent)
+            json.dump(
+                {
+                    "time": self.data.time,
+                    "qpos": self.data.qpos.tolist(),
+                    "action_32": self.current_action.tolist(),
+                    "activations": acts.tolist(),
+                },
+                f,
             )
-            axes[0].axis("off")
-            axes[1].imshow(after_img)
-            axes[1].set_title(
-                f"MIND'S EYE (AFTER ACTION - T={self.data.time:.2f}s)",
-                fontsize=10,
-                fontweight="bold",
-                color="#FFFFFF",
-            )
-            axes[1].axis("off")
-            ax_chart = axes[2]
-        else:
-            axes[0].imshow(after_img)
-            axes[0].set_title(
-                f"MIND'S EYE (T={self.data.time:.2f}s)",
-                fontsize=10,
-                fontweight="bold",
-                color="#FFFFFF",
-            )
-            axes[0].axis("off")
-            ax_chart = axes[1]
-
-        names = [self.audit_features[fid] for fid in sorted(self.audit_features.keys())]
-        vals = [float(acts[fid]) for fid in sorted(self.audit_features.keys())]
-        ax_chart.barh(
-            names,
-            vals,
-            color=["#FF4B4B", "#4BFF4B", "#4B4BFF"],
-            alpha=0.8,
-            edgecolor="white",
-        )
-        ax_chart.set_xlim(0, 5.0)
-        ax_chart.set_title(
-            "MECHANISTIC ACTIVATIONS", fontsize=10, fontweight="bold", color="#AAAAAA"
-        )
-        ax_chart.axis("off")
-
-        path = os.path.join(
-            self.snapshot_dir, f"brain_{int(self.data.time*100):05d}.png"
-        )
-        plt.savefig(path, dpi=120, bbox_inches="tight", facecolor="#111111")
-        plt.close()
+        print(f"📄 Snapshot JSON saved: {os.path.basename(json_path)}")
 
     def run(self):
         """Server loop handling ZMQ commands from the dashboard."""
@@ -261,9 +216,43 @@ class InterpretiveTeleopServer(GR1MuJoCoBase):
                 send_resp({"status": "step_ok"})
 
             elif cmd == "store_snapshot":
-                # Manual snapshot trigger (Captures brain triptych)
+                # Manual snapshot trigger (Captures brain triptych + JSON)
                 self.save_brain_snapshot()
                 send_resp({"status": "snapshot_ok"})
+
+            elif cmd == "load_snapshot":
+                idx = data.get("index")
+                json_path = os.path.join(
+                    self.snapshot_dir, f"brain_{int(idx):05d}.json"
+                )
+                if os.path.exists(json_path):
+                    with open(json_path, "r") as f:
+                        snap = json.load(f)
+
+                    # 1. Teleport Robot
+                    self.data.qpos[:] = np.array(snap["qpos"])
+                    self.data.qvel[:] = 0.0
+                    mujoco.mj_forward(self.model, self.data)
+
+                    # 2. Sync Buffers
+                    self._last_interp_q = self.data.qpos.copy()
+                    self.last_target_q = self.data.qpos.copy()
+                    self.current_action = np.array(snap["action_32"])
+
+                    # 3. Refresh Perception
+                    self.render_and_record(None)
+
+                    send_resp(
+                        {
+                            "status": "load_ok",
+                            "joints": StandardScaler()
+                            .scale_state(self.get_state_32())
+                            .tolist(),
+                            "action_32": snap["action_32"],
+                        }
+                    )
+                else:
+                    send_resp({"status": "error", "message": "Snapshot not found"})
             else:
                 send_resp({"status": "unknown"})
 

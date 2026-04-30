@@ -118,6 +118,23 @@ def update_feature_label(fid, label):
 
 
 # --- Callbacks ---
+def handle_restore(snap_idx):
+    resp = send_command({"command": "load_snapshot", "index": snap_idx})
+    if resp and resp.get("status") == "load_ok":
+        # 1. Update Joint Sliders
+        for idx, val in enumerate(resp["joints"]):
+            if idx >= 16 and abs(val) > 1e-4:
+                st.session_state.active_joints.add(idx)
+                st.session_state[f"input_{idx}"] = float(np.clip(val, -1.0, 1.0))
+
+        # 2. Update Action Buffer
+        st.session_state.staging_buffer = np.array(resp["action_32"], dtype=np.float32)
+
+        # 3. Trigger Audit
+        st.session_state._trigger_audit = True
+        st.toast(f"Reproduced Snapshot {snap_idx}!", icon="⏪")
+
+
 def handle_randomize():
     resp = send_command({"command": "reset"})
     if resp and "joints" in resp:
@@ -252,8 +269,10 @@ with col_audit:
 
     @st.fragment
     def render_audit_pane():
-        # Configuration & Trigger Row
-        c_id, c_lbl, c_sv, c_aud = st.columns([1, 4, 1, 2])
+        # Configuration & Trigger Row (Symmetric Button Widths)
+        c_id, c_lbl, c_sv, c_aud, c_sid, c_res = st.columns(
+            [0.6, 2.9, 1.3, 1.3, 0.6, 1.3]
+        )
         with c_id:
             feat_id = st.number_input(
                 "ID", min_value=0, max_value=1023, step=1, label_visibility="collapsed"
@@ -271,9 +290,16 @@ with col_audit:
                     update_feature_label(feat_id, n_label)
                     st.rerun()
         with c_aud:
-            if st.button("🔍 Audit Now", use_container_width=True):
-                # Manual trigger needs a rerun to catch the logic above
+            if st.button("🔍 Audit", use_container_width=True):
                 st.session_state._trigger_audit = True
+                st.rerun()
+        with c_sid:
+            s_idx = st.number_input(
+                "SnapID", min_value=0, step=1, label_visibility="collapsed"
+            )
+        with c_res:
+            if st.button("⏪ Restore", use_container_width=True):
+                handle_restore(s_idx)
                 st.rerun()
 
         stored_acts = st.session_state.get("_last_acts")
