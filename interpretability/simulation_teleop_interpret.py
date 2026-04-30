@@ -60,7 +60,7 @@ class InterpretiveTeleopServer(GR1MuJoCoBase):
         # 2. Load the Cross-Layer Transcoder (CLT)
         # The CLT maps visual encoder features to the predictor's latent space
         checkpoint = torch.load(clt_path, map_location=self.device)
-        self.norm = checkpoint["norm_stats"]  # Must use training normalization
+        self.norm = checkpoint["norm_stats"]
         self.clt = CrossLayerTranscoder(
             d_model=checkpoint["config"]["d_model"], d_sae=checkpoint["config"]["d_sae"]
         ).to(self.device)
@@ -81,7 +81,6 @@ class InterpretiveTeleopServer(GR1MuJoCoBase):
         # State buffers
         self.before_img = None
         self.current_action = np.zeros(32, dtype=np.float32)
-        self.last_target_q = self.data.qpos[self.arm_q_indices].copy()
 
     def log_to_rerun(self):
         """Log all 5 camera views to the Rerun stream."""
@@ -251,15 +250,14 @@ class InterpretiveTeleopServer(GR1MuJoCoBase):
                 send_resp({"status": "status_ok"})
 
             elif "target" in data:
+                # Capture visual state BEFORE the motor dispatch
                 self.capture_before_state()
                 action_32 = np.array(data["target"], dtype=np.float32)
                 self.current_action = action_32
-                # Dispatch motor command through MuJoCo
-                q_target = action_32[self.arm_joint_ids]
-                self.data.ctrl[self.arm_motor_indices] = q_target
-                # Step physics
-                for _ in range(10):
-                    mujoco.mj_step(self.model, self.data)
+
+                # Use high-fidelity base class methods for movement
+                self.process_target_32(action_32)
+                self.dispatch_action(action_32, self.last_target_q)
                 send_resp({"status": "step_ok"})
 
             elif cmd == "store_snapshot":
