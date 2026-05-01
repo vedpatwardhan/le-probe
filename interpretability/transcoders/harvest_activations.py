@@ -128,6 +128,7 @@ def harvest_activations(
     }
 
     total_samples = {layer_id: 0 for layer_id in hooks.keys()}
+    tokens_per_sample = {}
     last_shape = {}
 
     # 5. Harvesting Loop
@@ -180,6 +181,7 @@ def harvest_activations(
                     file_handles[layer_id].write(acts_flat.tobytes())
                     total_samples[layer_id] += acts_flat.shape[0]
                     last_shape[layer_id] = acts_flat.shape[1]
+                    tokens_per_sample[layer_id] = acts_flat.shape[0] // pixels.shape[0]
 
     finally:
         # 6. Cleanup hooks and Close files
@@ -191,8 +193,11 @@ def harvest_activations(
     # 7. Save Metadata Sidecars
     print("💾 Finalizing metadata headers...")
     for layer_id in hooks.keys():
+        # Calculate tokens per sample (Spatial * Temporal)
+        # We use the last known shape but divided by the logic
         metadata = {
             "shape": [total_samples[layer_id], last_shape[layer_id]],
+            "tokens_per_sample": tokens_per_sample[layer_id],
             "dtype": "float16",
             "layer_id": layer_id,
         }

@@ -90,13 +90,18 @@ def audit_activations(output_dir, model_path):
             )
             continue
 
-        total_samples_list.append(meta["shape"][0])
-
         # Value Fidelity Check (Sample-based)
-        # We don't read the whole file to save RAM, we memmap it
         data = np.memmap(
             bin_file, dtype=np.float16, mode="r", shape=tuple(meta["shape"])
         )
+
+        # Normalize Alignment (Accounting for the Funnel Effect)
+        # Encoder has 771 tokens (3 frames * 257 tokens)
+        # Predictor has 3 tokens (3 frames * 1 token)
+        is_encoder = "encoder" in layer_id
+        tokens_per_moment = 771 if is_encoder else 3
+        equiv_moments = meta["shape"][0] / tokens_per_moment
+        total_samples_list.append(round(equiv_moments, 2))
 
         # Check first/last/middle for NaNs/Infs
         sample_indices = [0, len(data) // 2, len(data) - 1]
@@ -118,29 +123,33 @@ def audit_activations(output_dir, model_path):
                 {
                     "layer": layer_id,
                     "status": "✅ Healthy",
-                    "samples": meta["shape"][0],
+                    "rows": meta["shape"][0],
+                    "equiv": round(equiv_moments, 1),
                     "dims": meta["shape"][1],
                 }
             )
 
     # 3. Cross-Layer Alignment
     print("\n🔗 Step 3: Cross-Layer Alignment...")
-    if len(set(total_samples_list)) > 1:
+    unique_equiv = set(total_samples_list)
+    if len(unique_equiv) > 1:
         print(
-            f"  ❌ ALIGNMENT FAILURE: Layers have different sample counts! {set(total_samples_list)}"
+            f"  ❌ ALIGNMENT FAILURE: Layers represent different moments! {unique_equiv}"
         )
     else:
-        print(f"  ✅ All layers perfectly aligned at {total_samples_list[0]} samples.")
+        print(
+            f"  ✅ All layers perfectly aligned at {list(unique_equiv)[0]} equivalent samples."
+        )
 
     # 4. Final Summary Table
     print("\n📋 --- FINAL AUDIT REPORT ---")
-    print(f"{'Layer ID':<20} | {'Status':<30} | {'Samples':<10} | {'Dims'}")
-    print("-" * 75)
+    print(f"{'Layer ID':<20} | {'Status':<30} | {'Rows':<10} | {'Eq. Samples'}")
+    print("-" * 80)
     for r in report:
         status = r["status"]
-        samples = r.get("samples", "N/A")
-        dims = r.get("dims", "N/A")
-        print(f"{r['layer']:<20} | {status:<30} | {samples:<10} | {dims}")
+        rows = r.get("rows", "N/A")
+        equiv = r.get("equiv", "N/A")
+        print(f"{r['layer']:<20} | {status:<30} | {rows:<10} | {equiv}")
 
     print("\n✨ Audit complete.")
 
