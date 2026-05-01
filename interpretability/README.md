@@ -15,8 +15,7 @@ Following is the architecture used for experimenting with the trained model for 
 
 ### 🛠 Key Components
 
-- [`sae`]: Sparse Autoencoders for getting more interpretable features out of the model
-- [`clt`]: Cross-Layer Transcoders for understanding how those features compound through the network.
+- [`transcoders`]: Unified module for both SAE (Identity) and CLT (Transition) probes.
 - [`steering`]: Latent Steering used for interpretability (hasn't been tried yet).
 - [`teleop_ui_interpret.py`]: Dashboard to view the top 15 features triggered the most by a given state-action configuration in a bar plot.
 - [`simulation_teleop_interpret.py`]: A simplified version of [`dataset/simulation_teleop.py`] for the features that are needed with static brain snapshots to complement the activation plot.
@@ -26,16 +25,11 @@ Following is the architecture used for experimenting with the trained model for 
 
 We have implemented a three-phase mechanistic interpretability stack that operates with **Zero-Impact Modularity** (using PyTorch hooks to avoid modifying the core `lewm` code).
 
-#### 🍎 Phase I: The SAE Harvest (`/sae`)
-To "crack" the 192d latent bottleneck, we perform a **Data Harvest**.
-- **Instrumentation**: `activation_harvester.py` attaches hooks to the `Predictor` and `Encoder`.
-- **Data Crop**: `harvest_activations.py` runs ~1,000 diverse simulation episodes.
-- **Decomposition**: `train_sae.py` trains a **Sparse Autoencoder** to map dense latents to 12,000+ monosemantic physical features (e.g., "gripper-cube contact").
-
-#### ⚡ Phase II: Circuit Tracing (`/clt`)
-Once features are isolated, we use **Cross-Layer Transcoders (CLTs)** to understand the model's logic.
-- **Mechanism**: `clt_model.py` maps features from one layer/time-step directly to the next.
-- **Goal**: Tracing "verbs" (e.g., *how* an action causes a state change) by linearizing the Predictor's internal MLP.
+#### ⚡ Cascading Interpretability (`/transcoders`)
+We use a **Cascading Training** paradigm to ensure monosemantic alignment across the model stack.
+- **Stage I (Grounding)**: `train_transcoder.py` trains an Identity Transcoder (SAE) on Layer 0 to isolate physical primitives.
+- **Stage II (Transition)**: `train_transcoder.py` maps Layer 0 features to Layer 1 (and beyond) to trace the model's intent.
+- **Unified Engine**: `universal_transcoder.py` provides a standardized API for both perception and intention probes.
 
 ## 🔬 Results
 
@@ -96,20 +90,14 @@ Collect raw latents from the frozen World Model to build the interpretability da
 .venv/bin/python interpretability/sae/harvest_activations.py --out activations_dual_14k.pt
 ```
 
-### 2. Feature Training (SAE & CLT)
-Decompose the latent space and train cross-layer transcoders:
+### 2. Feature Training (Cascading Transcoders)
+Decompose the latent space and build the "Chain of Custody" across layers:
 ```bash
-# 1. Train Sparse Autoencoder on harvested latents
-.venv/bin/python interpretability/sae/train_sae.py --input activations_dual_14k.pt --dict_size 1024 --l1 1e-3
+# 1. Train Layer 0 SAE (Identity Mapping)
+.venv/bin/python interpretability/transcoders/train_transcoder.py --source L0.pt --target L0.pt --output sae_weights.pt
 
-# 2. Inspect SAE Features
-.venv/bin/python interpretability/sae/inspect_sae.py --latents activations_dual_14k.pt --sae sae_weights.pt
-
-# 3. Train Cross-Layer Transcoder to map features across the transformer
-.venv/bin/python interpretability/clt/train_clt.py --input activations_dual_14k.pt --dict_size 1024
-
-# 4. Inspect CLT
-.venv/bin/python interpretability/clt/inspect_clt.py --clt clt_weights.pt --data activations_dual_14k.pt
+# 2. Train Layer 0 -> Layer 1 CLT (Transition Mapping)
+.venv/bin/python interpretability/transcoders/train_transcoder.py --source sae_L0_acts.pt --target L1.pt --output clt_weights.pt
 ```
 
 ### 3. Mechanistic Audit & Feature Discovery
