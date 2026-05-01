@@ -10,6 +10,7 @@ import json
 import argparse
 from pathlib import Path
 from tqdm import tqdm
+import numpy as np
 from torch.utils.data import DataLoader
 
 # --- Path Stabilization (Robust Absolute Resolution) ---
@@ -94,20 +95,22 @@ def harvest_activations(
         batch_size=32,
         shuffle=shuffle,
         num_workers=num_workers,
+        pin_memory=True,  # Faster CPU to GPU transfer
     )
 
     actual_total = num_episodes if num_episodes > 0 else len(dataloader)
 
     # Pre-flight Diagnostic: Full Causal Ghost Trace
-    print("👻 Running System-Wide Ghost Trace...")
+    print("👻 Running System-Wide Ghost Trace (FP16 enabled)...")
     with torch.no_grad():
-        dummy_pixels = torch.randn(1, 3, 3, 224, 224).to(device)
-        dummy_actions = torch.zeros(1, 3, 32).to(device)
+        with torch.amp.autocast("cuda"):  # Mixed Precision
+            dummy_pixels = torch.randn(1, 3, 3, 224, 224).to(device)
+            dummy_actions = torch.zeros(1, 3, 32).to(device)
 
-        # Trigger Encoder hooks
-        info = model.encode({"pixels": dummy_pixels, "action": dummy_actions})
-        # Trigger Predictor hooks
-        model.predict(info["emb"], info["act_emb"])
+            # Trigger Encoder hooks
+            info = model.encode({"pixels": dummy_pixels, "action": dummy_actions})
+            # Trigger Predictor hooks
+            model.predict(info["emb"], info["act_emb"])
 
         for layer_id, hook in hooks.items():
             if hook.output is None:
@@ -116,9 +119,11 @@ def harvest_activations(
                 )
     print(f"✅ System Green: All {len(hooks)} layers verified.")
 
-    # 4. Open Streaming Files
+    # 4. Open Streaming Files with large buffers
     file_handles = {
-        layer_id: open(output_path / f"{layer_id}.bin", "wb")
+        layer_id: open(
+            output_path / f"{layer_id}.bin", "wb", buffering=1024 * 1024
+        )  # 1MB buffer
         for layer_id in hooks.keys()
     }
 
@@ -141,13 +146,14 @@ def harvest_activations(
                 if torch.isnan(actions).any():
                     actions = torch.nan_to_num(actions, 0.0)
 
-                # TRIGGER THE CAUSAL CHAIN
-                # 1. Perception (Encoder)
-                info = model.encode({"pixels": pixels, "action": actions})
-                # 2. Intention (Predictor)
-                model.predict(info["emb"], info["act_emb"])
+                # TRIGGER THE CAUSAL CHAIN in Mixed Precision
+                with torch.amp.autocast("cuda"):
+                    # 1. Perception (Encoder)
+                    info = model.encode({"pixels": pixels, "action": actions})
+                    # 2. Intention (Predictor)
+                    model.predict(info["emb"], info["act_emb"])
 
-                # Stream results to disk
+                # Stream results to disk in FP16
                 for layer_id, hook in hooks.items():
                     acts = hook.output  # (B, T, D)
                     if acts is None:
@@ -155,8 +161,8 @@ def harvest_activations(
                             f"🚨 Trace Failure: Layer {layer_id} did not report activations!"
                         )
 
-                    # Flatten to (Samples, D)
-                    acts_flat = acts.reshape(-1, acts.shape[-1])
+                    # Explicit cast to float16 to save 50% disk IO/Space
+                    acts_flat = acts.reshape(-1, acts.shape[-1]).astype(np.float16)
                     file_handles[layer_id].write(acts_flat.tobytes())
                     total_samples[layer_id] += acts_flat.shape[0]
                     last_shape[layer_id] = acts_flat.shape[1]
@@ -173,7 +179,7 @@ def harvest_activations(
     for layer_id in hooks.keys():
         metadata = {
             "shape": [total_samples[layer_id], last_shape[layer_id]],
-            "dtype": "float32",
+            "dtype": "float16",
             "layer_id": layer_id,
         }
         with open(output_path / f"{layer_id}.json", "w") as f:
