@@ -132,7 +132,9 @@ def audit_activations(output_dir, model_path):
     # 3. Cross-Layer Alignment
     print("\n🔗 Step 3: Cross-Layer Alignment...")
     unique_equiv = set(total_samples_list)
-    if len(unique_equiv) > 1:
+    if not unique_equiv:
+        print("  ⚠️ No valid layers found to align.")
+    elif len(unique_equiv) > 1:
         print(
             f"  ❌ ALIGNMENT FAILURE: Layers represent different moments! {unique_equiv}"
         )
