@@ -143,6 +143,20 @@ def harvest_activations(
                 pixels = batch["pixels"].to(device)
                 actions = batch["action"].to(device)
 
+                # --- NATIVE RESOLUTION RESIZE (480px -> 224px) ---
+                # This prevents the 146GB bloat by matching the model's target 224px resolution.
+                B, T, C, H, W = pixels.shape
+                if H != 224 or W != 224:
+                    pixels_flat = pixels.view(B * T, C, H, W).float() / 255.0
+                    pixels_resized = torch.nn.functional.interpolate(
+                        pixels_flat,
+                        size=(224, 224),
+                        mode="bilinear",
+                        align_corners=False,
+                    )
+                    pixels = (pixels_resized * 255.0).byte().view(B, T, C, 224, 224)
+                # -------------------------------------------------
+
                 if torch.isnan(actions).any():
                     actions = torch.nan_to_num(actions, 0.0)
 
