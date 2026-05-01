@@ -118,21 +118,27 @@ def update_feature_label(fid, label):
 
 
 # --- Callbacks ---
-def handle_restore(snap_idx):
-    resp = send_command({"command": "load_snapshot", "index": snap_idx})
+def handle_restore(snap_idx, mode="full"):
+    resp = send_command({"command": "load_snapshot", "index": snap_idx, "mode": mode})
     if resp and resp.get("status") == "load_ok":
-        # 1. Update Joint Sliders
-        for idx, val in enumerate(resp["joints"]):
-            if idx >= 16 and abs(val) > 1e-4:
-                st.session_state.active_joints.add(idx)
-                st.session_state[f"input_{idx}"] = float(np.clip(val, -1.0, 1.0))
+        # 1. Update Joint Sliders (Only for 'full' or 'intent' modes)
+        if mode in ["full", "intent"]:
+            for idx, val in enumerate(resp["joints"]):
+                if idx >= 16 and abs(val) > 1e-4:
+                    st.session_state.active_joints.add(idx)
+                    st.session_state[f"input_{idx}"] = float(np.clip(val, -1.0, 1.0))
 
-        # 2. Update Action Buffer
-        st.session_state.staging_buffer = np.array(resp["action_32"], dtype=np.float32)
+            # Update Staging Action Buffer
+            st.session_state.staging_buffer = np.array(
+                resp["action_32"], dtype=np.float32
+            )
 
-        # 3. Trigger Audit
+        # 2. Trigger Audit to reflect the new state-action pair
         st.session_state._trigger_audit = True
-        st.toast(f"Reproduced Snapshot {snap_idx}!", icon="⏪")
+        msg = f"Restored {mode.upper()} of Snapshot {snap_idx}"
+        st.toast(
+            msg, icon="⏪" if mode == "state" else "🎯" if mode == "intent" else "🔄"
+        )
 
 
 def handle_randomize():
@@ -179,16 +185,16 @@ st.title("🔬 Le-Probe: Mechanistic Teleop")
 st.divider()
 
 # --- Split-Pane Dashboard ---
-col_control, col_audit = st.columns([1.2, 1], gap="large")
+col_control, col_audit = st.columns([1, 1], gap="large")
 
 # --- Pane 1: Teleop Control ---
 with col_control:
     st.subheader("🎮 Teleop Control")
     st.write("")
 
-    # MAIN BODY TOOLBAR: Triggers full rerun (and thus audit refresh)
+    # MAIN BODY TOOLBAR: 11-unit symmetric grid
     c_sel, c_add, c_sub, c_rand, c_wild, c_snap = st.columns(
-        [2.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        [3.0, 1.6, 1.6, 1.6, 1.6, 1.6]
     )
     with c_sel:
         sel_name = st.selectbox(
@@ -269,9 +275,9 @@ with col_audit:
 
     @st.fragment
     def render_audit_pane():
-        # Configuration & Trigger Row (Symmetric Button Widths)
-        c_id, c_lbl, c_sv, c_aud, c_sid, c_res = st.columns(
-            [0.6, 2.9, 1.3, 1.3, 0.6, 1.3]
+        # Configuration & Trigger Row (11-unit Symmetric Grid)
+        c_id, c_lbl, c_sv, c_aud, c_sid, c_mode, c_res = st.columns(
+            [0.7, 2.1, 1.6, 1.6, 0.7, 2.0, 2.3]
         )
         with c_id:
             feat_id = st.number_input(
@@ -297,9 +303,17 @@ with col_audit:
             s_idx = st.number_input(
                 "SnapID", min_value=0, step=1, label_visibility="collapsed"
             )
+        with c_mode:
+            r_mode = st.selectbox(
+                "Mode",
+                options=["Full", "State", "Intent"],
+                index=0,
+                label_visibility="collapsed",
+            )
         with c_res:
-            if st.button("⏪ Restore", use_container_width=True):
-                handle_restore(s_idx)
+            label_map = {"Full": "🔄 Full", "State": "⏪ State", "Intent": "🎯 Intent"}
+            if st.button(f"{label_map[r_mode]} Restore", use_container_width=True):
+                handle_restore(s_idx, mode=r_mode.lower())
                 st.rerun()
 
         stored_acts = st.session_state.get("_last_acts")

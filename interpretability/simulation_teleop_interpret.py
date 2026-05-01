@@ -222,6 +222,7 @@ class InterpretiveTeleopServer(GR1MuJoCoBase):
 
             elif cmd == "load_snapshot":
                 idx = data.get("index")
+                mode = data.get("mode", "full")  # Modes: 'full', 'state', 'intent'
                 json_path = os.path.join(
                     self.snapshot_dir, f"brain_{int(idx):05d}.json"
                 )
@@ -229,15 +230,17 @@ class InterpretiveTeleopServer(GR1MuJoCoBase):
                     with open(json_path, "r") as f:
                         snap = json.load(f)
 
-                    # 1. Teleport Robot
-                    self.data.qpos[:] = np.array(snap["qpos"])
-                    self.data.qvel[:] = 0.0
-                    mujoco.mj_forward(self.model, self.data)
+                    # 1. Teleport Robot (State Only or Full)
+                    if mode in ["full", "state"]:
+                        self.data.qpos[:] = np.array(snap["qpos"])
+                        self.data.qvel[:] = 0.0
+                        mujoco.mj_forward(self.model, self.data)
+                        self._last_interp_q = self.data.qpos.copy()
+                        self.last_target_q = self.data.qpos.copy()
 
-                    # 2. Sync Buffers
-                    self._last_interp_q = self.data.qpos.copy()
-                    self.last_target_q = self.data.qpos.copy()
-                    self.current_action = np.array(snap["action_32"])
+                    # 2. Update Action Tracking (Intent Only or Full)
+                    if mode in ["full", "intent"]:
+                        self.current_action = np.array(snap["action_32"])
 
                     # 3. Refresh Perception
                     self.render_and_record(None)

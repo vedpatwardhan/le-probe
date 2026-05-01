@@ -1,63 +1,48 @@
+import json
 import os
-import sys
 import torch
 import zmq
-import msgpack
-import json
-import numpy as np
-from pathlib import Path
-
-# --- Path Stabilization ---
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROBE_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
-LEWM_DIR = os.path.join(PROBE_DIR, "lewm")
-LE_WM_DIR = os.path.join(LEWM_DIR, "le_wm")
-
-for p in [PROBE_DIR, LEWM_DIR, LE_WM_DIR]:
-    if p not in sys.path:
-        sys.path.insert(0, p)
-# --------------------------
-
-from lewm.goal_mapper import GoalMapper
-from interpretability.sae.sae_model import SparseAutoencoder
+from interpretability.sae.train_sae import SparseAutoencoder
 from interpretability.clt.clt_model import CrossLayerTranscoder
-from gr1_protocol import StandardScaler
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-PORT = 5557
 
 
-class LatentExplorerServer:
-    def __init__(self, model_path, sae_path, clt_path, labels_path):
-        print("--- Initializing Latent Explorer Server ---")
-        self.scaler = StandardScaler()
-        self.device = DEVICE
+class LatentServer:
+    def __init__(
+        self,
+        agent,
+        sae_path="le-probe/interpretability/sae/sae_weights.pt",
+        clt_path="le-probe/interpretability/clt/clt_weights.pt",
+        labels_path="le-probe/interpretability/sae/feature_labels.json",
+        device="cuda" if torch.cuda.is_available() else "cpu",
+    ):
+        self.agent = agent
+        self.model = agent.model
+        self.device = device
+        self.labels_path = labels_path
 
-        # 1. Load LeWM (Predictor)
-        self.agent = GoalMapper(model_path, dataset_root=".")
-        self.model = self.agent.model.to(DEVICE).eval()
+        # 1. Load SAE (Perception Lens)
+        sae_data = torch.load(sae_path, map_location=device)
+        self.sae = SparseAutoencoder(sae_data["input_dim"], sae_data["dict_size"]).to(
+            device
+        )
+        self.sae.load_state_dict(sae_data["state_dict"])
+        self.sae_stats = sae_data["norm_stats"]
+        self.sae.eval()
 
-        # 2. Load SAE (Definitive Format from train_sae.py)
-        # Note: dict_size=1024, d_model=192 as per report
-        self.sae = SparseAutoencoder(d_model=192, d_sae=1024).to(DEVICE).eval()
-        sae_checkpoint = torch.load(sae_path, map_location=DEVICE)
-        self.sae.load_state_dict(sae_checkpoint["state_dict"])
+        # 2. Load CLT (Intent Proxy)
+        clt_data = torch.load(clt_path, map_location=device)
+        self.clt = CrossLayerTranscoder(
+            d_model=clt_data["config"]["d_model"],
+            d_sae=clt_data["config"]["d_sae"],
+            l1_coeff=clt_data["config"]["l1_coeff"],
+        ).to(device)
+        self.clt.load_state_dict(clt_data["state_dict"])
+        self.clt_stats = clt_data["norm_stats"]
+        self.clt.eval()
 
-        # 3. Load CLT (Definitive Format from train_clt.py)
-        clt_checkpoint = torch.load(clt_path, map_location=DEVICE)
-        self.clt = CrossLayerTranscoder(d_model=192, d_sae=1024).to(DEVICE).eval()
-        self.clt.load_state_dict(clt_checkpoint["state_dict"])
-        self.clt_norm = clt_checkpoint["norm_stats"]  # <--- Bit-Perfect Normalization
-
-        self.labels_path = Path(labels_path)
-        self.load_labels()
-
-        # State tracking
-        self.current_z_enc = None
-
-    def load_labels(self):
-        if self.labels_path.exists():
-            with open(self.labels_path, "r") as f:
+        # 3. Load Labels
+        if os.path.exists(labels_path):
+            with open(labels_path, "r") as f:
                 self.labels = json.load(f)
         else:
             self.labels = {}
@@ -69,8 +54,9 @@ class LatentExplorerServer:
     @torch.no_grad()
     def get_activations(self, image_np, action_np):
         """
-        Calculates activations for the 'Imagined' state.
-        Pipeline: Image -> Encoder -> z_enc -> Predictor(action) -> z_pred -> CLT -> Acts
+        Calculates activations using a Dual-Probe architecture:
+        1. Perception (SAE) -> What is physically present?
+        2. Intention (CLT) -> What is the model planning?
         """
         # 1. Image -> z_enc
         batch = self.agent.transform({"pixels": image_np})
@@ -79,10 +65,9 @@ class LatentExplorerServer:
         )  # (1, 1, 3, 224, 224)
         info = self.model.encode({"pixels": pixels})
         z_enc = info["emb"]  # (1, 1, 192)
+        z_enc_flat = z_enc.squeeze(0).squeeze(0).unsqueeze(0)
 
-        # 2. Action -> z_pred
-        # We manually run the predictor and use the ENCODER projector (self.model.projector)
-        # to ensure we stay in the CLT's training manifold.
+        # 2. Action -> z_pred (Imagination)
         action_t = (
             torch.tensor(action_np, device=self.device)
             .float()
@@ -90,126 +75,45 @@ class LatentExplorerServer:
             .unsqueeze(0)
         )
         act_emb = self.model.action_encoder(action_t)
-
-        # Predict but DON'T use model.pred_proj (which might differ from model.projector)
         raw_pred = self.model.predictor(z_enc, act_emb)
-        z_pred = self.model.projector(raw_pred.squeeze(0)).unsqueeze(
-            0
-        )  # Use Encoder Projector
-
-        # 3. Dual-Path Audit: Visual (z_enc) + Predicted (z_pred)
-        # This ensures we catch signals even if the predictor has no temporal context yet.
-        z_enc_flat = z_enc.squeeze(0).squeeze(0).unsqueeze(0)
+        z_pred = self.model.projector(raw_pred.squeeze(0)).unsqueeze(0)
         z_pred_flat = z_pred.squeeze(0).squeeze(0).unsqueeze(0)
 
-        # Apply normalization to both
-        mean = self.clt_norm["mean_L"].to(self.device)
-        std = self.clt_norm["std_L"].to(self.device)
+        # 3. Path A: Perception (SAE)
+        mean_s = self.sae_stats["mean"].to(self.device)
+        std_s = self.sae_stats["std"].to(self.device)
+        z_enc_norm_s = (z_enc_flat - mean_s) / (std_s + 1e-6)
+        _, acts_perceptual = self.sae(z_enc_norm_s)
+        acts_perceptual = acts_perceptual.squeeze(0)
 
-        z_enc_norm = (z_enc_flat - mean) / std
-        z_pred_norm = (z_pred_flat - mean) / std
-
-        # Get activations for both
-        acts_visual = self.clt(z_enc_norm)["activations"].squeeze(0)
-        acts_intent = self.clt(z_pred_norm)["activations"].squeeze(0)
+        # Path B: Intentional Imagination (CLT)
+        # Normalize using CLT statistics (harvested from Predictor transitions)
+        z_enc_clt_norm = (z_enc_flat - self.clt_stats["mean_L"].to(self.device)) / (
+            self.clt_stats["std_L"].to(self.device) + 1e-6
+        )
+        z_pred_clt_norm = (z_pred_flat - self.clt_stats["mean_T"].to(self.device)) / (
+            self.clt_stats["std_T"].to(self.device) + 1e-6
+        )
+        clt_out = self.clt(z_enc_clt_norm, z_pred_clt_norm)
+        acts_intentional = clt_out["activations"]
 
         # Take the maximum signal across both paths for the UI
-        acts_combined = torch.max(acts_visual, acts_intent)
+        acts_combined = torch.max(acts_perceptual, acts_intentional)
 
         return acts_combined.cpu().numpy()
 
     def run(self):
         context = zmq.Context()
         socket = context.socket(zmq.REP)
-        socket.bind(f"tcp://*:{PORT}")
-        print(f"🚀 Latent Server LISTENING on port {PORT}...")
+        socket.bind("tcp://*:5555")
+        print("Ready to audit latents.")
 
         while True:
-            try:
-                message = socket.recv()
-                req = msgpack.unpackb(message, raw=False)
-                cmd = req.get("command")
-
-                if cmd == "get_activations":
-                    image = np.frombuffer(
-                        req["image"]["data"], dtype=req["image"]["dtype"]
-                    ).reshape(req["image"]["shape"])
-                    action = np.array(req["action"], dtype=np.float32)
-
-                    acts = self.get_activations(image, action)
-
-                    # Get Top 15
-                    top_indices = np.argsort(acts)[-15:][::-1]
-                    top_features = []
-                    for idx in top_indices:
-                        val = float(acts[idx])
-                        if val > 0:
-                            label = self.labels.get(str(idx), None)
-                            top_features.append([int(idx), val, label])
-
-                    socket.send(
-                        msgpack.packb(
-                            {
-                                "status": "ok",
-                                "top_features": top_features,
-                                "activations": acts.tolist(),
-                                "labels": self.labels,
-                            }
-                        )
-                    )
-
-                elif cmd == "update_label":
-                    fid = str(req["feature_id"])
-                    label = req["label"]
-                    self.labels[fid] = label
-                    self.save_labels()
-                    socket.send(msgpack.packb({"status": "ok"}))
-
-                else:
-                    socket.send(
-                        msgpack.packb({"status": "error", "message": "Unknown command"})
-                    )
-
-            except Exception as e:
-                print(f"❌ Server Error: {e}")
-                import traceback
-
-                traceback.print_exc()
-                socket.send(msgpack.packb({"status": "error", "message": str(e)}))
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="gr1_reward_tuned_v2.ckpt")
-    parser.add_argument("--sae", type=str, default="sae_weights.pt")
-    parser.add_argument("--clt", type=str, default="clt_weights.pt")
-    parser.add_argument(
-        "--labels", type=str, default="le-probe/interpretability/feature_labels.json"
-    )
-
-    def resolve_path(p):
-        if os.path.isabs(p):
-            return p
-        if os.path.exists(p):
-            return os.path.abspath(p)
-        # Try relative to project root (two levels up from this script)
-        fallback = os.path.join(PROBE_DIR, "..", p)
-        if os.path.exists(fallback):
-            return fallback
-        # Try relative to the script's le-probe root
-        fallback_probe = os.path.join(PROBE_DIR, p)
-        if os.path.exists(fallback_probe):
-            return fallback_probe
-        return os.path.abspath(p)
-
-    args = parser.parse_args()
-
-    m_path = resolve_path(args.model)
-    s_path = resolve_path(args.sae)
-    c_path = resolve_path(args.clt)
-    l_path = resolve_path(args.labels)
-
-    server = LatentExplorerServer(m_path, s_path, c_path, l_path)
-    server.run()
+            msg = socket.recv_pyobj()
+            if msg["type"] == "get_acts":
+                acts = self.get_activations(msg["image"], msg["action"])
+                socket.send_pyobj(acts)
+            elif msg["type"] == "save_label":
+                self.labels[str(msg["index"])] = msg["label"]
+                self.save_labels()
+                socket.send_pyobj({"status": "ok"})
