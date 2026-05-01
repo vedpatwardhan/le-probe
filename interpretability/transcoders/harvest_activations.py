@@ -44,7 +44,7 @@ class TraceHook:
 
 
 def harvest_activations(
-    model_path, dataset_repo, output_dir, num_episodes, shuffle=False
+    model_path, dataset_repo, output_dir, num_episodes, shuffle=False, num_workers=2
 ):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     output_path = Path(output_dir).resolve()
@@ -89,7 +89,12 @@ def harvest_activations(
     data_plugin = LEWMDataPlugin(
         repo_id=dataset_repo, keys_to_load=["pixels", "action"], num_steps=3
     )
-    dataloader = DataLoader(data_plugin, batch_size=32, shuffle=shuffle, num_workers=0)
+    dataloader = DataLoader(
+        data_plugin,
+        batch_size=32,
+        shuffle=shuffle,
+        num_workers=num_workers,
+    )
 
     actual_total = num_episodes if num_episodes > 0 else len(dataloader)
 
@@ -184,6 +189,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="harvested_activations")
     parser.add_argument("--batches", type=int, default=0)
     parser.add_argument("--shuffle", action="store_true")
+    parser.add_argument("--workers", type=int, default=2)
     args = parser.parse_args()
 
     harvest_activations(
@@ -192,4 +198,5 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         num_episodes=args.batches,
         shuffle=args.shuffle,
+        num_workers=args.workers,
     )
