@@ -37,7 +37,7 @@ def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
     tokens_per_moment = 771
     tokens_per_frame = 257
     grid_size = 16
-    input_res = (224, 224)
+    render_res = (480, 480)  # Native resolution for better quality
     camera_key = "observation.images.world_center"
 
     for fid, examples in report.items():
@@ -85,11 +85,13 @@ def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
                 cap.release()
 
                 if ret:
-                    frame = cv2.resize(frame, input_res)
+                    # Keep original resolution (480x480)
+                    frame = cv2.resize(frame, render_res)
                     if patch_idx > 0:
                         p_idx = patch_idx - 1
                         row, col = p_idx // grid_size, p_idx % grid_size
-                        ph, pw = input_res[0] // grid_size, input_res[1] // grid_size
+                        # Scale grid to render_res
+                        ph, pw = render_res[0] // grid_size, render_res[1] // grid_size
                         x, y = col * pw, row * ph
                         cv2.rectangle(frame, (x, y), (x + pw, y + ph), (0, 255, 0), 2)
                         cv2.putText(
