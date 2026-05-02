@@ -4,7 +4,7 @@
 
 # 1. Configuration
 ACTIVATIONS_DIR="activations_granular"
-OUTPUT_DIR="sae_weights"
+OUTPUT_DIR="sae_weights_granular"
 DICT_SIZE=12288
 EPOCHS=10
 
