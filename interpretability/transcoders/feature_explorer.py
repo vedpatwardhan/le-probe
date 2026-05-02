@@ -14,16 +14,19 @@ def explore_features(
     Finds the top-activating examples for specific features.
     If auto_top is provided, it first finds the N features with the highest max activations.
     """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"🚀 Using device: {device}")
+
     # 1. Load Model & Stats
     data = torch.load(weight_path, map_location="cpu")
     sd = data["state_dict"]
-    norm_stats = data["norm_stats"]
+    norm_stats = {k: v.to(device) for k, v in data["norm_stats"].items()}
     config = data["config"]
     layer_id = config["source_layer"]
 
     # Extract Encoder weights: (d_model, d_sae)
-    w_enc = sd["encoder.weight"].T
-    b_enc = sd["encoder.bias"]
+    w_enc = sd["encoder.weight"].T.to(device)
+    b_enc = sd["encoder.bias"].to(device)
 
     # 2. Load Activation Metadata
     # Standard flat structure from harvest_activations.py
@@ -44,10 +47,10 @@ def explore_features(
     # 3. Discovery Mode: Find Top-N features if requested
     if auto_top:
         print(f"🔭 Discovering Top {auto_top} features with highest peak activation...")
-        max_acts = torch.zeros(w_enc.shape[1])
+        max_acts = torch.zeros(w_enc.shape[1], device=device)
         batch_size = 20000
         for i in tqdm(range(0, acts.shape[0], batch_size)):
-            batch = torch.from_numpy(acts[i : i + batch_size].copy()).float()
+            batch = torch.from_numpy(acts[i : i + batch_size].copy()).to(device).float()
             batch = (batch - norm_stats["mean"]) / norm_stats["std"]
             feat_acts = torch.relu(batch @ w_enc + b_enc)
             batch_max, _ = torch.max(feat_acts, dim=0)
@@ -65,7 +68,7 @@ def explore_features(
     # Batch process for speed
     batch_size = 10000
     for i in tqdm(range(0, acts.shape[0], batch_size)):
-        batch = torch.from_numpy(acts[i : i + batch_size].copy()).float()
+        batch = torch.from_numpy(acts[i : i + batch_size].copy()).to(device).float()
         batch = (batch - norm_stats["mean"]) / norm_stats["std"]
 
         # Compute activations only for relevant features
