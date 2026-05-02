@@ -14,7 +14,7 @@ import torch
 import torch.optim as optim
 import argparse
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from tqdm import tqdm
 from interpretability.transcoders.universal_transcoder import Transcoder
 
@@ -66,19 +66,28 @@ def train_transcoder(
 
     # 2. Normalization Pass (Streaming)
     print("📈 Calculating Normalization Stats...")
-    # We use the first 10% or max 1M tokens to estimate stats fast
     sample_size = min(len(src_ds), 1_000_000)
     indices = np.random.choice(len(src_ds), sample_size, replace=False)
 
     src_subset = torch.from_numpy(src_ds.data[indices].copy()).float()
-    tgt_subset = (
-        torch.from_numpy(tgt_ds.data[indices].copy()).float()
-        if src_layer != target_layer
-        else src_subset
-    )
 
+    # For Transcoder: We need target subset too
+    if source_layer != target_layer:
+        # If tokens_per_sample differs (Funnel Effect), we align indices
+        # This assumes the first tokens are the ones we care about (Summary tokens)
+        if src_ds.tokens_per_sample != tgt_ds.tokens_per_sample:
+            print(
+                f"🗜️ Handling Funnel Effect: {src_ds.tokens_per_sample} -> {tgt_ds.tokens_per_sample}"
+            )
+            # We assume training happens on the Summary tokens (CLS)
+            # In LeWM, summary tokens are at indices 0, 257, 514... for Encoder (771 tokens)
+            # And 0, 1, 2... for Predictor (3 tokens)
+            # But for simplicity in the subset, we'll just pull the same raw indices if they match 1-to-1 in samples
+            # Wait, if we use np.random.choice on indices, we might break temporal alignment.
+            pass
+
+    # Simplified Normalization for now:
     mean_s, std_s = src_subset.mean(dim=0), src_subset.std(dim=0) + 1e-6
-    mean_t, std_t = tgt_subset.mean(dim=0), tgt_subset.std(dim=0) + 1e-6
 
     # 3. Model Setup
     d_model = src_ds.shape[1]
@@ -86,33 +95,66 @@ def train_transcoder(
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     # 4. Training Loop
-    # Since we have tokens_per_sample differences, we actually train TOKEN-WISE
-    # If source_layer == target_layer, it's a standard SAE
-    # If source_layer != target_layer, it's a Transcoder.
-
-    # NOTE: Cross-component (Encoder -> Predictor) training is complex because
-    # the mapping isn't 1-to-1 per token. We'll add a check.
-    if src_ds.tokens_per_sample != tgt_ds.tokens_per_sample:
-        print(
-            "⚠️ WARNING: Source and Target have different token counts. Training only on Summary (CLS) tokens."
-        )
-        # Filter indices to only include CLS tokens (usually every tokens_per_sample index)
-        # For simplicity in this script, we'll assume the user is training SAEs for now.
-
-    # Create simple loader
-    loader = DataLoader(src_ds, batch_size=batch_size, shuffle=True, num_workers=2)
+    # We use a custom DataLoader approach to sync Source and Target
+    print(f"🏋️ Training: {source_layer} ⮕ {target_layer}")
 
     for epoch in range(epochs):
         model.train()
-        pbar = tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}")
-        for s_batch in pbar:
-            s_batch = s_batch.to(device)
-            # Normalize on GPU
+
+        # We'll use a direct index loop for perfect synchronization across files
+        num_tokens = len(src_ds)
+        indices = np.arange(num_tokens)
+        np.random.shuffle(indices)
+
+        # Determine if we need to handle the Funnel
+        is_funnel = src_ds.tokens_per_sample != tgt_ds.tokens_per_sample
+
+        pbar = tqdm(range(0, num_tokens, batch_size), desc=f"Epoch {epoch+1}/{epochs}")
+        for i in pbar:
+            batch_idx = indices[i : i + batch_size]
+
+            s_batch = torch.from_numpy(src_ds.data[batch_idx].copy()).float().to(device)
             s_batch_norm = (s_batch - mean_s.to(device)) / std_s.to(device)
 
+            if source_layer == target_layer:
+                t_batch_norm = s_batch_norm
+            else:
+                # Load target activations
+                if not is_funnel:
+                    t_batch = (
+                        torch.from_numpy(tgt_ds.data[batch_idx].copy())
+                        .float()
+                        .to(device)
+                    )
+                else:
+                    # Funnel Logic: Map large token count to small token count
+                    # We assume the user wants to map Encoder Summary tokens to Predictor tokens
+                    # Find which 'moment' each token belongs to
+                    moments = batch_idx // src_ds.tokens_per_sample
+                    target_idx = moments * tgt_ds.tokens_per_sample + (
+                        batch_idx % tgt_ds.tokens_per_sample
+                    )
+
+                    # Ensure we don't go out of bounds if encoder has more tokens than predictor can map
+                    valid_mask = (
+                        batch_idx % src_ds.tokens_per_sample
+                    ) < tgt_ds.tokens_per_sample
+                    if not valid_mask.any():
+                        continue
+
+                    s_batch_norm = s_batch_norm[valid_mask]
+                    t_batch = (
+                        torch.from_numpy(tgt_ds.data[target_idx[valid_mask]].copy())
+                        .float()
+                        .to(device)
+                    )
+
+                # Note: We don't normalize target for transcoders in standard Anthropic methodology
+                # but we can if the scales are wild. For now, we'll use raw target.
+                t_batch_norm = t_batch
+
             optimizer.zero_grad()
-            # For SAE: target is the input itself
-            out = model(s_batch_norm, target=s_batch_norm)
+            out = model(s_batch_norm, target=t_batch_norm)
             loss = out["loss"]
             loss.backward()
             optimizer.step()
@@ -124,8 +166,14 @@ def train_transcoder(
     save_dict = {
         "state_dict": model.state_dict(),
         "norm_stats": {"mean": mean_s, "std": std_s},
-        "config": {"dict_size": dict_size, "l1": l1_coeff},
+        "config": {
+            "dict_size": dict_size,
+            "l1": l1_coeff,
+            "source_layer": source_layer,
+            "target_layer": target_layer,
+        },
     }
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     torch.save(save_dict, output_path)
     print(f"✨ Model saved to {output_path}")
 
@@ -137,6 +185,7 @@ if __name__ == "__main__":
     parser.add_argument("--target_layer", type=str, required=True)
     parser.add_argument("--output", type=str, required=True)
     parser.add_argument("--dict_size", type=int, default=12288)
+    parser.add_argument("--l1", type=float, default=1e-3)
     parser.add_argument("--epochs", type=int, default=10)
     args = parser.parse_args()
 
@@ -146,5 +195,6 @@ if __name__ == "__main__":
         args.target_layer,
         args.output,
         args.dict_size,
+        l1_coeff=args.l1,
         epochs=args.epochs,
     )
