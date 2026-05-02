@@ -26,8 +26,15 @@ def explore_features(
     b_enc = sd["encoder.bias"]
 
     # 2. Load Activation Metadata
+    # Standard flat structure from harvest_activations.py
     json_path = os.path.join(activation_dir, f"{layer_id}.json")
     bin_path = os.path.join(activation_dir, f"{layer_id}.bin")
+
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(
+            f"❌ Could not find activation files for {layer_id} in {activation_dir}"
+        )
+
     with open(json_path, "r") as f:
         meta = json.load(f)
 
