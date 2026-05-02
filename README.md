@@ -228,19 +228,13 @@ The weights of the reward-tuned model can be found at [`gr1_reward_tuned_v2.ckpt
 .venv/bin/python interpretability/sae/harvest_activations.py --out activations_dual_14k.pt
 ```
 
-2. **Feature Training (SAE & CLT)**: Decompose the latent space and train cross-layer transcoders:
+2. **Feature Training (Cascading Transcoders)**: Decompose the latent space and build the "Chain of Custody" across layers:
 ```bash
-# 1. Train Sparse Autoencoder on harvested latents
-.venv/bin/python interpretability/sae/train_sae.py --input activations_dual_14k.pt --dict_size 1024 --l1 1e-3
+# 1. Train Layer 0 SAE (Identity Mapping)
+.venv/bin/python interpretability/transcoders/train_transcoder.py --source L0.pt --target L0.pt --output sae_weights.pt
 
-# 2. Inspect SAE Features
-.venv/bin/python interpretability/sae/inspect_sae.py --latents activations_dual_14k.pt --sae sae_weights.pt
-
-# 3. Train Cross-Layer Transcoder to map features across the transformer
-.venv/bin/python interpretability/clt/train_clt.py --input activations_dual_14k.pt --dict_size 1024
-
-# 4. Inspect CLT
-.venv/bin/python interpretability/clt/inspect_clt.py --clt clt_weights.pt --data activations_dual_14k.pt
+# 2. Train Layer 0 -> Layer 1 CLT (Transition Mapping)
+.venv/bin/python interpretability/transcoders/train_transcoder.py --source sae_L0_acts.pt --target L1.pt --output clt_weights.pt
 ```
 
 3. **Mechanistic Audit & Feature Discovery**: Identify "Golden Triggers" and visualize the model's internal representations:
