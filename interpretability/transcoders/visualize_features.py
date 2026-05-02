@@ -14,18 +14,14 @@ def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True, parents=True)
 
-    # Model Spec
+    # Model Spec (LeWM v17)
     tokens_per_moment = 771
-    tokens_per_view = 257  # 16x16 + 1 CLS
+    tokens_per_frame = 257  # 16x16 + 1 CLS
     grid_size = 16
     input_res = (224, 224)
 
-    # Camera views mapping (Adjust these if your dataset names differ)
-    camera_views = [
-        "observation.images.cam_high",
-        "observation.images.cam_low",
-        "observation.images.cam_wrist",
-    ]
+    # Primary camera for 'pixels' input
+    camera_key = "observation.images.world_center"
 
     for fid, examples in report.items():
         print(f"🖼️ Generating gallery for Feature {fid}...")
@@ -34,37 +30,31 @@ def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
 
         for rank, (val, global_idx) in enumerate(examples):
             # 1. Map to Dataset
+            # 771 tokens = 3 consecutive frames (T=3) * 257 tokens/frame
             moment_idx = global_idx // tokens_per_moment
             token_idx = global_idx % tokens_per_moment
 
             episode_idx = moment_idx // 32
-            frame_idx = moment_idx % 32
+            base_frame_idx = moment_idx % 32
 
-            view_idx = token_idx // tokens_per_view
-            patch_idx = token_idx % tokens_per_view
+            # Find the specific frame in the T=3 window
+            time_offset = token_idx // tokens_per_frame  # 0, 1, or 2
+            patch_idx = token_idx % tokens_per_frame
+
+            actual_frame_idx = base_frame_idx + time_offset
 
             # 2. Extract Frame from Video
-            view_name = (
-                camera_views[view_idx]
-                if view_idx < len(camera_views)
-                else camera_views[0]
-            )
+            # Structure: videos/observation.images.world_center/episode_000000.mp4
             video_path = (
-                Path(dataset_dir) / "videos" / f"{view_name}_ep{episode_idx:06d}.mp4"
+                Path(dataset_dir)
+                / "videos"
+                / camera_key
+                / f"episode_{episode_idx:06d}.mp4"
             )
-
-            if not video_path.exists():
-                # Try alternative naming
-                video_path = (
-                    Path(dataset_dir)
-                    / "videos"
-                    / view_name
-                    / f"episode_{episode_idx:06d}.mp4"
-                )
 
             if video_path.exists():
                 cap = cv2.VideoCapture(str(video_path))
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, actual_frame_idx)
                 ret, frame = cap.read()
                 cap.release()
 
@@ -82,21 +72,23 @@ def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
                         ph, pw = input_res[0] // grid_size, input_res[1] // grid_size
                         x, y = col * pw, row * ph
 
-                        cv2.rectangle(frame, (x, y), (x + pw, y + ph), (0, 0, 255), 2)
+                        cv2.rectangle(frame, (x, y), (x + pw, y + ph), (0, 255, 0), 2)
                         cv2.putText(
                             frame,
                             f"Act: {val:.2f}",
                             (x, y - 5),
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.4,
-                            (0, 0, 255),
+                            (0, 255, 0),
                             1,
                         )
 
-                    save_name = f"rank{rank}_ep{episode_idx}_f{frame_idx}_v{view_idx}_r{row if patch_idx > 0 else 'CLS'}.jpg"
+                    save_name = f"rank{rank}_ep{episode_idx}_f{actual_frame_idx}_t{time_offset}_{'patch' if patch_idx > 0 else 'CLS'}.jpg"
                     cv2.imwrite(str(feat_dir / save_name), frame)
                 else:
-                    print(f"⚠️ Failed to read frame {frame_idx} from {video_path}")
+                    print(
+                        f"⚠️ Failed to read frame {actual_frame_idx} from {video_path}"
+                    )
             else:
                 print(f"⚠️ Video not found: {video_path}")
 
