@@ -44,12 +44,14 @@ def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
             actual_frame_idx = base_frame_idx + time_offset
 
             # 2. Extract Frame from Video
-            # Structure: videos/observation.images.world_center/episode_000000.mp4
+            # Structure: videos/observation.images.world_center/chunk-000/file-000.mp4
+            chunk_idx = episode_idx // 1000
             video_path = (
                 Path(dataset_dir)
                 / "videos"
                 / camera_key
-                / f"episode_{episode_idx:06d}.mp4"
+                / f"chunk-{chunk_idx:03d}"
+                / f"file-{episode_idx % 1000:03d}.mp4"
             )
 
             if video_path.exists():
