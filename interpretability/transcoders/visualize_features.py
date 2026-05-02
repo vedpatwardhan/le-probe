@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import cv2
 import numpy as np
@@ -6,21 +7,37 @@ import argparse
 from pathlib import Path
 from huggingface_hub import snapshot_download
 
+# --- Path Stabilization ---
+CURRENT_FILE = Path(__file__).resolve()
+ROOT_DIR = CURRENT_FILE.parents[2]  # le-probe/
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from lewm.lewm_data_plugin import LEWMDataPlugin
+
 
 def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
+
     with open(report_path, "r") as f:
         report = json.load(f)
 
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True, parents=True)
 
-    # Model Spec (LeWM v17)
+    # 1. Initialize Plugin (to get frame_indices and boundary logic)
+    # We use a placeholder repo_id since we'll override the local_dir if needed
+    print(f"🔄 Initializing Data Plugin for index alignment...")
+    plugin = LEWMDataPlugin(
+        repo_id="vedpatwardhan/gr1_pickup_grasp", keys_to_load=["pixels"], num_steps=3
+    )
+    # Force the plugin to look at the local download directory
+    plugin.root = Path(dataset_dir)
+
+    # Model Spec
     tokens_per_moment = 771
-    tokens_per_frame = 257  # 16x16 + 1 CLS
+    tokens_per_frame = 257
     grid_size = 16
     input_res = (224, 224)
-
-    # Primary camera for 'pixels' input
     camera_key = "observation.images.world_center"
 
     for fid, examples in report.items():
@@ -29,29 +46,36 @@ def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
         feat_dir.mkdir(exist_ok=True)
 
         for rank, (val, global_idx) in enumerate(examples):
-            # 1. Map to Dataset
-            # 771 tokens = 3 consecutive frames (T=3) * 257 tokens/frame
-            moment_idx = global_idx // tokens_per_moment
+            # 2. Map Activation Index to Plugin Index
+            idx = global_idx // tokens_per_moment
             token_idx = global_idx % tokens_per_moment
 
-            episode_idx = moment_idx // 32
-            base_frame_idx = moment_idx % 32
+            # 3. Apply the EXACT same boundary shift logic as the harvester
+            buffer = 0  # No virtual actions in harvest config
+            ep_start = plugin.episode_indices[idx]
+            ep_end = plugin.episode_indices[idx + plugin.num_steps + buffer - 1]
+
+            actual_idx = idx
+            if ep_start != ep_end:
+                actual_idx = idx - plugin.num_steps
+                if actual_idx < 0:
+                    actual_idx = 0
+
+            episode_idx = int(plugin.episode_indices[actual_idx])
+            base_frame_idx = int(plugin.frame_indices[actual_idx])
 
             # Find the specific frame in the T=3 window
-            time_offset = token_idx // tokens_per_frame  # 0, 1, or 2
+            time_offset = token_idx // tokens_per_frame
             patch_idx = token_idx % tokens_per_frame
-
             actual_frame_idx = base_frame_idx + time_offset
 
-            # 2. Extract Frame from Video
-            # Structure: videos/observation.images.world_center/chunk-000/file-000.mp4
-            chunk_idx = episode_idx // 1000
+            # 4. Extract Frame from Video
             video_path = (
                 Path(dataset_dir)
                 / "videos"
                 / camera_key
-                / f"chunk-{chunk_idx:03d}"
-                / f"file-{episode_idx % 1000:03d}.mp4"
+                / f"chunk-000"
+                / f"file-{episode_idx:03d}.mp4"
             )
 
             if video_path.exists():
@@ -61,19 +85,12 @@ def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
                 cap.release()
 
                 if ret:
-                    # Resize to match model input (224x224)
                     frame = cv2.resize(frame, input_res)
-
-                    # 3. Draw Highlight
                     if patch_idx > 0:
                         p_idx = patch_idx - 1
-                        row = p_idx // grid_size
-                        col = p_idx % grid_size
-
-                        # Calculate patch pixel coords
+                        row, col = p_idx // grid_size, p_idx % grid_size
                         ph, pw = input_res[0] // grid_size, input_res[1] // grid_size
                         x, y = col * pw, row * ph
-
                         cv2.rectangle(frame, (x, y), (x + pw, y + ph), (0, 255, 0), 2)
                         cv2.putText(
                             frame,
