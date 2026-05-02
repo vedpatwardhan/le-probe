@@ -2,7 +2,9 @@ import os
 import json
 import cv2
 import numpy as np
+import argparse
 from pathlib import Path
+from huggingface_hub import snapshot_download
 
 
 def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
@@ -100,16 +102,34 @@ def visualize_audit(report_path, dataset_dir, output_dir="feature_gallery"):
 
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", type=str, required=True, help="Path to audit JSON")
     parser.add_argument(
-        "--dataset", type=str, required=True, help="Path to LeRobot dataset"
+        "--dataset",
+        type=str,
+        default="dataset/gr1_pickup_grasp",
+        help="Local path or Target path",
+    )
+    parser.add_argument(
+        "--repo_id",
+        type=str,
+        default="vedpatwardhan/gr1_pickup_grasp",
+        help="HF Repo ID for auto-download",
     )
     parser.add_argument(
         "--output", type=str, default="feature_gallery", help="Output folder"
     )
     args = parser.parse_args()
 
-    visualize_audit(args.report, args.dataset, args.output)
+    # Auto-download if missing
+    dataset_path = Path(args.dataset)
+    if not (dataset_path / "videos").exists():
+        print(f"📥 Dataset missing. Downloading videos from {args.repo_id}...")
+        snapshot_download(
+            repo_id=args.repo_id,
+            repo_type="dataset",
+            local_dir=str(dataset_path),
+            allow_patterns=["videos/*"],
+        )
+
+    visualize_audit(args.report, str(dataset_path), args.output)
