@@ -186,6 +186,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, required=True)
     parser.add_argument("--dict_size", type=int, default=12288)
     parser.add_argument("--l1", type=float, default=1e-3)
+    parser.add_argument("--batch_size", type=int, default=4096)
     parser.add_argument("--epochs", type=int, default=10)
     args = parser.parse_args()
 
@@ -196,5 +197,6 @@ if __name__ == "__main__":
         args.output,
         args.dict_size,
         l1_coeff=args.l1,
+        batch_size=args.batch_size,
         epochs=args.epochs,
     )
