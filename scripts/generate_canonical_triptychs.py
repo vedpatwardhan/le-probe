@@ -23,7 +23,7 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 MODEL_PATH = os.path.join(ROOT_DIR, "gr1_reward_tuned_v2.ckpt")
 CLT_PATH = os.path.join(ROOT_DIR, "clt_weights.pt")
 DATASET_ROOT = os.path.join(
-    LE_PROBE_DIR, "datasets", "anonymouscorl5-cmyk", "gr1_pickup_grasp"
+    LE_PROBE_DIR, "datasets", "vedpatwardhan", "gr1_pickup_grasp"
 )
 ASSETS_DIR = os.path.join(LE_PROBE_DIR, "assets")
 os.makedirs(ASSETS_DIR, exist_ok=True)

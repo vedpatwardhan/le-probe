@@ -102,9 +102,7 @@ class SnapshotAnalyzer:
 
 if __name__ == "__main__":
     CKPT = "/workspace/cortex-os/le-probe/research/outputs/gr1_grasp_v3/checkpoints/gr1-epoch=99-step=004400.ckpt"
-    SNAPSHOTS = (
-        "/workspace/cortex-os/le-probe/datasets/anonymouscorl5-cmyk/gr1_reward_pred"
-    )
+    SNAPSHOTS = "/workspace/cortex-os/le-probe/datasets/vedpatwardhan/gr1_reward_pred"
 
     analyzer = SnapshotAnalyzer(CKPT, SNAPSHOTS)
     analyzer.run_analysis()

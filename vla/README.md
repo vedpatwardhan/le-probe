@@ -26,15 +26,15 @@ pip install -r requirements.txt
 ## Training Signal
 
 <div align="center">
-  <img src="../assets/gr00t_grasp_loss.png" width="240" alt="grasp loss">
-  <img src="../assets/gr00t_cup_loss.png" width="240" alt="cup loss">
+  <img src="../assets/vla/gr00t_grasp_loss.png" width="240" alt="grasp loss">
+  <img src="../assets/vla/gr00t_cup_loss.png" width="240" alt="cup loss">
 </div>
 
 ## Rollout Examples
 
 <div align="center">
-  <img src="../assets/vla_grasp.gif" width="240" alt="grasp execution">
-  <img src="../assets/vla_cup.gif" width="240" alt="cup execution">
+  <img src="../assets/vla/vla_grasp.gif" width="240" alt="grasp execution">
+  <img src="../assets/vla/vla_cup.gif" width="240" alt="cup execution">
 </div>
 
 ## Minimal Inference Workflow

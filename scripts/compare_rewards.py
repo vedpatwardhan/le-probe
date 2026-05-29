@@ -25,8 +25,8 @@ def get_avg_rewards(sidecar_path):
 
 
 def plot_comparison():
-    cup_path = "/workspace/cortex-os/le-probe/datasets/anonymouscorl5-cmyk/gr1_pickup_cup/progress_sparse.parquet"
-    grasp_path = "/workspace/cortex-os/le-probe/datasets/anonymouscorl5-cmyk/gr1_pickup_grasp/progress_sparse.parquet"
+    cup_path = "/workspace/cortex-os/le-probe/datasets/vedpatwardhan/gr1_pickup_cup/progress_sparse.parquet"
+    grasp_path = "/workspace/cortex-os/le-probe/datasets/vedpatwardhan/gr1_pickup_grasp/progress_sparse.parquet"
 
     avg_cup = get_avg_rewards(cup_path)
     avg_grasp = get_avg_rewards(grasp_path)

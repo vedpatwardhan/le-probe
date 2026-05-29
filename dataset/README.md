@@ -72,16 +72,16 @@ streamlit run dataset/teleop_ui.py
 ## Visual Examples
 
 <div align="center">
-  <img src="../assets/dataset_grasp.gif" width="240" alt="grasp behavior data">
-  <img src="../assets/dataset_cup.gif" width="240" alt="cup behavior data">
+  <img src="../assets/dataset/dataset_grasp.gif" width="240" alt="grasp behavior data">
+  <img src="../assets/dataset/dataset_cup.gif" width="240" alt="cup behavior data">
 </div>
 
 <div align="center">
-  <img src="../assets/skeletal_priors.gif" width="480" alt="skeletal prior example">
+  <img src="../assets/dataset/skeletal_priors.gif" width="480" alt="skeletal prior example">
 </div>
 
 <div align="center">
-  <img src="../assets/dino_skeletal_priors.gif" width="720" alt="DINOv3 waypoint example">
+  <img src="../assets/dataset/dino_skeletal_priors.gif" width="720" alt="DINOv3 waypoint example">
 </div>
 
 ## Static Workspace Probes

@@ -21,7 +21,7 @@ def validate_compression():
         os.path.dirname(os.path.abspath(__file__)),
         "..",
         "datasets",
-        "anonymouscorl5-cmyk",
+        "vedpatwardhan",
     )
     source_path = os.path.join(parent_dir, source_repo)
     target_path = os.path.join(parent_dir, target_repo)

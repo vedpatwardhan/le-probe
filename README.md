@@ -1,6 +1,6 @@
 # Le-Probe: Representation Audits for LeWM
 
-Le-Probe is the experiment and analysis stack used in our CoRL 2026 submission to diagnose why latent MPC succeeds or fails across LeRobot World Model variants on a high-DoF cube-pick task.
+Le-Probe is the experiment and analysis stack to diagnose why latent MPC succeeds or fails across LeWorldModel variants on a GR-1 cube-pickup task.
 
 ## Paper-Aligned Scope
 
@@ -19,7 +19,7 @@ Le-Probe is the experiment and analysis stack used in our CoRL 2026 submission t
 ## Setup
 
 ```bash
-git clone --recursive https://github.com/anonymouscorl5-cmyk/le-probe.git
+git clone --recursive https://github.com/vedpatwardhan/le-probe.git
 cd le-probe
 python3 -m venv .venv
 source .venv/bin/activate
@@ -77,10 +77,10 @@ Notebook-aligned CLI equivalents (including priors, fused cache, trainer/tuner f
 
 | Variant | 3D PCA | 3D t-SNE | 3D UMAP |
 | :--- | :---: | :---: | :---: |
-| **Single-View RGB** | ![PCA](assets/manifold_3d_pca.png) | ![t-SNE](assets/manifold_3d_tsne.png) | ![UMAP](assets/manifold_3d_umap.png) |
-| **Multi-View RGB** | ![PCA](assets/manifold_3d_multiview_pca.png) | ![t-SNE](assets/manifold_3d_multiview_tsne.png) | ![UMAP](assets/manifold_3d_multiview_umap.png) |
-| **Multi-View RGB + Skeletal Priors** | ![PCA](assets/manifold_3d_multiview_skeleton_pca.png) | ![t-SNE](assets/manifold_3d_multiview_skeleton_tsne.png) | ![UMAP](assets/manifold_3d_multiview_skeleton_umap.png) |
-| **Multi-View RGB + Skeletal Priors + DINOv3 Waypoints** | ![PCA](assets/manifold_3d_multiview_skeleton_dino_2_pca.png) | ![t-SNE](assets/manifold_3d_multiview_skeleton_dino_2_tsne.png) | ![UMAP](assets/manifold_3d_multiview_skeleton_dino_2_umap.png) |
+| **Single-View RGB** | ![PCA](assets/manifold/manifold_3d_pca.png) | ![t-SNE](assets/manifold/manifold_3d_tsne.png) | ![UMAP](assets/manifold/manifold_3d_umap.png) |
+| **Multi-View RGB** | ![PCA](assets/manifold/manifold_3d_multiview_pca.png) | ![t-SNE](assets/manifold/manifold_3d_multiview_tsne.png) | ![UMAP](assets/manifold/manifold_3d_multiview_umap.png) |
+| **Multi-View RGB + Skeletal Priors** | ![PCA](assets/manifold/manifold_3d_multiview_skeleton_pca.png) | ![t-SNE](assets/manifold/manifold_3d_multiview_skeleton_tsne.png) | ![UMAP](assets/manifold/manifold_3d_multiview_skeleton_umap.png) |
+| **Multi-View RGB + Skeletal Priors + DINOv3 Waypoints** | ![PCA](assets/manifold/manifold_3d_multiview_skeleton_dino_2_pca.png) | ![t-SNE](assets/manifold/manifold_3d_multiview_skeleton_dino_2_tsne.png) | ![UMAP](assets/manifold/manifold_3d_multiview_skeleton_dino_2_umap.png) |
 
 ### Static Workspace Probes
 
@@ -106,8 +106,22 @@ Notebook-aligned CLI equivalents (including priors, fused cache, trainer/tuner f
 
 ## Mechanistic Interpretability Snapshot
 
+Precomputed **Neuronpedia-style IG attribution circuits** (≤15 pinned nodes per canonical static probe). Panels match the paper appendix (Fig. 15); full grids live under `neuronpedia_images/`.
+
 <div align="center">
-  <img src="assets/neuronpedia_dashboard.png" width="720" style="border-radius: 12px; margin-bottom: 20px;">
+  <table>
+    <tr>
+      <td align="center"><b>MV — lateral left</b><br><img src="assets/circuits/lateral_table_region/multiview_left.png" width="240" alt="Multi-view lateral left circuit"></td>
+      <td align="center"><b>Skel — lateral left</b><br><img src="assets/circuits/lateral_table_region/skeleton_left.png" width="240" alt="Skeletal lateral left circuit"></td>
+      <td align="center"><b>DINO — lateral left</b><br><img src="assets/circuits/lateral_table_region/dino_left.png" width="240" alt="DINO lateral left circuit"></td>
+    </tr>
+    <tr>
+      <td align="center"><b>MV — approach</b><br><img src="assets/circuits/distance_to_cube/multiview_approach.png" width="240" alt="Multi-view distance approach circuit"></td>
+      <td align="center"><b>MV — near table</b><br><img src="assets/circuits/distance_to_cube/multiview_near_table.png" width="240" alt="Multi-view distance near table circuit"></td>
+      <td align="center"><b>Skel — pose 2</b><br><img src="assets/circuits/pose_clusters/skeleton_pose_2.png" width="240" alt="Skeletal pose cluster 2 circuit"></td>
+    </tr>
+  </table>
+  <p><em>Top row: lateral-left across checkpoints (sharpest split under multi-view, 3/15 overlap). Bottom row: multi-view distance bins (5/15); skeletal pose cluster (pose_2↔pose_4 is 10/15 in the full playbook).</em></p>
 </div>
 
 ## Dataset and Checkpoint Sources

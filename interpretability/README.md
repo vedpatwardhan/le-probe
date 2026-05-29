@@ -19,10 +19,10 @@ This module covers the analysis side of Le-Probe: why planning behavior changes 
 
 | Variant | 3D PCA | 3D t-SNE | 3D UMAP |
 | :--- | :---: | :---: | :---: |
-| **Single-View RGB** | ![PCA](../assets/manifold_3d_pca.png) | ![t-SNE](../assets/manifold_3d_tsne.png) | ![UMAP](../assets/manifold_3d_umap.png) |
-| **Multi-View RGB** | ![PCA](../assets/manifold_3d_multiview_pca.png) | ![t-SNE](../assets/manifold_3d_multiview_tsne.png) | ![UMAP](../assets/manifold_3d_multiview_umap.png) |
-| **Multi-View RGB + Skeletal Priors** | ![PCA](../assets/manifold_3d_multiview_skeleton_pca.png) | ![t-SNE](../assets/manifold_3d_multiview_skeleton_tsne.png) | ![UMAP](../assets/manifold_3d_multiview_skeleton_umap.png) |
-| **Multi-View RGB + Skeletal Priors + DINOv3 Waypoints** | ![PCA](../assets/manifold_3d_multiview_skeleton_dino_2_pca.png) | ![t-SNE](../assets/manifold_3d_multiview_skeleton_dino_2_tsne.png) | ![UMAP](../assets/manifold_3d_multiview_skeleton_dino_2_umap.png) |
+| **Single-View RGB** | ![PCA](../assets/manifold/manifold_3d_pca.png) | ![t-SNE](../assets/manifold/manifold_3d_tsne.png) | ![UMAP](../assets/manifold/manifold_3d_umap.png) |
+| **Multi-View RGB** | ![PCA](../assets/manifold/manifold_3d_multiview_pca.png) | ![t-SNE](../assets/manifold/manifold_3d_multiview_tsne.png) | ![UMAP](../assets/manifold/manifold_3d_multiview_umap.png) |
+| **Multi-View RGB + Skeletal Priors** | ![PCA](../assets/manifold/manifold_3d_multiview_skeleton_pca.png) | ![t-SNE](../assets/manifold/manifold_3d_multiview_skeleton_tsne.png) | ![UMAP](../assets/manifold/manifold_3d_multiview_skeleton_umap.png) |
+| **Multi-View RGB + Skeletal Priors + DINOv3 Waypoints** | ![PCA](../assets/manifold/manifold_3d_multiview_skeleton_dino_2_pca.png) | ![t-SNE](../assets/manifold/manifold_3d_multiview_skeleton_dino_2_tsne.png) | ![UMAP](../assets/manifold/manifold_3d_multiview_skeleton_dino_2_umap.png) |
 
 ## Static Probe Results
 
@@ -118,10 +118,24 @@ make webapp-localhost-dev
 .venv/bin/python interpretability/dashboard/neuronpedia_server.py
 ```
 
-## Current Mechanistic Artifact
+## Representative IG Circuits (Appendix Panels)
+
+Pinned backward circuits extracted from precomputed attribution graphs (`dashboard/run_probe_attribution_graphs.py` → `extract_probe_circuits.py`). Same six canonical probes as the paper appendix.
 
 <div align="center">
-  <img src="../assets/neuronpedia_dashboard.png" width="720" style="border-radius: 12px; margin-bottom: 20px;">
+  <table>
+    <tr>
+      <td align="center"><b>MV — lateral left</b><br><img src="../assets/circuits/lateral_table_region/multiview_left.png" width="240" alt="Multi-view lateral left circuit"></td>
+      <td align="center"><b>Skel — lateral left</b><br><img src="../assets/circuits/lateral_table_region/skeleton_left.png" width="240" alt="Skeletal lateral left circuit"></td>
+      <td align="center"><b>DINO — lateral left</b><br><img src="../assets/circuits/lateral_table_region/dino_left.png" width="240" alt="DINO lateral left circuit"></td>
+    </tr>
+    <tr>
+      <td align="center"><b>MV — approach</b><br><img src="../assets/circuits/distance_to_cube/multiview_approach.png" width="240" alt="Multi-view distance approach circuit"></td>
+      <td align="center"><b>MV — near table</b><br><img src="../assets/circuits/distance_to_cube/multiview_near_table.png" width="240" alt="Multi-view distance near table circuit"></td>
+      <td align="center"><b>Skel — pose 2</b><br><img src="../assets/circuits/pose_clusters/skeleton_pose_2.png" width="240" alt="Skeletal pose cluster 2 circuit"></td>
+    </tr>
+  </table>
+  <p><em>Assets under <code>assets/circuits/</code>; remaining playbook screenshots in <code>neuronpedia_images/</code> (gitignored).</em></p>
 </div>
 
 ## Supplementary Artifacts

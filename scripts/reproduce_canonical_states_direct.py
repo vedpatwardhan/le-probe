@@ -6,9 +6,7 @@ import numpy as np
 from PIL import Image
 
 # Base Path
-DATASET_ROOT = (
-    "/workspace/cortex-os/le-probe/datasets/anonymouscorl5-cmyk/gr1_pickup_grasp"
-)
+DATASET_ROOT = "/workspace/cortex-os/le-probe/datasets/vedpatwardhan/gr1_pickup_grasp"
 OUTPUT_DIR = "/workspace/cortex-os/le-probe/temp_repro"
 JSON_PATH = "/workspace/cortex-os/le-probe/canonical_reproduction.json"
 
