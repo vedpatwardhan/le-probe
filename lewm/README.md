@@ -136,7 +136,6 @@ source .venv/bin/activate
 
 ## Notes
 
-- Default dataset IDs are anonymized in configs/scripts.
 - This module focuses on representation and planning behavior, not end-task success guarantees.
 
 ## Pretrained Artifacts (Supplementary Storage)

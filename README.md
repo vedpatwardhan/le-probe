@@ -16,33 +16,6 @@ Le-Probe is the experiment and analysis stack to diagnose why latent MPC succeed
 - [`interpretability/`](./interpretability): manifold audits, static probe audits, CLT training, and Neuronpedia-backed inspection.
 - [`scripts/`](./scripts): maintenance and reproducibility utilities.
 
-## Setup
-
-```bash
-git clone --recursive https://github.com/vedpatwardhan/le-probe.git
-cd le-probe
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-## Reproduction
-
-The canonical reference workflow for reproducing LeWM experiments is:
-
-- [`lewm/LeWM_Training.ipynb`](./lewm/LeWM_Training.ipynb) for training and checkpoint generation.
-- [`lewm/LeWM_E2E.ipynb`](./lewm/LeWM_E2E.ipynb) for end-to-end planning/inference evaluation.
-
-Notebook-aligned CLI equivalents (including priors, fused cache, trainer/tuner flow) are documented in [`lewm/README.md`](./lewm/README.md).
-
-```bash
-# 1) Start planner server (full variant example)
-.venv/bin/python lewm/lewm_server.py \
-  --model <ckpt> \
-  --gallery goal_gallery.pth \
-  --multi_view --use_skeleton --use_dino
-```
-
 ## Representation Variants
 
 <div align="center">
@@ -128,12 +101,34 @@ Precomputed **Neuronpedia-style IG attribution circuits** (≤15 pinned nodes pe
   <p><em>Top row: lateral-left across checkpoints (sharpest split under multi-view, 3/15 overlap). Bottom row: multi-view distance bins (5/15); skeletal pose cluster (pose_2↔pose_4 is 10/15 in the full playbook).</em></p>
 </div>
 
-## Dataset and Checkpoint Sources
+## Setup
 
-- Datasets and pretrained artifacts are distributed through supplementary storage links documented in module READMEs.
-- Dataset IDs used in scripts/configs are anonymized (`gr1_pickup_grasp`, `gr1_reward_pred`, `gr1_reward_pred_v2`).
+```bash
+git clone --recursive https://github.com/vedpatwardhan/le-probe.git
+cd le-probe
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-### Supplementary Storage Links
+## Reproduction
+
+The canonical reference workflow for reproducing LeWM experiments is:
+
+- [`lewm/LeWM_Training.ipynb`](./lewm/LeWM_Training.ipynb) for training and checkpoint generation.
+- [`lewm/LeWM_E2E.ipynb`](./lewm/LeWM_E2E.ipynb) for end-to-end planning/inference evaluation.
+
+Notebook-aligned CLI equivalents (including priors, fused cache, trainer/tuner flow) are documented in [`lewm/README.md`](./lewm/README.md).
+
+```bash
+# 1) Start planner server (full variant example)
+.venv/bin/python lewm/lewm_server.py \
+  --model <ckpt> \
+  --gallery goal_gallery.pth \
+  --multi_view --use_skeleton --use_dino
+```
+
+### Storage Links
 
 #### Datasets
 
