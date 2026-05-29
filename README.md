@@ -158,5 +158,5 @@ Notebook-aligned CLI equivalents (including priors, fused cache, trainer/tuner f
 
 ## Limitations
 
-- This repository provides reproducibility artifacts for a bounded submission window; analyses are intentionally scoped to one task family.
+- Analyses are intentionally scoped to one task family.
 - Static probes diagnose geometry and separability but are not equivalent to full in-distribution policy evaluation.
