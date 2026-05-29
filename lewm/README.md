@@ -4,14 +4,18 @@ This module contains the LeWorldModel training and planning stack used for:
 
 `Single-View RGB -> Multi-View RGB -> Multi-View RGB + Skeletal Priors -> Multi-View RGB + Skeletal Priors + DINOv3 Waypoints`
 
-## Variant Flags
+## Representation Variants
 
-| Variant | Runtime Flags |
-| :--- | :--- |
-| Single-View RGB | *(none)* |
-| Multi-View RGB | `--multi_view` |
-| Multi-View RGB + Skeletal Priors | `--multi_view --use_skeleton` |
-| Multi-View RGB + Skeletal Priors + DINOv3 Waypoints | `--multi_view --use_skeleton --use_dino` |
+<div align="center">
+  <img src="../assets/architecture_diagram.png" width="720" alt="LeWorldModel representation variants: single-view (a) and multi-view with skeletal priors and DINOv3 waypoints (b–d)">
+</div>
+
+| Variant | Added Signal | Goal | Runtime Flags |
+| :--- | :--- | :--- | :--- |
+| Single-View RGB | `world_center` only | Baseline JEPA + MPC | *(none)* |
+| Multi-View RGB | 5 camera views | Improve state coverage | `--multi_view` |
+| Multi-View RGB + Skeletal Priors | 4th kinematic channel | Anchor task-relevant structure | `--multi_view --use_skeleton` |
+| Multi-View RGB + Skeletal Priors + DINOv3 Waypoints | phase waypoints | Improve long-horizon subgoal alignment | `--multi_view --use_skeleton --use_dino` |
 
 ## What This Module Covers
 

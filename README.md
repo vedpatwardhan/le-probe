@@ -45,6 +45,10 @@ Notebook-aligned CLI equivalents (including priors, fused cache, trainer/tuner f
 
 ## Representation Variants
 
+<div align="center">
+  <img src="assets/architecture_diagram.png" width="720" alt="LeWorldModel representation variants: single-view (a) and multi-view with skeletal priors and DINOv3 waypoints (b–d)">
+</div>
+
 | Variant | Added Signal | Goal |
 | :--- | :--- | :--- |
 | Single-View RGB | `world_center` only | Baseline JEPA + MPC |
