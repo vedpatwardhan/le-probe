@@ -83,7 +83,7 @@ Le-Probe is the experiment and analysis stack to diagnose why latent MPC succeed
 
 ## Mechanistic Interpretability Snapshot
 
-Precomputed **Neuronpedia-style IG attribution circuits** (≤15 pinned nodes per canonical static probe). Panels match the paper appendix (Fig. 15); full grids live under `neuronpedia_images/`.
+Precomputed **Neuronpedia-style IG attribution circuits** (≤15 pinned nodes per canonical static probe).
 
 <div align="center">
   <table>
