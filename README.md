@@ -89,7 +89,7 @@ The granular interpretability pipeline leverages Sparse Autoencoders (SAEs) and 
   <img src="assets/interpretability_architecture.png" width="60%" alt="interpretability architecture">
 </div>
 
-Precomputed **Neuronpedia-style IG attribution circuits** (≤15 pinned nodes per canonical static probe). Panels match the paper appendix (Fig. 15); full grids live under `neuronpedia_images/`.
+Precomputed **Neuronpedia-style IG attribution circuits** (≤15 pinned nodes per canonical static probe).
 
 <div align="center">
   <table>
