@@ -120,6 +120,12 @@ make webapp-localhost-dev
 
 ## Representative IG Circuits (Appendix Panels)
 
+The granular interpretability pipeline leverages Sparse Autoencoders (SAEs) and Transcoders connected residually onto the layers of the base model to reconstruct outputs and map features:
+
+<div align="center">
+  <img src="../assets/interpretability_architecture.png" width="60%" alt="interpretability architecture">
+</div>
+
 Pinned backward circuits extracted from precomputed attribution graphs (`dashboard/run_probe_attribution_graphs.py` → `extract_probe_circuits.py`). Same six canonical probes as the paper appendix.
 
 <div align="center">
