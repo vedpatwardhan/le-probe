@@ -86,7 +86,7 @@ Le-Probe is the experiment and analysis stack to diagnose why latent MPC succeed
 The granular interpretability pipeline leverages Sparse Autoencoders (SAEs) and Transcoders connected residually onto the layers of the base model to reconstruct outputs and map features:
 
 <div align="center">
-  <img src="assets/interpretability_architecture.png" width="60%" alt="interpretability architecture">
+  <img src="assets/interpretability_architecture.png" width="50%" alt="interpretability architecture">
 </div>
 
 Precomputed **Neuronpedia-style IG attribution circuits** (≤15 pinned nodes per canonical static probe).
