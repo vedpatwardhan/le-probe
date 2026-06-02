@@ -79,7 +79,6 @@ Le-Probe is the experiment and analysis stack to diagnose why latent MPC succeed
 </div>
 
 - **Observed trend:** separability and cluster continuity improve across variants, with strongest structure in `Multi-View RGB + Skeletal Priors` and `Multi-View RGB + Skeletal Priors + DINOv3 Waypoints`.
-- **Full outputs:** `workspace_visualization/lateral_table_region/`, `workspace_visualization/distance_to_cube/`, `workspace_visualization/pose_clusters/`.
 
 ## Mechanistic Interpretability Snapshot
 
