@@ -334,6 +334,8 @@ class LeRobotManager:
         rewards = []
         MAX_APPROACH_DIST = 0.5
 
+        # Calculate raw scores first to compute discounted returns
+        scores = []
         for i, frame in enumerate(self.episode_buffer):
             # Extract physics from extra_info
             cube_z = float(frame["extra_info"].get("cube_z", 0.0))
@@ -359,7 +361,19 @@ class LeRobotManager:
                 else:
                     dist_factor = max(0, 1.0 - (target_dist / MAX_APPROACH_DIST))
                     score = 0.1 + (dist_factor * 0.4)
+            scores.append(score)
 
+        # Compute discounted future returns (value)
+        gamma = 0.95
+        values = []
+        for t in range(len(scores)):
+            val = 0.0
+            for k in range(t, len(scores)):
+                val += (gamma ** (k - t)) * scores[k]
+            values.append(val)
+
+        for i, frame in enumerate(self.episode_buffer):
+            score = scores[i]
             # Final Temporal Slope for unique indexing
             final_score = float(score + (i * 0.0001))
 
@@ -369,6 +383,7 @@ class LeRobotManager:
                     "episode_index": episode_idx,
                     "progress_sparse": final_score,
                     "progress_dense": final_score,
+                    "value": float(values[i]),
                 }
             )
 
