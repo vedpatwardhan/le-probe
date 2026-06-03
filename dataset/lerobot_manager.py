@@ -223,9 +223,6 @@ class LeRobotManager:
                 interpolated_pos = start_pos + (end_pos - start_pos) * fraction
                 smoothed_actions_32[i + k] = interpolated_pos.astype(np.float32)
 
-                # [AUDIT:STAGE3] Data Buffer for R-Shoulder Roll
-                print(f"[AUDIT:STAGE3] {interpolated_pos[17]:.6f}")
-
             prev_target = curr_target.copy()
             i = j
 
