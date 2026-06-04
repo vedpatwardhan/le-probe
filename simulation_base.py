@@ -46,7 +46,7 @@ class GR1MuJoCoBase:
         self.frame_indices = {cam: 0 for cam in self.cam_names}
 
         # Renderer
-        self.res = (480, 480)
+        self.res = (224, 224)
         self.renderer = mujoco.Renderer(
             self.model, height=self.res[1], width=self.res[0]
         )
@@ -212,11 +212,12 @@ class GR1MuJoCoBase:
     def _post_render_hook(self, name, rgb, depth=None):
         """Saves camera views to the filesystem for diagnostic-verification (Mirrors original teleop logic)."""
         # Save in a subdirectory for this specific camera inside the session folder
-        cam_dir = self.base_log_dir / name
-        cam_dir.mkdir(parents=True, exist_ok=True)
+        # cam_dir = self.base_log_dir / name
+        # cam_dir.mkdir(parents=True, exist_ok=True)
 
-        img_path = cam_dir / f"{self.frame_indices[name]:04d}.png"
-        Image.fromarray(rgb).save(img_path)
+        # img_path = cam_dir / f"{self.frame_indices[name]:04d}.png"
+        # Image.fromarray(rgb).save(img_path)
+        pass
 
     def get_state_32(self):
         return self.qpos_to_action_32(self.data.qpos)
@@ -300,7 +301,7 @@ class GR1MuJoCoBase:
         )
 
         # 6. ITERATIVE SOLVER LOOP: Refine the joint angles to minimize distance to targets
-        for i in range(1500):
+        for i in range(500):
             # Calculate the velocity vector needed to move toward targets
             solver = mink.solve_ik(
                 self.configuration,

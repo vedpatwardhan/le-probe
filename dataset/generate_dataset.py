@@ -79,8 +79,8 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
         # Define offsets and parameter mutations based on episode type
         offsets = {
             "success": 0.0,
-            "suboptimal": np.random.uniform(0.015, 0.035),  # 1.5 - 3.5 cm perturbation
-            "fail": np.random.uniform(0.07, 0.15),  # 7 - 15 cm massive failure
+            "suboptimal": np.random.uniform(0.07, 0.3),  # 7 - 30 cm perturbation
+            "fail": np.random.uniform(0.3, 0.7),  # 30 - 70 cm massive failure
         }
 
         offset = offsets[ep_type]

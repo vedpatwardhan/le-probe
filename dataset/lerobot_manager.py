@@ -273,8 +273,8 @@ class LeRobotManager:
         self.dataset = None
 
         # Check for batch sync trigger
-        if self.episodes_since_sync >= self.upload_interval:
-            self.force_sync()
+        # if self.episodes_since_sync >= self.upload_interval:
+        #     self.force_sync()
 
     def discard_episode(self):
         """Aborts the current episode without saving or syncing."""
