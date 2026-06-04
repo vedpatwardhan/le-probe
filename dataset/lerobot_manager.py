@@ -477,3 +477,11 @@ class LeRobotManager:
     @property
     def pending_uploads(self):
         return self._pending_uploads
+
+    def close(self):
+        """Clean up the ThreadPoolExecutor threads."""
+        if hasattr(self, "executor") and self.executor is not None:
+            try:
+                self.executor.shutdown(wait=False)
+            except Exception:
+                pass

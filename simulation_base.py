@@ -30,7 +30,7 @@ class GR1MuJoCoBase:
     Handles XML loading, IK solving, State extraction, and Perception.
     """
 
-    def __init__(self, scene_path=SCENE_PATH, restrict_ik=True):
+    def __init__(self, scene_path=SCENE_PATH, restrict_ik=True, recorder=None):
         print(f"--- GR-1 MODULAR BASE (MuJoCo) ---")
         self.restrict_ik = restrict_ik
         self.model = mujoco.MjModel.from_xml_path(scene_path)
@@ -62,9 +62,14 @@ class GR1MuJoCoBase:
         self.debug_log_path = None
 
         # LeRobot Manager
-        self.recorder = LeRobotManager(
-            repo_id="gr1_pickup_grasp", fps=10, upload_interval=20
-        )
+        if recorder is not None:
+            self.recorder = recorder
+            self._owns_recorder = False
+        else:
+            self.recorder = LeRobotManager(
+                repo_id="gr1_pickup_grasp", fps=10, upload_interval=20
+            )
+            self._owns_recorder = True
 
         # Canonical Scaling Logic
         self.unscaler = StandardScaler()
@@ -608,3 +613,9 @@ class GR1MuJoCoBase:
                 self.renderer.close()
             except Exception:
                 pass
+        if hasattr(self, "_owns_recorder") and self._owns_recorder:
+            if hasattr(self, "recorder") and self.recorder is not None:
+                try:
+                    self.recorder.close()
+                except Exception:
+                    pass

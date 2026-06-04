@@ -32,7 +32,7 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
     """
 
     def __init__(self, dataset_name="gr1_auto_dataset", seed=42, recorder=None):
-        super().__init__(scene_path=SCENE_PATH, restrict_ik=True)
+        super().__init__(scene_path=SCENE_PATH, restrict_ik=True, recorder=recorder)
         np.random.seed(seed)
 
         # Override the recorder to save to the custom target dataset
