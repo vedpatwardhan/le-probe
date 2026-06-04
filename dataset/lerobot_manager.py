@@ -297,11 +297,6 @@ class LeRobotManager:
         self.episode_buffer = []
         self.episode_frame_count = 0
 
-        print(f"[TIMER] LeRobotManager.stop_episode details:")
-        print(f"  - Interpolation: {t_smooth_dur:.4f}s")
-        print(f"  - Temp serialize conversion: {t_norm_dur:.4f}s")
-        print(f"  - TOTAL stop_episode: {time.time() - t_stop_start:.4f}s")
-
         # Flush if we have reached the batch limit
         existing_eps = [
             d for d in os.listdir(self.temp_episodes_dir) if d.startswith("episode_")
@@ -341,7 +336,9 @@ class LeRobotManager:
             for frame in frames:
                 frame_data = {
                     **{
-                        k: Image.open(os.path.join(ep_dir, img_name))
+                        f"observation.images.{k}": Image.open(
+                            os.path.join(ep_dir, img_name)
+                        )
                         for k, img_name in frame["image_paths"].items()
                     },
                     "observation.state": frame["observation.state"],
