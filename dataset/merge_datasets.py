@@ -85,7 +85,13 @@ def merge_chunks(root_dir, chunk_names, target_repo_id):
                 # Reconstruct dict expected by add_frame
                 add_data = {}
                 for key in first_ds.features:
-                    if key in ["index", "episode_index", "timestamp", "frame_index", "task_index"]:
+                    if key in [
+                        "index",
+                        "episode_index",
+                        "timestamp",
+                        "frame_index",
+                        "task_index",
+                    ]:
                         continue
                     val = frame_data[key]
                     # Transpose (C, H, W) images/video tensors to (H, W, C) numpy or PIL for image writer compatibility
