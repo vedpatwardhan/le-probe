@@ -75,8 +75,9 @@ def merge_chunks(root_dir, chunk_names, target_repo_id):
         for ep_idx in tqdm(
             range(chunk_ds.num_episodes), desc=f"Episodes in {chunk_name}"
         ):
-            start_frame, end_frame = chunk_ds.episode_bounds[ep_idx]
-            task = chunk_ds.hf_dataset[start_frame]["task"]
+            start_frame = int(chunk_ds.meta.episodes[ep_idx]["dataset_from_index"])
+            end_frame = int(chunk_ds.meta.episodes[ep_idx]["dataset_to_index"])
+            task = chunk_ds[start_frame]["task"]
 
             for frame_idx in range(start_frame, end_frame):
                 frame_data = chunk_ds[frame_idx]
