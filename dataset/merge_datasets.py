@@ -9,153 +9,176 @@ if ROOT_DIR not in sys.path:
 
 import argparse
 import shutil
-import numpy as np
+import json
+import glob
 import pandas as pd
-from PIL import Image
-import torch
+import pyarrow.parquet as pq
+import pyarrow as pa
 from tqdm import tqdm
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 
-def merge_chunks(root_dir, chunk_names, target_repo_id):
-    # Determine target dataset path
+def fast_merge_chunks(root_dir, chunk_names, target_repo_id):
     target_path = os.path.join(root_dir, target_repo_id)
     if os.path.exists(target_path):
         print(f"🚨 Target dataset already exists at {target_path}.")
         print("Please delete or move it if you want a clean merge.")
         return
 
-    # Load the first chunk to inspect/replicate its configuration features
-    first_chunk_path = os.path.join(root_dir, chunk_names[0])
-    if not os.path.exists(first_chunk_path):
-        print(
-            f"❌ Error: First chunk not found at {first_chunk_path}. Cannot replicate features."
-        )
-        return
-
-    print(f"📖 Probing features from first chunk: {chunk_names[0]}")
-    first_ds = LeRobotDataset(repo_id=chunk_names[0], root=first_chunk_path)
-
-    # Create the target dataset
-    target_ds = LeRobotDataset.create(
-        repo_id=target_repo_id,
-        fps=first_ds.fps,
-        root=target_path,
-        features=first_ds.features,
-        use_videos=True,
-        image_writer_processes=0,
-        image_writer_threads=4,
-        video_backend="ffmpeg",
-        vcodec="h264",
-    )
-    print(f"✨ Created target dataset at: {target_path}")
-
-    all_rewards = []
-
-    # Loop over chunks
+    # Check that all chunks exist
     for chunk_name in chunk_names:
         chunk_path = os.path.join(root_dir, chunk_name)
         if not os.path.exists(chunk_path):
-            print(
-                f"⚠️ Warning: Chunk {chunk_name} not found at {chunk_path}. Skipping."
+            print(f"❌ Error: Source chunk not found at {chunk_path}.")
+            return
+
+    # Make target directories
+    print("📁 Creating target directory structure...")
+    os.makedirs(os.path.join(target_path, "meta"), exist_ok=True)
+    os.makedirs(os.path.join(target_path, "data"), exist_ok=True)
+    os.makedirs(os.path.join(target_path, "videos"), exist_ok=True)
+
+    cumulative_episodes = 0
+    cumulative_frames = 0
+    episodes_dfs = []
+    rewards_dfs = []
+
+    # Map each chunk's index to target indices
+    for idx, chunk_name in enumerate(chunk_names):
+        chunk_path = os.path.join(root_dir, chunk_name)
+        print(f"\n📦 Merging chunk: {chunk_name} (Chunk index {idx})")
+
+        # 1. Load episodes metadata
+        ep_file = os.path.join(
+            chunk_path, "meta", "episodes", "chunk-000", "file-000.parquet"
+        )
+        if not os.path.exists(ep_file):
+            # Fallback to general scan if path differs
+            matches = glob.glob(
+                os.path.join(chunk_path, "meta", "episodes", "*", "*.parquet")
             )
-            continue
+            if matches:
+                ep_file = matches[0]
+            else:
+                raise FileNotFoundError(
+                    f"No episodes metadata parquet found for {chunk_name}"
+                )
 
-        print(f"📦 Merging chunk: {chunk_name}...")
-        chunk_ds = LeRobotDataset(repo_id=chunk_name, root=chunk_path)
+        ep_df = pd.read_parquet(ep_file)
 
-        # Load the reward sidecar for this chunk if it exists
-        reward_sidecar_path = os.path.join(chunk_path, "progress_sparse.parquet")
-        chunk_rewards_df = None
-        if os.path.exists(reward_sidecar_path):
-            chunk_rewards_df = pd.read_parquet(reward_sidecar_path)
-            print(f"   ℹ️ Loaded rewards sidecar from {reward_sidecar_path}")
+        # 2. Copy the video files by shifting the chunk directories to prevent collision
+        # Each chunk's videos/observation.images.xxx/chunk-000/ -> target videos/observation.images.xxx/chunk-00{idx}/
+        video_src_root = os.path.join(chunk_path, "videos")
+        if os.path.exists(video_src_root):
+            for cam_dir in os.listdir(video_src_root):
+                src_cam_path = os.path.join(video_src_root, cam_dir)
+                if not os.path.isdir(src_cam_path):
+                    continue
+                # We expect videos inside chunk-000
+                src_chunk_path = os.path.join(src_cam_path, "chunk-000")
+                if os.path.exists(src_chunk_path):
+                    dst_chunk_path = os.path.join(
+                        target_path, "videos", cam_dir, f"chunk-{idx:03d}"
+                    )
+                    os.makedirs(os.path.dirname(dst_chunk_path), exist_ok=True)
+                    print(f"   🎥 Copying videos for {cam_dir}...")
+                    shutil.copytree(src_chunk_path, dst_chunk_path)
 
-        # Iterate over all episodes of chunk_ds
-        for ep_idx in tqdm(
-            range(chunk_ds.num_episodes), desc=f"Episodes in {chunk_name}"
-        ):
-            start_frame = int(chunk_ds.meta.episodes[ep_idx]["dataset_from_index"])
-            end_frame = int(chunk_ds.meta.episodes[ep_idx]["dataset_to_index"])
-            task = chunk_ds[start_frame]["task"]
+        # 3. Copy the data parquet files by shifting chunk directories
+        # data/chunk-000/ -> data/chunk-00{idx}/
+        data_src_chunk = os.path.join(chunk_path, "data", "chunk-000")
+        data_dst_chunk = os.path.join(target_path, "data", f"chunk-{idx:03d}")
+        if os.path.exists(data_src_chunk):
+            os.makedirs(os.path.dirname(data_dst_chunk), exist_ok=True)
+            print("   📄 Copying data parquet tables...")
+            shutil.copytree(data_src_chunk, data_dst_chunk)
 
-            for frame_idx in range(start_frame, end_frame):
-                frame_data = chunk_ds[frame_idx]
+            # 4. Modify the copied parquet files to shift index & episode_index, and set chunk_index to target index
+            parquet_files = glob.glob(os.path.join(data_dst_chunk, "*.parquet"))
+            for p_file in tqdm(parquet_files, desc="      Updating data files"):
+                df = pd.read_parquet(p_file)
+                df["episode_index"] = df["episode_index"] + cumulative_episodes
+                df["index"] = df["index"] + cumulative_frames
+                if "data/chunk_index" in df.columns:
+                    df["data/chunk_index"] = idx
+                df.to_parquet(p_file)
 
-                # Reconstruct dict expected by add_frame
-                add_data = {}
-                for key in first_ds.features:
-                    if key in [
-                        "index",
-                        "episode_index",
-                        "timestamp",
-                        "frame_index",
-                        "task_index",
-                    ]:
-                        continue
-                    val = frame_data[key]
-                    # Transpose (C, H, W) images/video tensors to (H, W, C) numpy or PIL for image writer compatibility
-                    if first_ds.features[key]["dtype"] in ["image", "video"]:
-                        if isinstance(val, torch.Tensor):
-                            val = val.cpu().numpy()
-                        # If shape is channel-first (e.g. 3, 224, 224), transpose to channel-last
-                        if val.ndim == 3 and val.shape[0] in [1, 3]:
-                            val = np.transpose(val, (1, 2, 0))
-                        val = Image.fromarray(
-                            (val * 255).astype(np.uint8)
-                            if val.dtype == np.float32 or val.max() <= 1.0
-                            else val.astype(np.uint8)
-                        )
-                    elif isinstance(val, torch.Tensor):
-                        val = val.cpu().numpy()
-                    add_data[key] = val
+        # 5. Shift and update episodes metadata DataFrame
+        ep_df["episode_index"] = ep_df["episode_index"] + cumulative_episodes
+        ep_df["dataset_from_index"] = ep_df["dataset_from_index"] + cumulative_frames
+        ep_df["dataset_to_index"] = ep_df["dataset_to_index"] + cumulative_frames
+        ep_df["data/chunk_index"] = idx
 
-                add_data["task"] = task
-                target_ds.add_frame(add_data)
+        # Update video chunk indices mapping in the metadata
+        for col in ep_df.columns:
+            if col.startswith("videos/") and col.endswith("/chunk_index"):
+                ep_df[col] = idx
 
-            target_ds.save_episode(parallel_encoding=False)
+        episodes_dfs.append(ep_df)
 
-            # Map the rewards sidecar indices
-            target_episode_idx = target_ds.num_episodes - 1
-            target_start_frame = target_ds.num_frames - (end_frame - start_frame)
+        # 6. Read and shift rewards sidecar
+        rewards_file = os.path.join(chunk_path, "progress_sparse.parquet")
+        if os.path.exists(rewards_file):
+            rw_df = pd.read_parquet(rewards_file)
+            rw_df["episode_index"] = rw_df["episode_index"] + cumulative_episodes
+            rw_df["index"] = rw_df["index"] + cumulative_frames
+            rewards_dfs.append(rw_df)
 
-            if chunk_rewards_df is not None:
-                ep_rows = chunk_rewards_df[
-                    chunk_rewards_df["episode_index"] == ep_idx
-                ].copy()
-                if not ep_rows.empty:
-                    ep_rows = ep_rows.sort_values("index")
-                    for i, (_, row) in enumerate(ep_rows.iterrows()):
-                        all_rewards.append(
-                            {
-                                "index": target_start_frame + i,
-                                "episode_index": target_episode_idx,
-                                "progress_sparse": row["progress_sparse"],
-                                "progress_dense": row.get(
-                                    "progress_dense", row["progress_sparse"]
-                                ),
-                                "value": row.get("value", 0.0),
-                            }
-                        )
+        # Increment offsets
+        # The number of episodes in this chunk is the length of the metadata DataFrame
+        cumulative_episodes += len(ep_df)
+        # The total frames added is the sum of lengths in this chunk
+        cumulative_frames += int(ep_df["length"].sum())
 
-    # Save target rewards sidecar
-    if all_rewards:
-        reward_df = pd.DataFrame(all_rewards)
+    # 7. Write combined episodes metadata
+    if episodes_dfs:
+        merged_episodes_df = pd.concat(episodes_dfs, ignore_index=True)
+        meta_ep_dir = os.path.join(target_path, "meta", "episodes", "chunk-000")
+        os.makedirs(meta_ep_dir, exist_ok=True)
+        merged_episodes_df.to_parquet(os.path.join(meta_ep_dir, "file-000.parquet"))
+        print("\n✅ Combined episodes metadata written successfully.")
+
+    # 8. Write combined rewards sidecar
+    if rewards_dfs:
+        merged_rewards_df = pd.concat(rewards_dfs, ignore_index=True)
         sidecar_path = os.path.join(target_path, "progress_sparse.parquet")
-        reward_df.to_parquet(sidecar_path)
+        merged_rewards_df.to_parquet(sidecar_path)
         print(
-            f"✅ Successfully wrote rewards sidecar to: {sidecar_path} with {len(reward_df)} entries."
+            f"✅ Combined rewards sidecar written successfully with {len(merged_rewards_df)} entries."
         )
 
+    # 9. Copy tasks template metadata
+    tasks_src = os.path.join(root_dir, chunk_names[0], "meta", "tasks.parquet")
+    if os.path.exists(tasks_src):
+        shutil.copy(tasks_src, os.path.join(target_path, "meta", "tasks.parquet"))
+
+    # 10. Copy and update info.json
+    info_src = os.path.join(root_dir, chunk_names[0], "meta", "info.json")
+    if os.path.exists(info_src):
+        with open(info_src, "r") as f:
+            info = json.load(f)
+        info["total_episodes"] = cumulative_episodes
+        info["total_frames"] = cumulative_frames
+        info["splits"] = {"train": [0, cumulative_episodes]}
+        with open(os.path.join(target_path, "meta", "info.json"), "w") as f:
+            json.dump(info, f, indent=4)
+        print("✅ info.json updated.")
+
+    # 11. Copy stats.json template
+    stats_src = os.path.join(root_dir, chunk_names[0], "meta", "stats.json")
+    if os.path.exists(stats_src):
+        shutil.copy(stats_src, os.path.join(target_path, "meta", "stats.json"))
+        print("✅ stats.json copied.")
+
     print(
-        f"\n🎉 Merge complete! Combined dataset has {target_ds.num_episodes} episodes and {target_ds.num_frames} total frames."
+        f"\n🎉 Fast Merge Complete! Unified dataset '{target_repo_id}' generated successfully in seconds."
+    )
+    print(
+        f"📊 Total Episodes: {cumulative_episodes} | Total Frames: {cumulative_frames}"
     )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Merge LeRobot dataset chunks into a unified dataset"
-    )
+    parser = argparse.ArgumentParser(description="Fast LeRobot dataset chunk merger")
     parser.add_argument(
         "--root-dir",
         type=str,
@@ -179,5 +202,5 @@ if __name__ == "__main__":
 
     # Resolve absolute path for root-dir
     abs_root = os.path.abspath(args.root_dir)
-    print(f"Merging chunks {args.chunks} in {abs_root} -> {args.target}")
-    merge_chunks(abs_root, args.chunks, args.target)
+    print(f"Fast merging chunks {args.chunks} in {abs_root} -> {args.target}")
+    fast_merge_chunks(abs_root, args.chunks, args.target)
