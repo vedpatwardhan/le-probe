@@ -22,11 +22,19 @@ def test_32dim_identity_protocol():
 def test_recorder_sync_logic(mock_exists, mock_dataset_class):
     """Verify that add_frame correctly preserves 32-dim protocol."""
     # 1. Mock setup: Ensure the manager thinks the dataset is ready
-    mock_exists.return_value = False  # Force creation
+    def side_effect(path):
+        if ".temp_episodes" in path or "data.pkl" in path:
+            return True
+        return False
+    mock_exists.side_effect = side_effect
     mock_ds = MagicMock()
+    mock_ds.num_frames = 1
+    mock_ds.num_episodes = 1
     mock_dataset_class.create.return_value = mock_ds
 
     manager = LeRobotManager(repo_id="test_repo", fps=10)
+    manager.batch_size = 1
+    manager._append_rewards_to_sidecar = MagicMock()
     manager.start_episode("Pick up the cube")
 
     # 2. Prepare mock 32-dim data
@@ -44,9 +52,13 @@ def test_recorder_sync_logic(mock_exists, mock_dataset_class):
     calls = mock_ds.add_frame.call_args_list
     frame_data = calls[0][0][0]
 
-    # Check that index 16 is still 16 (not remapped to 7)
-    assert frame_data["observation.state"][16] == 16.0
-    assert frame_data["action"][16] == 16.0
+    from gr1_protocol import StandardScaler
+    scaler = StandardScaler()
+    expected_state = scaler.scale_state(state_32)
+    expected_action = scaler.scale_state(action_32)
+
+    assert np.allclose(frame_data["observation.state"], expected_state, atol=1e-4)
+    assert np.allclose(frame_data["action"], expected_action, atol=1e-4)
 
     # Ensure task is attached
     assert frame_data["task"] == "Pick up the cube"

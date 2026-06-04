@@ -9,6 +9,8 @@ if ROOT_DIR not in sys.path:
 
 import os
 import shutil
+import time
+import pickle
 import json
 import lerobot.datasets.utils as lerobot_utils
 import numpy as np
@@ -82,6 +84,10 @@ class LeRobotManager:
         # Canonical Scaling Logic
         self.unscaler = StandardScaler()
 
+        # Batched Episode Cache Configurations
+        self.batch_size = 50
+        self.temp_episodes_dir = os.path.join(self.root, self.repo_id, ".temp_episodes")
+
     def start_episode(self, task_instruction):
         """Initializes a new episode or resumes the dataset."""
         if not LEROBOT_AVAILABLE:
@@ -130,6 +136,12 @@ class LeRobotManager:
         dataset_path = os.path.join(self.root, self.repo_id)
         metadata_path = os.path.join(dataset_path, "meta", "info.json")
         episodes_path = os.path.join(dataset_path, "meta", "episodes")
+
+        if self.dataset is not None:
+            self.current_task = task_instruction
+            self.episode_buffer = []  # Clear buffer for new episode
+            print(f"[LEROBOT] Fast-Reusing existing dataset instance '{self.repo_id}'.")
+            return
 
         # We only resume if the folder exists AND is a fully initialized dataset.
         # If the folders are present but empty/incomplete, we MUST use .create.
@@ -188,17 +200,18 @@ class LeRobotManager:
         )
 
     def stop_episode(self):
-        """Finalizes the episode locally by applying smoothing and flushing to the dataset."""
+        """Finalizes the episode locally by applying smoothing and caching to disk."""
+        t_stop_start = time.time()
         if self.dataset is None or not self.episode_buffer:
             print("[LEROBOT] Alert: stop_episode called on empty buffer.")
             return
 
+        t_smooth_start = time.time()
         print(
             f"[LEROBOT] Applying Smooth Absolute Interpolation to {len(self.episode_buffer)} frames..."
         )
 
         # 1. Smooth Absolute Interpolation (Linear Ramp Integration)
-        # First reference is the proprioception of the first frame
         prev_target = self.episode_buffer[0]["state_32"].copy()
         raw_targets = [f["action_32"] for f in self.episode_buffer]
         smoothed_actions_32 = [None] * len(self.episode_buffer)
@@ -225,56 +238,166 @@ class LeRobotManager:
 
             prev_target = curr_target.copy()
             i = j
+        t_smooth_dur = time.time() - t_smooth_start
 
-        # 2. Canonical Normalize and Remap to 64-dim Rosetta and Flush to LeRobotDataset
-        self.unscaler = StandardScaler()
+        # 2. Compute rewards for the episode immediately
+        scores, values = self._calculate_rewards(self.episode_buffer)
 
-        print(f"[LEROBOT] Finalizing episode local save with 32-dim Normalization...")
+        # 3. Serialize frames and images to the temporary folder
+        t_norm_start = time.time()
+
+        # Create temp folder path for this specific episode
+        os.makedirs(self.temp_episodes_dir, exist_ok=True)
+        existing_eps = [
+            d for d in os.listdir(self.temp_episodes_dir) if d.startswith("episode_")
+        ]
+        next_temp_idx = len(existing_eps)
+        ep_dir = os.path.join(self.temp_episodes_dir, f"episode_{next_temp_idx}")
+        os.makedirs(ep_dir, exist_ok=True)
+
+        serialized_frames = []
         for idx, frame in enumerate(self.episode_buffer):
-            # Normalize raw radians to [-1, 1] based on canonical physical limits
+            # Normalize raw radians to [-1, 1] based on canonical limits
             norm_state_32 = self.unscaler.scale_state(frame["state_32"])
             norm_action_32 = self.unscaler.scale_state(smoothed_actions_32[idx])
 
-            # Remap in-memory frames to LeRobot features
-            frame_data = {
-                **{
-                    f"observation.images.{k}": Image.fromarray(
-                        v[..., :3].astype(np.uint8)
-                    )
-                    for k, v in frame["views"].items()
-                },
-                "observation.state": norm_state_32.astype(np.float32),
-                "action": norm_action_32.astype(np.float32),
-                "observation.physics": np.array(
-                    [
-                        float(frame["extra_info"].get("cube_z", 0.0)),
-                        float(frame["extra_info"].get("is_grasping", False)),
-                        float(frame["extra_info"].get("target_dist", 1.0)),
-                    ],
-                    dtype=np.float32,
-                ),
-                "task": self.current_task,
-            }
+            # Save views to individual files
+            image_paths = {}
+            for k, v in frame["views"].items():
+                img = Image.fromarray(v[..., :3].astype(np.uint8))
+                img_name = f"frame_{idx:04d}_{k}.png"
+                img_path = os.path.join(ep_dir, img_name)
+                img.save(img_path)
+                image_paths[k] = img_name
 
-            self.dataset.add_frame(frame_data)
+            serialized_frames.append(
+                {
+                    "image_paths": image_paths,
+                    "observation.state": norm_state_32.astype(np.float32),
+                    "action": norm_action_32.astype(np.float32),
+                    "observation.physics": np.array(
+                        [
+                            float(frame["extra_info"].get("cube_z", 0.0)),
+                            float(frame["extra_info"].get("is_grasping", False)),
+                            float(frame["extra_info"].get("target_dist", 1.0)),
+                        ],
+                        dtype=np.float32,
+                    ),
+                    "task": self.current_task,
+                    "reward_score": scores[idx],
+                    "reward_value": float(values[idx]),
+                }
+            )
 
-        # Commit to Parquet (Main Dataset)
-        self.dataset.save_episode(parallel_encoding=False)
+        with open(os.path.join(ep_dir, "data.pkl"), "wb") as f:
+            pickle.dump(serialized_frames, f)
+        t_norm_dur = time.time() - t_norm_start
 
-        # Incremental Reward calculation for the episode
-        self._append_rewards_to_sidecar()
-        self._total_episodes = self.dataset.num_episodes
-        self.episodes_since_sync += 1
-        print(f"[LEROBOT] Episode saved. Total frames: {len(self.episode_buffer)}")
-
-        # Reset buffers and state for next episode
+        # Reset buffers for next episode
         self.episode_buffer = []
         self.episode_frame_count = 0
-        self.dataset = None
 
-        # Check for batch sync trigger
-        # if self.episodes_since_sync >= self.upload_interval:
-        #     self.force_sync()
+        print(f"[TIMER] LeRobotManager.stop_episode details:")
+        print(f"  - Interpolation: {t_smooth_dur:.4f}s")
+        print(f"  - Temp serialize conversion: {t_norm_dur:.4f}s")
+        print(f"  - TOTAL stop_episode: {time.time() - t_stop_start:.4f}s")
+
+        # Flush if we have reached the batch limit
+        existing_eps = [
+            d for d in os.listdir(self.temp_episodes_dir) if d.startswith("episode_")
+        ]
+        if len(existing_eps) >= self.batch_size:
+            print(
+                f"[LEROBOT] Reached batch size ({self.batch_size}). Flushing accumulated episodes..."
+            )
+            self.flush_accumulated_episodes()
+
+    def flush_accumulated_episodes(self):
+        """Flushes all cached episodes from the temp folder to the LeRobot dataset."""
+        if not os.path.exists(self.temp_episodes_dir):
+            return
+
+        ep_dirs = sorted(
+            [d for d in os.listdir(self.temp_episodes_dir) if d.startswith("episode_")],
+            key=lambda x: int(x.split("_")[1]),
+        )
+        if not ep_dirs:
+            return
+
+        print(f"[LEROBOT] Batch committing {len(ep_dirs)} episodes to dataset...")
+
+        all_rewards = []
+
+        for ep_dir_name in ep_dirs:
+            ep_dir = os.path.join(self.temp_episodes_dir, ep_dir_name)
+            data_pkl_path = os.path.join(ep_dir, "data.pkl")
+            if not os.path.exists(data_pkl_path):
+                continue
+
+            with open(data_pkl_path, "rb") as f:
+                frames = pickle.load(f)
+
+            # Add all frames of this episode to the dataset
+            for frame in frames:
+                frame_data = {
+                    **{
+                        k: Image.open(os.path.join(ep_dir, img_name))
+                        for k, img_name in frame["image_paths"].items()
+                    },
+                    "observation.state": frame["observation.state"],
+                    "action": frame["action"],
+                    "observation.physics": frame["observation.physics"],
+                    "task": frame["task"],
+                }
+                self.dataset.add_frame(frame_data)
+
+            # Save the episode in LeRobot
+            self.dataset.save_episode(parallel_encoding=False)
+
+            # Determine global start index for reward calculation
+            num_total_frames = self.dataset.num_frames
+            episode_len = len(frames)
+            start_idx = num_total_frames - episode_len
+            episode_idx = self.dataset.num_episodes - 1
+
+            # Reconstruct rewards sidecar from precomputed values
+            rewards = []
+            for idx, frame in enumerate(frames):
+                score = frame["reward_score"]
+                value = frame["reward_value"]
+                final_score = float(score + (idx * 0.0001))
+                rewards.append(
+                    {
+                        "index": start_idx + idx,
+                        "episode_index": episode_idx,
+                        "progress_sparse": final_score,
+                        "progress_dense": final_score,
+                        "value": value,
+                    }
+                )
+
+            all_rewards.extend(rewards)
+
+        # Save sidecar rewards in one batch operation
+        if all_rewards:
+            reward_df = pd.DataFrame(all_rewards)
+            sidecar_path = os.path.join(
+                self.root, self.repo_id, "progress_sparse.parquet"
+            )
+            os.makedirs(os.path.dirname(sidecar_path), exist_ok=True)
+            if os.path.exists(sidecar_path):
+                existing_df = pd.read_parquet(sidecar_path)
+                min_new_idx = all_rewards[0]["index"]
+                existing_df = existing_df[existing_df["index"] < min_new_idx]
+                reward_df = pd.concat([existing_df, reward_df], ignore_index=True)
+            reward_df.to_parquet(sidecar_path)
+            print(
+                f"[LEROBOT] Batch sidecar updated. Total reward frames: {len(reward_df)}"
+            )
+
+        # Clean up temp folder completely
+        shutil.rmtree(self.temp_episodes_dir, ignore_errors=True)
+        self._total_episodes = self.dataset.num_episodes
 
     def discard_episode(self):
         """Aborts the current episode without saving or syncing."""
@@ -312,44 +435,20 @@ class LeRobotManager:
         finally:
             self._pending_uploads = max(0, self._pending_uploads - 1)
 
-    def _append_rewards_to_sidecar(self):
-        """Calculates rewards for the current buffer and appends to progress_sparse.parquet."""
-        if not LEROBOT_AVAILABLE:
-            return
-
-        print(
-            f"[LEROBOT] Appending rewards to sidecar for episode {self.dataset.num_episodes - 1}..."
-        )
-
-        # Determine global start index for this episode
-        # num_frames includes the frames we JUST added
-        num_total_frames = self.dataset.num_frames
-        episode_len = len(self.episode_buffer)
-        start_idx = num_total_frames - episode_len
-        episode_idx = self.dataset.num_episodes - 1
-
-        rewards = []
+    def _calculate_rewards(self, episode_buffer):
+        """Calculates raw scores and values for the given episode buffer."""
+        episode_len = len(episode_buffer)
         MAX_APPROACH_DIST = 0.5
-
-        # Calculate raw scores first to compute discounted returns
         scores = []
-        for i, frame in enumerate(self.episode_buffer):
-            # Extract physics from extra_info
+        for frame in episode_buffer:
             cube_z = float(frame["extra_info"].get("cube_z", 0.0))
             is_grasping = bool(frame["extra_info"].get("is_grasping", False))
             target_dist = float(frame["extra_info"].get("target_dist", 1.0))
 
-            # -----------------------------------------------------------------
-            # 32-FRAME PURE INVERTED DISTANCE STRATEGY
-            # -----------------------------------------------------------------
-            if len(self.episode_buffer) == 32:
-                # The entire reward is just the proximity to the target (scaled to 10.0)
-                # target_dist is usually around 0.5 to 1.0 at start, and ~0.0 at grasp.
+            if episode_len == 32:
                 proximity = max(0, 1.0 - target_dist)
                 score = proximity * 10.0
-
             else:
-                # Fallback Heuristic for variable-length/manual teleop
                 z_offset = cube_z - 0.82
                 if z_offset > 0.03:
                     score = 10.0
@@ -369,34 +468,7 @@ class LeRobotManager:
                 val += (gamma ** (k - t)) * scores[k]
             values.append(val)
 
-        for i, frame in enumerate(self.episode_buffer):
-            score = scores[i]
-            # Final Temporal Slope for unique indexing
-            final_score = float(score + (i * 0.0001))
-
-            rewards.append(
-                {
-                    "index": start_idx + i,
-                    "episode_index": episode_idx,
-                    "progress_sparse": final_score,
-                    "progress_dense": final_score,
-                    "value": float(values[i]),
-                }
-            )
-
-        reward_df = pd.DataFrame(rewards)
-        sidecar_path = os.path.join(self.root, self.repo_id, "progress_sparse.parquet")
-
-        if os.path.exists(sidecar_path):
-            existing_df = pd.read_parquet(sidecar_path)
-            # Ensure we don't have overlapping indices if a save failed previously
-            existing_df = existing_df[existing_df["index"] < start_idx]
-            reward_df = pd.concat([existing_df, reward_df], ignore_index=True)
-
-        reward_df.to_parquet(sidecar_path)
-        print(
-            f"[LEROBOT] Sidecar updated with Smart Rewards. Total reward frames: {len(reward_df)}"
-        )
+        return scores, values
 
     @property
     def total_episodes(self):

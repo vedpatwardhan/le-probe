@@ -8,6 +8,8 @@ if ROOT_DIR not in sys.path:
 # --------------------------
 
 import numpy as np
+import time
+import gc
 import mujoco
 import argparse
 import json
@@ -29,12 +31,17 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
       - Failing/Horrible episodes (500)
     """
 
-    def __init__(self, dataset_name="gr1_auto_dataset", seed=42):
+    def __init__(self, dataset_name="gr1_auto_dataset", seed=42, recorder=None):
         super().__init__(scene_path=SCENE_PATH, restrict_ik=True)
         np.random.seed(seed)
 
         # Override the recorder to save to the custom target dataset
-        self.recorder = LeRobotManager(repo_id=dataset_name, fps=10, upload_interval=50)
+        if recorder is not None:
+            self.recorder = recorder
+        else:
+            self.recorder = LeRobotManager(
+                repo_id=dataset_name, fps=10, upload_interval=50
+            )
         print(f"📁 Initialized dataset generator for: {dataset_name}")
 
     def run_automatic_generation(
@@ -57,14 +64,33 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
         for ep_idx, ep_type in enumerate(
             tqdm(episode_types, desc="Generating episodes")
         ):
-            self.generate_episode(ep_idx, ep_type)
+            # Instantiate a fresh generator for each episode to completely reset MuJoCo, Mink, and rendering state
+            # but reuse self.recorder to avoid expensive dataset reinitialization
+            ep_generator = AutoDatasetGenerator(
+                dataset_name=self.recorder.repo_id, seed=ep_idx, recorder=self.recorder
+            )
+            try:
+                ep_generator.generate_episode(ep_idx, ep_type)
+            finally:
+                ep_generator.close()
+                del ep_generator
+                gc.collect()
+
+        # Flush any remaining cached episodes that didn't fill the final batch
+        self.recorder.flush_accumulated_episodes()
 
         print("\n🎉 Automated generation sequence completed successfully!")
 
     def generate_episode(self, ep_idx, ep_type):
         """Runs the 4-phase sequence with type-specific perturbations."""
+        t_start_ep = time.time()
+
         # 1. Reset Env (Randomizes cube within table boundaries)
+        t_reset_start = time.time()
         self.reset_env(lock_posture=True, randomize_cube=True)
+        print(
+            f"[TIMER] generate_episode: reset_env took {time.time() - t_reset_start:.4f}s"
+        )
 
         cube_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint")
         cube_pos = self.data.qpos[
@@ -73,7 +99,11 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
 
         # Start recording the episode
         task_desc = f"Pick up red cube (Class: {ep_type})"
+        t_start_rec = time.time()
         self.recorder.start_episode(task_desc)
+        print(
+            f"[TIMER] generate_episode: start_episode took {time.time() - t_start_rec:.4f}s"
+        )
         self.is_recording = True
 
         # Define offsets and parameter mutations based on episode type
@@ -90,6 +120,7 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             # ==========================================
             # PHASE 1: Approach / Rotate
             # ==========================================
+            t_phase1_start = time.time()
             self.current_phase = 1
             # Add random directional noise to the target positions for suboptimal/failed runs
             noise_p1 = (
@@ -101,19 +132,28 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             pos_t_h = cube_pos + [-0.02, 0, 0.07] + noise_p1
             pos_w_h = cube_pos + [0, 0, 0.13] + noise_p1
 
+            t_ik_start = time.time()
             q_reach_h = self.solve_ik(
                 pos_w_h, quat_down, pos_i_h, pos_t_h, posture_cost=1e-6
             )
+            t_ik_dur = time.time() - t_ik_start
+
+            t_dispatch_start = time.time()
             self.dispatch_action(
                 self.qpos_to_action_32(q_reach_h),
                 q_reach_h,
                 n_steps=240,
                 render_freq=30,
             )
+            t_dispatch_dur = time.time() - t_dispatch_start
+            print(
+                f"[TIMER] generate_episode: Phase 1 took {time.time() - t_phase1_start:.4f}s (IK: {t_ik_dur:.4f}s, Dispatch: {t_dispatch_dur:.4f}s)"
+            )
 
             # ==========================================
             # PHASE 2: Descent
             # ==========================================
+            t_phase2_start = time.time()
             self.current_phase = 2
             noise_p2 = (
                 np.random.normal(0, offset, size=3)
@@ -124,25 +164,33 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             pos_t_l = cube_pos + [-0.06, 0, 0] + noise_p2
             pos_w_l = cube_pos + [0, 0, 0.06] + noise_p2
 
+            t_ik_start = time.time()
             q_reach_l = self.solve_ik(
                 pos_w_l, quat_down, pos_i_l, pos_t_l, posture_cost=1e-6
             )
+            t_ik_dur = time.time() - t_ik_start
 
             # Keep fingers open
             for f_idx in [50, 51, 52, 53, 54, 55, 56]:
                 if f_idx < len(q_reach_l):
                     q_reach_l[f_idx] = 0.0
 
+            t_dispatch_start = time.time()
             self.dispatch_action(
                 self.qpos_to_action_32(q_reach_l),
                 q_reach_l,
                 n_steps=240,
                 render_freq=30,
             )
+            t_dispatch_dur = time.time() - t_dispatch_start
+            print(
+                f"[TIMER] generate_episode: Phase 2 took {time.time() - t_phase2_start:.4f}s (IK: {t_ik_dur:.4f}s, Dispatch: {t_dispatch_dur:.4f}s)"
+            )
 
             # ==========================================
             # PHASE 3: Grasp
             # ==========================================
+            t_phase3_start = time.time()
             self.current_phase = 3
             noise_p3 = (
                 np.random.normal(0, offset * 0.5, size=3)
@@ -157,9 +205,11 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             pos_t_l = cube_pos + [0, 0, 0] + noise_p3
             pos_w_l = cube_pos + [0, 0, 0] + noise_p3
 
+            t_ik_start = time.time()
             q_reach_l = self.solve_ik(
                 pos_w_l, quat_down, pos_i_l, pos_t_l, posture_cost=1e-6
             )
+            t_ik_dur = time.time() - t_ik_start
             q_grasp = q_reach_l.copy()
 
             # If failing, make the grip loose or wrong joint command limits
@@ -168,13 +218,19 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             for g_id in [50, 52, 54, 56]:
                 q_grasp[g_id] = -grip_force
 
+            t_dispatch_start = time.time()
             self.dispatch_action(
                 self.qpos_to_action_32(q_grasp), q_grasp, n_steps=240, render_freq=30
+            )
+            t_dispatch_dur = time.time() - t_dispatch_start
+            print(
+                f"[TIMER] generate_episode: Phase 3 took {time.time() - t_phase3_start:.4f}s (IK: {t_ik_dur:.4f}s, Dispatch: {t_dispatch_dur:.4f}s)"
             )
 
             # ==========================================
             # PHASE 4: Lift / Retract
             # ==========================================
+            t_phase4_start = time.time()
             self.current_phase = 4
             noise_p4 = (
                 np.random.normal(0, offset, size=3)
@@ -185,9 +241,11 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             pos_t_up = cube_pos + [0, 0, 0.25] + noise_p4
             pos_w_up = cube_pos + [0, 0, 0.25] + noise_p4
 
+            t_ik_start = time.time()
             q_lift = self.solve_ik(
                 pos_w_up, quat_down, pos_i_up, pos_t_up, posture_cost=1e-6
             )
+            t_ik_dur = time.time() - t_ik_start
 
             # Maintain grip force (or drop the cube for failed attempts)
             lift_grip_force = 0.0 if ep_type == "fail" else grip_force
@@ -195,12 +253,24 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             for g_id in [50, 52, 54, 56]:
                 q_lift[g_id] = -lift_grip_force
 
+            t_dispatch_start = time.time()
             self.dispatch_action(
                 self.qpos_to_action_32(q_lift), q_lift, n_steps=240, render_freq=30
             )
+            t_dispatch_dur = time.time() - t_dispatch_start
+            print(
+                f"[TIMER] generate_episode: Phase 4 took {time.time() - t_phase4_start:.4f}s (IK: {t_ik_dur:.4f}s, Dispatch: {t_dispatch_dur:.4f}s)"
+            )
 
             # 2. Stop and save episode
+            t_stop_rec_start = time.time()
             self.recorder.stop_episode()
+            print(
+                f"[TIMER] generate_episode: stop_episode took {time.time() - t_stop_rec_start:.4f}s"
+            )
+            print(
+                f"[TIMER] generate_episode: TOTAL episode {ep_idx} took {time.time() - t_start_ep:.4f}s\n"
+            )
         except Exception as e:
             print(f"⚠️ Error generating episode {ep_idx}: {str(e)}")
             self.recorder.discard_episode()
