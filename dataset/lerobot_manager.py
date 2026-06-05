@@ -348,9 +348,15 @@ class LeRobotManager:
                 }
                 self.dataset.add_frame(frame_data)
 
-            # Force separate video and data parquet files for each episode
-            self.dataset.latest_episode = None
-            self.dataset.meta.latest_episode = None
+            # Flush metadata buffer and reload metadata from disk to populate meta.episodes if this isn't the first episode
+            if self.dataset.num_episodes > 0:
+                self.dataset.meta._close_writer()
+                self.dataset.meta.load_metadata()
+
+                # Force separate video and data parquet files for each episode
+                self.dataset.latest_episode = None
+                self.dataset.meta.latest_episode = None
+                self.dataset._close_writer()
 
             # Save the episode in LeRobot
             self.dataset.save_episode(parallel_encoding=False)
