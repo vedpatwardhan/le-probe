@@ -348,6 +348,10 @@ class LeRobotManager:
                 }
                 self.dataset.add_frame(frame_data)
 
+            # Force separate video and data parquet files for each episode
+            self.dataset.latest_episode = None
+            self.dataset.meta.latest_episode = None
+
             # Save the episode in LeRobot
             self.dataset.save_episode(parallel_encoding=False)
 
