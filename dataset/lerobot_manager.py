@@ -321,6 +321,20 @@ class LeRobotManager:
 
         print(f"[LEROBOT] Batch committing {len(ep_dirs)} episodes to dataset...")
 
+        # Ensure meta.episodes is loaded once (no-op if already loaded/list)
+        if self.dataset.meta.episodes is None:
+            try:
+                self.dataset.meta.load_metadata()
+            except Exception:
+                pass
+
+        if self.dataset.meta.episodes is not None and not isinstance(
+            self.dataset.meta.episodes, list
+        ):
+            self.dataset.meta.episodes = list(self.dataset.meta.episodes)
+        elif self.dataset.meta.episodes is None:
+            self.dataset.meta.episodes = []
+
         all_rewards = []
 
         for ep_dir_name in ep_dirs:
@@ -348,12 +362,8 @@ class LeRobotManager:
                 }
                 self.dataset.add_frame(frame_data)
 
-            # Flush metadata buffer and reload metadata from disk to populate meta.episodes if this isn't the first episode
+            # Force separate video and data parquet files for each episode
             if self.dataset.num_episodes > 0:
-                self.dataset.meta._close_writer()
-                self.dataset.meta.load_metadata()
-
-                # Force separate video and data parquet files for each episode
                 self.dataset.latest_episode = None
                 self.dataset.meta.latest_episode = None
                 self.dataset._close_writer()
@@ -366,6 +376,27 @@ class LeRobotManager:
             episode_len = len(frames)
             start_idx = num_total_frames - episode_len
             episode_idx = self.dataset.num_episodes - 1
+
+            # Append the metadata of the newly saved episode to self.dataset.meta.episodes in-memory
+            # to make sure the next iteration knows the exact chunk and file index of the last episode.
+            new_ep_meta = {
+                "dataset_to_index": num_total_frames,
+                "data/chunk_index": 0,
+                "data/file_index": episode_idx,
+                "meta/episodes/chunk_index": 0,
+                "meta/episodes/file_index": episode_idx,
+            }
+            for cam in [
+                "world_top",
+                "world_left",
+                "world_right",
+                "world_center",
+                "world_wrist",
+            ]:
+                new_ep_meta[f"videos/observation.images.{cam}/chunk_index"] = 0
+                new_ep_meta[f"videos/observation.images.{cam}/file_index"] = episode_idx
+
+            self.dataset.meta.episodes.append(new_ep_meta)
 
             # Reconstruct rewards sidecar from precomputed values
             rewards = []
@@ -384,6 +415,9 @@ class LeRobotManager:
                 )
 
             all_rewards.extend(rewards)
+
+        # Flush the buffered metadata to disk at the end of the batch flush
+        self.dataset.meta._close_writer()
 
         # Save sidecar rewards in one batch operation
         if all_rewards:
