@@ -51,6 +51,88 @@ def run_sanity_check(root_dir, repo_id):
         print(f"❌ Error instantiating dataset: {e}")
         return
 
+    # 2b. Rigorous physical file validation
+    print("\n📦 Verifying physical Parquet and Video files on disk...")
+    try:
+        ep_meta_path = os.path.join(
+            dataset_path, "meta/episodes/chunk-000/file-000.parquet"
+        )
+        ep_meta_df = pd.read_parquet(ep_meta_path)
+
+        # Verify data parquet files
+        data_files = set()
+        for idx, row in ep_meta_df.iterrows():
+            c_idx = row["data/chunk_index"]
+            f_idx = row["data/file_index"]
+            data_files.add(f"data/chunk-{c_idx:03d}/file-{f_idx:03d}.parquet")
+
+        print(
+            f"   - Identified {len(data_files)} unique data Parquet files referenced by metadata."
+        )
+        all_data_exist = True
+        total_data_rows = 0
+        for df_rel in sorted(data_files):
+            df_abs = os.path.join(dataset_path, df_rel)
+            if not os.path.exists(df_abs):
+                print(f"     ❌ Missing data file: {df_rel}")
+                all_data_exist = False
+            else:
+                df_content = pd.read_parquet(df_abs)
+                total_data_rows += len(df_content)
+
+        if all_data_exist:
+            print(
+                f"   - [✅] All {len(data_files)} data Parquet files exist physically."
+            )
+            print(
+                f"   - [✅] Total rows across data Parquets: {total_data_rows} (Expected: 64000)"
+            )
+            assert (
+                total_data_rows == 64000
+            ), f"Row count mismatch, got {total_data_rows}"
+        else:
+            print("   - [❌] Some data Parquet files are missing!")
+            return
+
+        # Verify video files for each camera view
+        camera_keys = [
+            "observation.images.world_top",
+            "observation.images.world_left",
+            "observation.images.world_right",
+            "observation.images.world_center",
+            "observation.images.world_wrist",
+        ]
+
+        for cam in camera_keys:
+            video_files = set()
+            for idx, row in ep_meta_df.iterrows():
+                c_idx = row[f"videos/{cam}/chunk_index"]
+                f_idx = row[f"videos/{cam}/file_index"]
+                video_files.add(f"videos/{cam}/chunk-{c_idx:03d}/file-{f_idx:03d}.mp4")
+
+            print(f"   - Camera '{cam}': checking {len(video_files)} video files...")
+            all_videos_exist = True
+            for vf_rel in video_files:
+                vf_abs = os.path.join(dataset_path, vf_rel)
+                if not os.path.exists(vf_abs):
+                    print(f"     ❌ Missing video file: {vf_rel}")
+                    all_videos_exist = False
+                elif os.path.getsize(vf_abs) == 0:
+                    print(f"     ❌ Empty video file: {vf_rel}")
+                    all_videos_exist = False
+
+            if all_videos_exist:
+                print(
+                    f"     [✅] All {len(video_files)} video files exist and are non-empty."
+                )
+            else:
+                print(f"     [❌] Camera '{cam}' video check failed!")
+                return
+
+    except Exception as e:
+        print(f"❌ Physical file validation failed: {e}")
+        return
+
     # 3. Check Frame Fetching at Chunk Boundaries
     print("\n📸 Testing frame access at chunk boundaries...")
     # 4 chunks of 500 episodes * 32 steps = 16000 frames each
