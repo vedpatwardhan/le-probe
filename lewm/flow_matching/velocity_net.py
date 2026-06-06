@@ -24,10 +24,10 @@ class SinusoidalPositionEmbeddings(nn.Module):
 
 class ActionVelocityNetwork(nn.Module):
     """
-    Continuous vector field MLP representing the action denoiser velocity network:
+    Flow Transformer vector field network representing the action denoiser:
     v(a(tau), tau | z_t, z_bar, p_t)
 
-    Maps: (action_trajectory, tau, z_t, z_bar, p_t) -> velocity vector da/dtau
+    Uses self-attention blocks over trajectory step tokens prepended with a context conditioning token.
     """
 
     def __init__(
@@ -38,11 +38,14 @@ class ActionVelocityNetwork(nn.Module):
         proprio_dim=10,
         time_embed_dim=64,
         hidden_dim=256,
+        nhead=4,
+        num_layers=3,
+        dim_feedforward=512,
+        dropout=0.1,
     ):
         super().__init__()
         self.horizon = horizon
         self.action_dim = action_dim
-        self.flat_action_dim = horizon * action_dim
 
         # Time Embedding
         self.time_embed = nn.Sequential(
@@ -51,27 +54,45 @@ class ActionVelocityNetwork(nn.Module):
             nn.SiLU(),
         )
 
-        # Context encoder/projection
+        # Context encoder/projection (projects z_t, z_bar, p_t, and time embedding into a single context token)
         self.context_projection = nn.Sequential(
             nn.Linear(embed_dim * 2 + proprio_dim + time_embed_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.SiLU(),
         )
 
-        # Velocity network trunk
-        self.net = nn.Sequential(
-            nn.Linear(self.flat_action_dim + hidden_dim, hidden_dim),
+        # Action step projection (projects individual action vectors to hidden_dim)
+        self.action_projection = nn.Sequential(
+            nn.Linear(action_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.SiLU(),
+        )
+
+        # Learnable temporal positional embeddings for the action sequence
+        self.pos_embedding = nn.Parameter(torch.zeros(1, horizon, hidden_dim))
+
+        # Transformer Encoder Trunk
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        # Velocity projection (maps hidden tokens back to action dimensions)
+        self.velocity_projection = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
             nn.SiLU(),
-            nn.Linear(hidden_dim, self.flat_action_dim),
+            nn.Linear(hidden_dim, action_dim),
         )
 
     def forward(self, a_tau, tau, z_t, z_bar, p_t):
         """
-        a_tau: (B, horizon, action_dim) or (B, flat_action_dim)
+        a_tau: (B, horizon, action_dim)
         tau: (B, 1) or (B,) - virtual temporal flow step in [0, 1]
         z_t: (B, embed_dim) - current latent visual state representation
         z_bar: (B, embed_dim) - target subgoal waypoint representation
@@ -79,9 +100,9 @@ class ActionVelocityNetwork(nn.Module):
         """
         B = a_tau.shape[0]
 
-        # Flatten action if input is 3D
-        if a_tau.ndim == 3:
-            a_tau = a_tau.reshape(B, -1)
+        # Reshape a_tau if it arrives flattened
+        if a_tau.ndim == 2:
+            a_tau = a_tau.reshape(B, self.horizon, self.action_dim)
 
         if tau.ndim == 2:
             tau = tau.squeeze(-1)  # (B,)
@@ -89,13 +110,28 @@ class ActionVelocityNetwork(nn.Module):
         # 1. Project virtual flow time
         t_emb = self.time_embed(tau)  # (B, time_embed_dim)
 
-        # 2. Concat and project context conditions
+        # 2. Concat and project context conditions to a single context token
         context = torch.cat([z_t, z_bar, p_t, t_emb], dim=-1)
-        context_emb = self.context_projection(context)  # (B, hidden_dim)
+        context_token = self.context_projection(context).unsqueeze(
+            1
+        )  # (B, 1, hidden_dim)
 
-        # 3. Concatenate action trajectory with context and pass through trunk
-        inp = torch.cat([a_tau, context_emb], dim=-1)
-        out = self.net(inp)  # (B, flat_action_dim)
+        # 3. Project action steps and add positional embeddings
+        action_tokens = self.action_projection(a_tau)  # (B, horizon, hidden_dim)
+        action_tokens = action_tokens + self.pos_embedding
 
-        # Reshape velocity back to trajectory format: (B, horizon, action_dim)
-        return out.reshape(B, self.horizon, self.action_dim)
+        # 4. Concat context token and action tokens: [context, action_1, ..., action_H]
+        sequence = torch.cat(
+            [context_token, action_tokens], dim=1
+        )  # (B, horizon + 1, hidden_dim)
+
+        # 5. Pass through Transformer Encoder
+        out_sequence = self.transformer(sequence)  # (B, horizon + 1, hidden_dim)
+
+        # 6. Extract action tokens (skipping the prepended context token) and project to velocities
+        out_action_tokens = out_sequence[:, 1:, :]  # (B, horizon, hidden_dim)
+        pred_velocities = self.velocity_projection(
+            out_action_tokens
+        )  # (B, horizon, action_dim)
+
+        return pred_velocities

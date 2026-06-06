@@ -47,23 +47,24 @@ def fast_merge_chunks(root_dir, chunk_names, target_repo_id):
         chunk_path = os.path.join(root_dir, chunk_name)
         print(f"\n📦 Merging chunk: {chunk_name} (Chunk index {idx})")
 
-        # 1. Load episodes metadata
-        ep_file = os.path.join(
-            chunk_path, "meta", "episodes", "chunk-000", "file-000.parquet"
-        )
-        if not os.path.exists(ep_file):
+        # 1. Load episodes metadata (could be split across multiple file-*.parquet files)
+        ep_dir = os.path.join(chunk_path, "meta", "episodes", "chunk-000")
+        ep_files = sorted(glob.glob(os.path.join(ep_dir, "*.parquet")))
+        if not ep_files:
             # Fallback to general scan if path differs
-            matches = glob.glob(
-                os.path.join(chunk_path, "meta", "episodes", "*", "*.parquet")
-            )
-            if matches:
-                ep_file = matches[0]
-            else:
-                raise FileNotFoundError(
-                    f"No episodes metadata parquet found for {chunk_name}"
+            ep_files = sorted(
+                glob.glob(
+                    os.path.join(chunk_path, "meta", "episodes", "*", "*.parquet")
                 )
+            )
+        if not ep_files:
+            raise FileNotFoundError(
+                f"No episodes metadata parquet found for {chunk_name}"
+            )
 
-        ep_df = pd.read_parquet(ep_file)
+        # Load and concatenate all metadata files for this chunk
+        chunk_ep_dfs = [pd.read_parquet(f) for f in ep_files]
+        ep_df = pd.concat(chunk_ep_dfs, ignore_index=True)
 
         # 2. Copy the video files by shifting the chunk directories to prevent collision
         # Each chunk's videos/observation.images.xxx/chunk-000/ -> target videos/observation.images.xxx/chunk-00{idx}/
@@ -158,7 +159,7 @@ def fast_merge_chunks(root_dir, chunk_names, target_repo_id):
             info = json.load(f)
         info["total_episodes"] = cumulative_episodes
         info["total_frames"] = cumulative_frames
-        info["splits"] = {"train": [0, cumulative_episodes]}
+        info["splits"] = {"train": f"0:{cumulative_episodes}"}
         with open(os.path.join(target_path, "meta", "info.json"), "w") as f:
             json.dump(info, f, indent=4)
         print("✅ info.json updated.")
