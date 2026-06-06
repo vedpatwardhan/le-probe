@@ -247,7 +247,6 @@ class GR1MuJoCoBase:
         posture_cost=None,
     ):
         """Hardened IK solver for a 3-tip end effector (Index, Thumb, Wrist)."""
-        t_ik_start = time.time()
         # 1. Convert input rotation (wxyz) to a NumPy array for mathematical operations
         quat = np.array(quat)
         # Validate that the quaternion has the correct length (MuJoCo/Mink expects 4: wxyz)
@@ -388,11 +387,9 @@ class GR1MuJoCoBase:
 
     def render_and_record(self, action_32):
         """Captures camera views, logs to Rerun, and records to dataset if active."""
-        t_render_start = time.time()
         views = {}
         rr.set_time("sim_step", sequence=self.render_step_idx)
 
-        t_cam_start = time.time()
         need_depth = self._render_needs_depth()
         for name in self.cam_names:
             self.renderer.update_scene(self.data, camera=name)
@@ -406,24 +403,19 @@ class GR1MuJoCoBase:
             views[name] = rgb
             # rr.log(name, rr.Image(rgb))
             self.frame_indices[name] += 1
-        t_cam_dur = time.time() - t_cam_start
 
         self.render_step_idx += 1
         self.rerun_count += 1
 
         # THIS TAKES NEGLIGIBLE TIME
-        t_rec_dur = 0.0
         if self.is_recording:
             # Extract ground-truth physics for RA-BC Progress Weighting
-            t_rec_start = time.time()
             physics = self.get_physics_state()
             self.recorder.add_frame(views, self.get_state_32(), action_32, physics)
-            t_rec_dur = time.time() - t_rec_start
 
     def dispatch_action(
         self, action_32_norm, target_q, n_steps=None, render_freq=None, reset_start=True
     ):
-        t_disp_start = time.time()
         # Backward Compatible Defaults
         total_steps = n_steps if n_steps is not None else 200
         rf = render_freq if render_freq is not None else 16
@@ -438,8 +430,6 @@ class GR1MuJoCoBase:
 
         root_target = target_q[self.root_q_idx : self.root_q_idx + 7]
 
-        t_step_total = 0.0
-        t_render_total = 0.0
         for step in range(total_steps):
             alpha = (step + 1) / float(total_steps)
             current_target_q = start_q + alpha * (target_q - start_q)
@@ -447,9 +437,7 @@ class GR1MuJoCoBase:
             self.data.qpos[self.root_q_idx : self.root_q_idx + 7] = root_target
             self.data.qvel[:6] = 0.0
 
-            t_step_start = time.time()
             mujoco.mj_step(self.model, self.data)
-            t_step_total += time.time() - t_step_start
 
             # [AUDIT:STAGE2] Physical Reality for R-Shoulder Roll
             if step == total_steps - 1:
@@ -465,15 +453,11 @@ class GR1MuJoCoBase:
 
             # Legacy Periodic Rendering (e.g., for VLA/Teleop)
             if rf > 0 and step % rf == 0:
-                t_render_start = time.time()
                 self.render_and_record(action_32_norm)
-                t_render_total += time.time() - t_render_start
 
         # Ensure at least one render at the end if rf was too large
         if rf >= total_steps or rf == 0:
-            t_render_start = time.time()
             self.render_and_record(action_32_norm)
-            t_render_total += time.time() - t_render_start
 
         # Save target for next chunk (VLA Trajectory Threading)
         self._last_interp_q = target_q.copy()

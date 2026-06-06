@@ -137,9 +137,10 @@ class LeRobotManager:
         metadata_path = os.path.join(dataset_path, "meta", "info.json")
         episodes_path = os.path.join(dataset_path, "meta", "episodes")
 
+        self.current_task = task_instruction
+        self.episode_buffer = []  # Clear buffer for new episode
+
         if self.dataset is not None:
-            self.current_task = task_instruction
-            self.episode_buffer = []  # Clear buffer for new episode
             print(f"[LEROBOT] Fast-Reusing existing dataset instance '{self.repo_id}'.")
             return
 
@@ -171,8 +172,6 @@ class LeRobotManager:
             if self.dataset.image_writer is None:
                 self.dataset.start_image_writer(num_processes=0, num_threads=4)
 
-        self.current_task = task_instruction
-        self.episode_buffer = []  # Clear buffer for new episode
         print(
             f"[LEROBOT] Dataset '{self.repo_id}' ready. "
             f"Recording NEW episode for task: '{task_instruction}'"
@@ -201,12 +200,10 @@ class LeRobotManager:
 
     def stop_episode(self):
         """Finalizes the episode locally by applying smoothing and caching to disk."""
-        t_stop_start = time.time()
         if self.dataset is None or not self.episode_buffer:
             print("[LEROBOT] Alert: stop_episode called on empty buffer.")
             return
 
-        t_smooth_start = time.time()
         print(
             f"[LEROBOT] Applying Smooth Absolute Interpolation to {len(self.episode_buffer)} frames..."
         )
@@ -238,15 +235,13 @@ class LeRobotManager:
 
             prev_target = curr_target.copy()
             i = j
-        t_smooth_dur = time.time() - t_smooth_start
 
         # 2. Compute rewards for the episode immediately
         scores, values = self._calculate_rewards(self.episode_buffer)
 
         # 3. Serialize frames and images to the temporary folder
-        t_norm_start = time.time()
-
         # Create temp folder path for this specific episode
+        # <dataset_name>/.temp_episodes/episode_<idx>
         os.makedirs(self.temp_episodes_dir, exist_ok=True)
         existing_eps = [
             d for d in os.listdir(self.temp_episodes_dir) if d.startswith("episode_")
@@ -291,7 +286,6 @@ class LeRobotManager:
 
         with open(os.path.join(ep_dir, "data.pkl"), "wb") as f:
             pickle.dump(serialized_frames, f)
-        t_norm_dur = time.time() - t_norm_start
 
         # Reset buffers for next episode
         self.episode_buffer = []

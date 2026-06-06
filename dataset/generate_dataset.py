@@ -73,8 +73,6 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
 
     def generate_episode(self, ep_idx, ep_type):
         """Runs the 4-phase sequence with type-specific perturbations."""
-        t_start_ep = time.time()
-
         # 1. Reset Env (Randomizes cube within table boundaries)
         self.reset_env(lock_posture=True, randomize_cube=True)
 
@@ -102,7 +100,6 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             # ==========================================
             # PHASE 1: Approach / Rotate
             # ==========================================
-            t_phase1_start = time.time()
             self.current_phase = 1
             # Add random directional noise to the target positions for suboptimal/failed runs
             noise_p1 = (
@@ -128,7 +125,6 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             # ==========================================
             # PHASE 2: Descent
             # ==========================================
-            t_phase2_start = time.time()
             self.current_phase = 2
             noise_p2 = (
                 np.random.normal(0, offset, size=3)
@@ -158,7 +154,6 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             # ==========================================
             # PHASE 3: Grasp
             # ==========================================
-            t_phase3_start = time.time()
             self.current_phase = 3
             noise_p3 = (
                 np.random.normal(0, offset * 0.5, size=3)
@@ -191,7 +186,6 @@ class AutoDatasetGenerator(GR1MuJoCoBase):
             # ==========================================
             # PHASE 4: Lift / Retract
             # ==========================================
-            t_phase4_start = time.time()
             self.current_phase = 4
             noise_p4 = (
                 np.random.normal(0, offset, size=3)
