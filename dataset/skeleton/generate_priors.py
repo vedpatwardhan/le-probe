@@ -158,7 +158,7 @@ def process_episode(args):
             str(tmp_raw), cv2.VideoWriter_fourcc(*"mp4v"), 10, (448, 224), isColor=True
         )
 
-        for f_idx, current_xpos in enumerate(xpos_history):
+        for step_idx, current_xpos in enumerate(xpos_history):
             ret, rgb_frame = cap.read()
             if not ret:
                 break
