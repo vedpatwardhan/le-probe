@@ -6,6 +6,7 @@ and values of pre-computed DINOv3 priors and compiled fused high-speed dataset
 caches before launching training.
 """
 
+import os
 import sys
 import torch
 from pathlib import Path
@@ -22,13 +23,13 @@ from lewm.skeleton.dino_constants import dino_waypoints_shape  # noqa: E402
 
 
 def main(repo_id="gr1_pickup_grasp"):
-    # Dynamically resolve dataset path using LeRobot's own dataset engine or bust
-    local_path = Path("le-probe/datasets") / repo_id
-    if not local_path.exists():
-        local_path = Path("datasets") / repo_id
-
-    if local_path.exists():
-        dataset = LeRobotDataset(repo_id, root=str(local_path))
+    lerobot_home = os.environ.get("LEROBO_HOME")
+    if lerobot_home:
+        local_path = Path(lerobot_home) / repo_id
+        if local_path.exists():
+            dataset = LeRobotDataset(repo_id, root=str(local_path))
+        else:
+            dataset = LeRobotDataset(repo_id)
     else:
         dataset = LeRobotDataset(repo_id)
     dataset_path = Path(dataset.root)

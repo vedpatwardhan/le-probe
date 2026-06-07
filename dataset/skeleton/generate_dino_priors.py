@@ -111,12 +111,13 @@ def main(repo_id="gr1_pickup_grasp"):
     print(f"📦 [DINO CACHE GENERATOR] Initializing: {repo_id}")
     print(f"   Views: {list(DINO_VIEW_KEYS)}")
     print(f"   Output shape per episode: {dino_waypoints_shape()}")
-    local_path = Path("le-probe/datasets") / repo_id
-    if not local_path.exists():
-        local_path = Path("datasets") / repo_id
-
-    if local_path.exists():
-        dataset = LeRobotDataset(repo_id, root=str(local_path))
+    lerobot_home = os.environ.get("LEROBO_HOME")
+    if lerobot_home:
+        local_path = Path(lerobot_home) / repo_id
+        if local_path.exists():
+            dataset = LeRobotDataset(repo_id, root=str(local_path))
+        else:
+            dataset = LeRobotDataset(repo_id)
     else:
         dataset = LeRobotDataset(repo_id)
     dataset_path = Path(dataset.root)
