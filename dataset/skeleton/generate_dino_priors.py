@@ -67,20 +67,20 @@ def extract_view_checkpoints(
     return embeddings[:NUM_DINO_PHASES]
 
 
-def process_episode(ep_idx, dataset_path, model, transform, device):
+def process_episode(ep_idx, dataset_path, model, transform, device, c_idx, f_idx):
     """
     Extract landmark frames from every training view, pass through frozen DINOv3,
     and cache [4, num_views, 384] float32 features.
     """
-    out_dir = dataset_path / "cache_dino/chunk-000"
+    out_dir = dataset_path / f"cache_dino/chunk-{c_idx:03d}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"file-{ep_idx:03d}_dino.pt"
+    out_path = out_dir / f"file-{f_idx:03d}_dino.pt"
 
     view_tensors = []
     for view in DINO_VIEW_KEYS:
         rgb_v_path = (
             dataset_path
-            / f"videos/observation.images.{view}/chunk-000/file-{ep_idx:03d}.mp4"
+            / f"videos/observation.images.{view}/chunk-{c_idx:03d}/file-{f_idx:03d}.mp4"
         )
         if not rgb_v_path.exists():
             print(f"⚠️ Video missing for Episode {ep_idx} view {view}: {rgb_v_path}")
@@ -139,7 +139,10 @@ def main(repo_id="gr1_pickup_grasp"):
         f"episodes on {device}..."
     )
     for ep_idx in tqdm(range(dataset.num_episodes), desc="DINO Caching"):
-        process_episode(ep_idx, dataset_path, model, transform, device)
+        ep_meta = dataset.meta.episodes[ep_idx]
+        c_idx = ep_meta["data/chunk_index"]
+        f_idx = ep_meta["data/file_index"]
+        process_episode(ep_idx, dataset_path, model, transform, device, c_idx, f_idx)
 
     print(f"🎉 Success! Cached DINO anchors saved to: {dataset_path / 'cache_dino'}")
 

@@ -258,8 +258,11 @@ class SkeletonDataPlugin(LEWMDataPlugin):
                 batch["skeletons_raw"] = torch.stack(skels, dim=1)
 
         # Fetch pre-computed DINO anchors from raw file fallback
+        ep_meta = self.lerobot_dataset.meta.episodes[episode_idx]
+        c_idx = ep_meta["data/chunk_index"]
+        f_idx = ep_meta["data/file_index"]
         dino_pt_path = (
-            self.root / f"cache_dino/chunk-000/file-{episode_idx:03d}_dino.pt"
+            self.root / f"cache_dino/chunk-{c_idx:03d}/file-{f_idx:03d}_dino.pt"
         )
         if dino_pt_path.exists():
             dino_waypoints = validate_dino_waypoints(

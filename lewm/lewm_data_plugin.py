@@ -134,13 +134,15 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
 
     def _get_video_path(self, episode_idx, image_key):
         """Constructs the direct file path for a specific episode and camera."""
-        # Pattern verified: videos/{key}/chunk-000/file-{ep:03d}.mp4
+        ep_meta = self.lerobot_dataset.meta.episodes[episode_idx]
+        c_idx = ep_meta[f"videos/{image_key}/chunk_index"]
+        f_idx = ep_meta[f"videos/{image_key}/file_index"]
         return (
             self.root
             / "videos"
             / image_key
-            / "chunk-000"
-            / f"file-{episode_idx:03d}.mp4"
+            / f"chunk-{c_idx:03d}"
+            / f"file-{f_idx:03d}.mp4"
         )
 
     def clear_cache(self):

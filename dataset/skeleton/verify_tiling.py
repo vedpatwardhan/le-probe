@@ -17,8 +17,8 @@ def verify_tiled_video(video_path, output_img="verification_tiled.png"):
     h, w, c = frame.shape
     print(f"📏 Frame Dimensions: {w}x{h} (Channels: {c})")
 
-    if w != 960 or h != 480:
-        print(f"⚠️ Warning: Expected 960x480, got {w}x{h}")
+    if w != 448 or h != 224:
+        print(f"⚠️ Warning: Expected 448x224, got {w}x{h}")
 
     mid = w // 2
     rgb = frame[:, :mid, :]

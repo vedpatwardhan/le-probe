@@ -36,14 +36,18 @@ def main(repo_id="gr1_pickup_grasp"):
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     views = ["world_center", "world_left", "world_right", "world_top", "world_wrist"]
-    total_episodes = 200
+    total_episodes = dataset.num_episodes
 
     print("🚀 Compiling High-Speed Direct Fused Disk Cache...")
     print(f"🎬 Target: {total_episodes} Episodes (Center, Left, Right, Top, Wrist)")
 
     for ep in tqdm(range(total_episodes), desc="Caching Episodes"):
+        ep_meta = dataset.meta.episodes[ep]
+        c_idx = ep_meta["data/chunk_index"]
+        f_idx = ep_meta["data/file_index"]
+
         # 1. Load Parquet for actions and states
-        parquet_path = dataset_path / f"data/chunk-000/file-{ep:03d}.parquet"
+        parquet_path = dataset_path / f"data/chunk-{c_idx:03d}/file-{f_idx:03d}.parquet"
         if not parquet_path.exists():
             print(f"⚠️ Parquet missing for Episode {ep}: {parquet_path}")
             continue
@@ -75,11 +79,11 @@ def main(repo_id="gr1_pickup_grasp"):
         for view in views:
             rgb_path = (
                 dataset_path
-                / f"videos/observation.images.{view}/chunk-000/file-{ep:03d}.mp4"
+                / f"videos/observation.images.{view}/chunk-{c_idx:03d}/file-{f_idx:03d}.mp4"
             )
             skel_path = (
                 dataset_path
-                / f"videos/observation.images.{view}_tiled/chunk-000/file-{ep:03d}.mp4"
+                / f"videos/observation.images.{view}_tiled/chunk-{c_idx:03d}/file-{f_idx:03d}.mp4"
             )
 
             if not rgb_path.exists() or not skel_path.exists():
@@ -104,10 +108,12 @@ def main(repo_id="gr1_pickup_grasp"):
                     # Grayscale conversion for skeleton mask
                     frame_skel = cv2.cvtColor(frame_skel, cv2.COLOR_BGR2GRAY)
 
-                    # Crop the right half (skeleton mask) from the 960x480 tiled video
+                    # Crop the right half (skeleton mask) from the tiled video
                     h_skel, w_skel = frame_skel.shape
                     if w_skel == 960:
                         frame_skel = frame_skel[:, 480:]
+                    elif w_skel == 448:
+                        frame_skel = frame_skel[:, 224:]
 
                     # Resize to 224x224
                     rgb_224 = cv2.resize(
@@ -136,7 +142,9 @@ def main(repo_id="gr1_pickup_grasp"):
         stacked_pixels = torch.stack(episode_pixels, dim=1)
 
         # 2. Package DINO Waypoint Anchors if pre-computed
-        dino_pt_path = dataset_path / f"cache_dino/chunk-000/file-{ep:03d}_dino.pt"
+        dino_pt_path = (
+            dataset_path / f"cache_dino/chunk-{c_idx:03d}/file-{f_idx:03d}_dino.pt"
+        )
         if dino_pt_path.exists():
             dino_waypoints = validate_dino_waypoints(
                 torch.load(dino_pt_path, map_location="cpu")

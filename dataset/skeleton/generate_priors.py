@@ -91,26 +91,26 @@ def draw_cube_wireframe(draw, cube_pos, K, R, t, color=255):
 
 
 def process_episode(args):
-    ep_idx, dataset_path, views, repo_id = args
+    ep_idx, dataset_path, views, repo_id, c_idx, f_idx = args
     model = mujoco.MjModel.from_xml_path(SCENE_PATH)
     data = mujoco.MjData(model)
     unscaler = StandardScaler()
     idx_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "R_index_tip_link")
     thm_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "R_thumb_tip_link")
 
-    parquet_file = dataset_path / f"data/chunk-000/file-{ep_idx:03d}.parquet"
+    parquet_file = dataset_path / f"data/chunk-{c_idx:03d}/file-{f_idx:03d}.parquet"
     if not parquet_file.exists():
         return
 
     cam_id_center = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "world_center")
     mujoco.mj_forward(model, data)
-    K_center = get_projection_matrix(cam_id_center, model, 480, 480)
+    K_center = get_projection_matrix(cam_id_center, model, 224, 224)
     t_center, R_center = data.cam_xpos[cam_id_center], data.cam_xmat[
         cam_id_center
     ].reshape(3, 3) @ np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
     center_rgb = (
         dataset_path
-        / f"videos/observation.images.world_center/chunk-000/file-{ep_idx:03d}.mp4"
+        / f"videos/observation.images.world_center/chunk-{c_idx:03d}/file-{f_idx:03d}.mp4"
     )
     initial_cube_pos = find_initial_cube_pos(center_rgb, K_center, R_center, t_center)
 
@@ -140,14 +140,14 @@ def process_episode(args):
     for view in views:
         rgb_v_path = (
             dataset_path
-            / f"videos/observation.images.{view}/chunk-000/file-{ep_idx:03d}.mp4"
+            / f"videos/observation.images.{view}/chunk-{c_idx:03d}/file-{f_idx:03d}.mp4"
         )
         out_v_path = (
             dataset_path
-            / f"videos/observation.images.{view}_tiled/chunk-000/file-{ep_idx:03d}.mp4"
+            / f"videos/observation.images.{view}_tiled/chunk-{c_idx:03d}/file-{f_idx:03d}.mp4"
         )
         cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, view)
-        K = get_projection_matrix(cam_id, model, 480, 480)
+        K = get_projection_matrix(cam_id, model, 224, 224)
         t_cam, R_cam = data.cam_xpos[cam_id], data.cam_xmat[cam_id].reshape(
             3, 3
         ) @ np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
@@ -155,7 +155,7 @@ def process_episode(args):
         cap = cv2.VideoCapture(str(rgb_v_path))
         tmp_raw = out_v_path.with_suffix(".raw.mp4")
         video = cv2.VideoWriter(
-            str(tmp_raw), cv2.VideoWriter_fourcc(*"mp4v"), 10, (960, 480), isColor=True
+            str(tmp_raw), cv2.VideoWriter_fourcc(*"mp4v"), 10, (448, 224), isColor=True
         )
 
         for f_idx, current_xpos in enumerate(xpos_history):
@@ -163,7 +163,7 @@ def process_episode(args):
             if not ret:
                 break
 
-            mask = Image.new("L", (480, 480), 0)
+            mask = Image.new("L", (224, 224), 0)
             draw = ImageDraw.Draw(mask)
             for b_id in range(1, model.nbody):
                 p_id = model.body_parentid[b_id]
@@ -185,8 +185,8 @@ def process_episode(args):
                 draw_cube_wireframe(draw, cube_pos, K, R_cam, t_cam)
 
             skel_3ch = cv2.cvtColor(np.array(mask), cv2.COLOR_GRAY2BGR)
-            if rgb_frame.shape[:2] != (480, 480):
-                rgb_frame = cv2.resize(rgb_frame, (480, 480))
+            if rgb_frame.shape[:2] != (224, 224):
+                rgb_frame = cv2.resize(rgb_frame, (224, 224))
             video.write(np.hstack([rgb_frame, skel_3ch]))
 
         cap.release()
@@ -204,12 +204,22 @@ def main(repo_id="gr1_pickup_grasp"):
     dataset_path = Path(dataset.root)
     views = ["world_center", "world_left", "world_right", "world_top", "world_wrist"]
     for view in views:
-        (dataset_path / f"videos/observation.images.{view}_tiled/chunk-000").mkdir(
-            parents=True, exist_ok=True
-        )
+        # Create chunk directories chunk-000 to chunk-003 dynamically based on dataset metadata
+        for ep_meta in dataset.meta.episodes:
+            c_idx = ep_meta[f"videos/observation.images.{view}/chunk_index"]
+            (
+                dataset_path
+                / f"videos/observation.images.{view}_tiled/chunk-{c_idx:03d}"
+            ).mkdir(parents=True, exist_ok=True)
 
     print(f"🚀 Parallelizing across {cpu_count()} cores...")
-    args_list = [(i, dataset_path, views, repo_id) for i in range(dataset.num_episodes)]
+    args_list = []
+    for i in range(dataset.num_episodes):
+        ep_meta = dataset.meta.episodes[i]
+        c_idx = ep_meta["data/chunk_index"]
+        f_idx = ep_meta["data/file_index"]
+        args_list.append((i, dataset_path, views, repo_id, c_idx, f_idx))
+
     with Pool(cpu_count()) as p:
         list(
             tqdm(

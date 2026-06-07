@@ -26,7 +26,7 @@ def main(repo_id="gr1_pickup_grasp"):
     dataset = LeRobotDataset(repo_id)
     dataset_path = Path(dataset.root)
 
-    dino_cache_dir = dataset_path / "cache_dino/chunk-000"
+    dino_parent_dir = dataset_path / "cache_dino"
     fused_cache_dir = dataset_path / "cache"
 
     print("🔎 [CACHE & PRIOR VERIFIER] Starting high-fidelity diagnostic sweep...")
@@ -34,14 +34,14 @@ def main(repo_id="gr1_pickup_grasp"):
 
     # --- Step 1: Verify DINO Priors ---
     print("\n--- Phase 1: Auditing DINOv3 Prior Tensors ---")
-    if not dino_cache_dir.exists():
-        print(f"❌ Error: DINO cache directory does not exist: {dino_cache_dir}")
+    if not dino_parent_dir.exists():
+        print(f"❌ Error: DINO cache directory does not exist: {dino_parent_dir}")
         print(
             "💡 Please run: .venv/bin/python le-probe/dataset/skeleton/generate_dino_priors.py first."
         )
         sys.exit(1)
 
-    dino_files = list(dino_cache_dir.glob("file-*_dino.pt"))
+    dino_files = list(dino_parent_dir.glob("chunk-*/file-*_dino.pt"))
     print(f"Found {len(dino_files)} pre-computed DINO prior files.")
 
     dino_failures = 0
