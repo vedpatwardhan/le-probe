@@ -297,4 +297,5 @@ def main(repo_id="gr1_pickup_grasp"):
 
 
 if __name__ == "__main__":
-    main()
+    repo_id = sys.argv[1] if len(sys.argv) > 1 else "gr1_pickup_grasp"
+    main(repo_id)
