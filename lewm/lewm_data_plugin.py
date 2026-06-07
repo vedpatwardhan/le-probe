@@ -52,7 +52,24 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         self.repo_id = self._resolve_local_repo_id(repo_id)
 
         # 1. Base Dataset Discovery
-        self.lerobot_dataset = LeRobotDataset(self.repo_id)
+        lerobot_home = os.environ.get("LEROBO_HOME")
+        local_path = None
+        if lerobot_home:
+            candidate = Path(lerobot_home) / self.repo_id
+            if candidate.exists():
+                local_path = candidate
+
+        if local_path is None:
+            local_path = Path(ROOT_DIR) / "datasets" / self.repo_id
+            if not local_path.exists() and "/" in self.repo_id:
+                _, name = self.repo_id.split("/", 1)
+                local_path = Path(ROOT_DIR) / "datasets" / name
+
+        if local_path and local_path.exists():
+            self.lerobot_dataset = LeRobotDataset(self.repo_id, root=str(local_path))
+        else:
+            self.lerobot_dataset = LeRobotDataset(self.repo_id)
+
         self.root = Path(self.lerobot_dataset.root)
         self.hf_dataset = self.lerobot_dataset.hf_dataset
 
