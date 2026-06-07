@@ -85,43 +85,49 @@ def main(repo_id="gr1_pickup_grasp"):
         episode_pixels = []
 
         for view in views:
-            rgb_path = (
-                dataset_path
-                / f"videos/observation.images.{view}/chunk-{c_idx:03d}/file-{f_idx:03d}.mp4"
-            )
             skel_path = (
                 dataset_path
                 / f"videos/observation.images.{view}_tiled/chunk-{c_idx:03d}/file-{f_idx:03d}.mp4"
             )
 
-            if not rgb_path.exists() or not skel_path.exists():
-                print(f"⚠️ Missing video for Ep {ep} {view}")
+            if not skel_path.exists():
+                print(f"⚠️ Missing tiled video for Ep {ep} {view}")
                 continue
 
-            cap_rgb = cv2.VideoCapture(str(rgb_path))
             cap_skel = cv2.VideoCapture(str(skel_path))
 
             view_frames = []
             for frame_idx in range(32):
-                ret_rgb, frame_rgb = cap_rgb.read()
-                ret_skel, frame_skel = cap_skel.read()
+                ret_skel, frame_tiled = cap_skel.read()
 
-                if not ret_rgb or not ret_skel:
+                if not ret_skel:
                     # Fallback to zero frames if video ends prematurely
                     rgb_224 = np.zeros((224, 224, 3), dtype=np.uint8)
                     skel_224 = np.zeros((224, 224), dtype=np.uint8)
                 else:
-                    # OpenCV reads in BGR, convert to RGB
-                    frame_rgb = cv2.cvtColor(frame_rgb, cv2.COLOR_BGR2RGB)
-                    # Grayscale conversion for skeleton mask
-                    frame_skel = cv2.cvtColor(frame_skel, cv2.COLOR_BGR2GRAY)
+                    # The tiled video frame is BGR of shape [H, W, 3] (e.g. 224x448x3 or 480x960x3)
+                    # Left half is RGB frame, right half is skeleton mask
+                    h_tiled, w_tiled, _ = frame_tiled.shape
 
-                    # Crop the right half (skeleton mask) from the tiled video
-                    h_skel, w_skel = frame_skel.shape
-                    if w_skel == 960:
-                        frame_skel = frame_skel[:, 480:]
-                    elif w_skel == 448:
-                        frame_skel = frame_skel[:, 224:]
+                    if w_tiled == 960:
+                        frame_rgb = frame_tiled[:, :480]
+                        frame_skel = cv2.cvtColor(
+                            frame_tiled[:, 480:], cv2.COLOR_BGR2GRAY
+                        )
+                    elif w_tiled == 448:
+                        frame_rgb = frame_tiled[:, :224]
+                        frame_skel = cv2.cvtColor(
+                            frame_tiled[:, 224:], cv2.COLOR_BGR2GRAY
+                        )
+                    else:
+                        mid = w_tiled // 2
+                        frame_rgb = frame_tiled[:, :mid]
+                        frame_skel = cv2.cvtColor(
+                            frame_tiled[:, mid:], cv2.COLOR_BGR2GRAY
+                        )
+
+                    # OpenCV reads in BGR, convert RGB frame to RGB format
+                    frame_rgb = cv2.cvtColor(frame_rgb, cv2.COLOR_BGR2RGB)
 
                     # Resize to 224x224
                     rgb_224 = cv2.resize(
@@ -139,7 +145,6 @@ def main(repo_id="gr1_pickup_grasp"):
 
                 view_frames.append(torch.from_numpy(fused))
 
-            cap_rgb.release()
             cap_skel.release()
 
             # Stack 32 frames of the view -> Shape [32, 4, 224, 224]
