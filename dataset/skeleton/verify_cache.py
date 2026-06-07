@@ -23,7 +23,14 @@ from lewm.skeleton.dino_constants import dino_waypoints_shape  # noqa: E402
 
 def main(repo_id="gr1_pickup_grasp"):
     # Dynamically resolve dataset path using LeRobot's own dataset engine or bust
-    dataset = LeRobotDataset(repo_id)
+    local_path = Path("le-probe/datasets") / repo_id
+    if not local_path.exists():
+        local_path = Path("datasets") / repo_id
+
+    if local_path.exists():
+        dataset = LeRobotDataset(repo_id, root=str(local_path))
+    else:
+        dataset = LeRobotDataset(repo_id)
     dataset_path = Path(dataset.root)
 
     dino_parent_dir = dataset_path / "cache_dino"

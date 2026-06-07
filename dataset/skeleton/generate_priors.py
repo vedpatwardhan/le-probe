@@ -200,7 +200,14 @@ def process_episode(args):
 
 def main(repo_id="gr1_pickup_grasp"):
     print(f"📦 [SKELETON GENERATOR] Initializing: {repo_id}")
-    dataset = LeRobotDataset(repo_id)
+    local_path = Path("le-probe/datasets") / repo_id
+    if not local_path.exists():
+        local_path = Path("datasets") / repo_id
+
+    if local_path.exists():
+        dataset = LeRobotDataset(repo_id, root=str(local_path))
+    else:
+        dataset = LeRobotDataset(repo_id)
     dataset_path = Path(dataset.root)
     views = ["world_center", "world_left", "world_right", "world_top", "world_wrist"]
     for view in views:
