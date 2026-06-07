@@ -8,13 +8,14 @@ them along with actions and proprioceptive states directly into serialized Torch
 
 import os
 import sys
-import gzip
 import torch
 import cv2
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
+import lz4.frame
+import io
 
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -174,9 +175,13 @@ def main(repo_id="gr1_pickup_grasp"):
             "dino_waypoints": dino_waypoints,  # float [4, 5, 384] multi-view anchors
         }
 
-        # Save to disk
+        # Save to disk using high-speed LZ4 compression
         out_path = cache_dir / f"episode_{ep:03d}_fused.pt"
-        torch.save(packaged_data, out_path)
+        buffer = io.BytesIO()
+        torch.save(packaged_data, buffer)
+        compressed = lz4.frame.compress(buffer.getvalue())
+        with open(out_path, "wb") as f:
+            f.write(compressed)
 
     print(f"🎉 Pre-compiled cache successfully generated inside: {cache_dir}")
 
