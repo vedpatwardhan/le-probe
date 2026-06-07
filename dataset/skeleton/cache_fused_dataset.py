@@ -8,6 +8,7 @@ them along with actions and proprioceptive states directly into serialized Torch
 
 import os
 import sys
+import gzip
 import torch
 import cv2
 import numpy as np
@@ -170,7 +171,8 @@ def main(repo_id="gr1_pickup_grasp"):
 
         # Save to disk
         out_path = cache_dir / f"episode_{ep:03d}_fused.pt"
-        torch.save(packaged_data, out_path)
+        with gzip.open(out_path, "wb", compresslevel=1) as f:
+            torch.save(packaged_data, f)
 
     print(f"🎉 Pre-compiled cache successfully generated inside: {cache_dir}")
 

@@ -1,4 +1,5 @@
 import torch
+import gzip
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from lewm.lewm_data_plugin import LEWMDataPlugin
@@ -187,7 +188,8 @@ class SkeletonDataPlugin(LEWMDataPlugin):
                 cache_path = self.cache_dir / f"episode_{episode_idx:03d}_fused.pt"
                 # If cached episode file is missing, fallback to raw loading
                 if cache_path.exists():
-                    self._last_loaded_data = torch.load(cache_path, map_location="cpu")
+                    with gzip.open(cache_path, "rb") as f:
+                        self._last_loaded_data = torch.load(f, map_location="cpu")
                     self._last_loaded_ep = episode_idx
                 else:
                     self._last_loaded_data = None
