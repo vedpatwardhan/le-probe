@@ -30,10 +30,9 @@ LEWM_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "le_wm"))
 sys.path.append(LEWM_ROOT)
 
 # Import official LeWM components
-from jepa import JEPA
 from module import ARPredictor, SIGReg
 from gr1_modules import GR1Embedder, GR1MLP, MultiViewJEPA
-from utils import get_column_normalizer, get_img_preprocessor, ModelObjectCallBack
+from utils import get_img_preprocessor, ModelObjectCallBack
 from lewm_data_plugin import LEWMDataPlugin
 from metrics import MetricsCallback
 from multi_view_encoder import get_multi_view_encoder
@@ -580,8 +579,10 @@ def run(cfg):
 
         if patch_key not in filtered_dict:
             print(f"⚠️  WARNING: {patch_key} NOT FOUND OR SHAPE MISMATCH.")
-            if is_multi_view and patch_key in new_sd:
-                print(f"   - Found in state_dict (mapped): {new_sd[patch_key].shape}")
+            if is_multi_view and patch_key in new_state_dict:
+                print(
+                    f"   - Found in state_dict (mapped): {new_state_dict[patch_key].shape}"
+                )
             elif not is_multi_view and patch_key in state_dict:
                 print(f"   - Found in state_dict (raw): {state_dict[patch_key].shape}")
 
