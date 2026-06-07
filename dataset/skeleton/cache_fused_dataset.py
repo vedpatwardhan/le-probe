@@ -171,8 +171,7 @@ def main(repo_id="gr1_pickup_grasp"):
 
         # Save to disk
         out_path = cache_dir / f"episode_{ep:03d}_fused.pt"
-        with gzip.open(out_path, "wb", compresslevel=1) as f:
-            torch.save(packaged_data, f)
+        torch.save(packaged_data, out_path)
 
     print(f"🎉 Pre-compiled cache successfully generated inside: {cache_dir}")
 

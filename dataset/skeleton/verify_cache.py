@@ -113,8 +113,7 @@ def main(repo_id="gr1_pickup_grasp"):
 
     for fused_path in tqdm(fused_files, desc="Verifying Fused Caches"):
         try:
-            with gzip.open(fused_path, "rb") as f:
-                data = torch.load(f, map_location="cpu")
+            data = torch.load(fused_path, map_location="cpu")
             required_keys = {"pixels", "state", "action", "dino_waypoints"}
             missing_keys = required_keys - data.keys()
 
