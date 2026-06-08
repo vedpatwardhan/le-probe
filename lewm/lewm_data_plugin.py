@@ -74,70 +74,7 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         self.root = Path(self.lerobot_dataset.root)
         self.hf_dataset = self.lerobot_dataset.hf_dataset
 
-        # 2. Key Mapping & Dim Detection
-        self.key_map = {
-            "world_center": "observation.images.world_center",
-            "world_left": "observation.images.world_left",
-            "world_right": "observation.images.world_right",
-            "world_top": "observation.images.world_top",
-            "world_wrist": "observation.images.world_wrist",
-            "pixels": "observation.images.world_center",
-            "state": "observation.state",
-            "proprio": "observation.state",
-            "action": "action",
-        }
-
-        # 3. HIGH SPEED METADATA CACHE (Zero Parquet latency)
-        print(f"🚀 Initializing Direct Bypass for {self.repo_id}...")
-        self.episode_indices = torch.from_numpy(
-            np.array(self.hf_dataset["episode_index"])
-        )
-        self.frame_indices = torch.from_numpy(np.array(self.hf_dataset["frame_index"]))
-
-        self.cached_states = None
-        if "observation.state" in self.hf_dataset.column_names:
-            self.cached_states = torch.from_numpy(
-                np.array(self.hf_dataset["observation.state"])
-            )
-
-        self.cached_actions = None
-        self.has_native_actions = "action" in self.hf_dataset.column_names
-        if self.has_native_actions:
-            self.cached_actions = torch.from_numpy(np.array(self.hf_dataset["action"]))
-            print("⚡ Using native action column from RAM cache.")
-
-        # Progress / Rewards
-        self.cached_progress = None
-        self.has_progress = False
-
-        reward_cols = ["progress_sparse", "progress", "reward"]
-        for col in reward_cols:
-            if col in self.hf_dataset.column_names:
-                self.cached_progress = torch.from_numpy(np.array(self.hf_dataset[col]))
-                self.has_progress = True
-                print(f"📈 Using {col} column from RAM cache.")
-                break
-
-        # Fallback to side-car parquet file (common for research datasets on Colab)
-        if not self.has_progress:
-            reward_file = self.root / "progress_sparse.parquet"
-            if reward_file.exists():
-                df = pd.read_parquet(reward_file)
-                for col in reward_cols:
-                    if col in df.columns:
-                        self.cached_progress = torch.from_numpy(df[col].values).float()
-                        self.has_progress = True
-                        print(f"📈 Loaded {col} from side-car file: {reward_file.name}")
-                        break
-            else:
-                print(
-                    f"⚠️ Local side-car reward file missing at {reward_file}. "
-                    "HF fallback is disabled in submission mode."
-                )
-
-        # 4. LRU Decoder Cache (Worker-local)
-        self._decoders = {}
-
+        self.valid_indices = None
         if use_subset:
             print(
                 "🎯 Subsetting dataset to 1/4th (500 episodes) preserving success/suboptimal/fail ratios..."
@@ -191,17 +128,75 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             selected_episodes = np.sort(selected_episodes)
 
             mask = np.isin(df_meta["episode_index"].values, selected_episodes)
-            valid_indices = np.where(mask)[0]
+            self.valid_indices = np.where(mask)[0]
+            self.hf_dataset = self.hf_dataset.select(self.valid_indices)
 
-            self.episode_indices = self.episode_indices[valid_indices]
-            self.frame_indices = self.frame_indices[valid_indices]
+        # 2. Key Mapping & Dim Detection
+        self.key_map = {
+            "world_center": "observation.images.world_center",
+            "world_left": "observation.images.world_left",
+            "world_right": "observation.images.world_right",
+            "world_top": "observation.images.world_top",
+            "world_wrist": "observation.images.world_wrist",
+            "pixels": "observation.images.world_center",
+            "state": "observation.state",
+            "proprio": "observation.state",
+            "action": "action",
+        }
 
-            if self.cached_states is not None:
-                self.cached_states = self.cached_states[valid_indices]
-            if self.cached_actions is not None:
-                self.cached_actions = self.cached_actions[valid_indices]
-            if self.cached_progress is not None:
-                self.cached_progress = self.cached_progress[valid_indices]
+        # 3. HIGH SPEED METADATA CACHE (Zero Parquet latency)
+        print(f"🚀 Initializing Direct Bypass for {self.repo_id}...")
+        self.episode_indices = torch.from_numpy(
+            np.array(self.hf_dataset["episode_index"])
+        )
+        self.frame_indices = torch.from_numpy(np.array(self.hf_dataset["frame_index"]))
+
+        self.cached_states = None
+        if "observation.state" in self.hf_dataset.column_names:
+            self.cached_states = torch.from_numpy(
+                np.array(self.hf_dataset["observation.state"])
+            )
+
+        self.cached_actions = None
+        self.has_native_actions = "action" in self.hf_dataset.column_names
+        if self.has_native_actions:
+            self.cached_actions = torch.from_numpy(np.array(self.hf_dataset["action"]))
+            print("⚡ Using native action column from RAM cache.")
+
+        # Progress / Rewards
+        self.cached_progress = None
+        self.has_progress = False
+
+        reward_cols = ["progress_sparse", "progress", "reward"]
+        for col in reward_cols:
+            if col in self.hf_dataset.column_names:
+                self.cached_progress = torch.from_numpy(np.array(self.hf_dataset[col]))
+                self.has_progress = True
+                print(f"📈 Using {col} column from RAM cache.")
+                break
+
+        # Fallback to side-car parquet file (common for research datasets on Colab)
+        if not self.has_progress:
+            reward_file = self.root / "progress_sparse.parquet"
+            if reward_file.exists():
+                df = pd.read_parquet(reward_file)
+                for col in reward_cols:
+                    if col in df.columns:
+                        vals = df[col].values
+                        if self.valid_indices is not None:
+                            vals = vals[self.valid_indices]
+                        self.cached_progress = torch.from_numpy(vals).float()
+                        self.has_progress = True
+                        print(f"📈 Loaded {col} from side-car file: {reward_file.name}")
+                        break
+            else:
+                print(
+                    f"⚠️ Local side-car reward file missing at {reward_file}. "
+                    "HF fallback is disabled in submission mode."
+                )
+
+        # 4. LRU Decoder Cache (Worker-local)
+        self._decoders = {}
 
     def _get_decoder(self, video_path):
         """Returns a cached VideoDecoder instance for the given path."""
