@@ -145,10 +145,18 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
             df_meta = pd.DataFrame(
                 {
                     "episode_index": np.array(self.hf_dataset["episode_index"]),
-                    "task": np.array(self.hf_dataset["task"]),
+                    "task_index": np.array(self.hf_dataset["task_index"]),
                 }
             )
-            df_episodes = df_meta.drop_duplicates(subset=["episode_index"])
+            df_episodes = df_meta.drop_duplicates(subset=["episode_index"]).copy()
+
+            tasks_list = [
+                self.lerobot_dataset.meta.tasks.iloc[i].name
+                for i in range(len(self.lerobot_dataset.meta.tasks))
+            ]
+            df_episodes["task"] = df_episodes["task_index"].map(
+                lambda x: tasks_list[int(x)]
+            )
 
             def get_class(task_str):
                 task_lower = str(task_str).lower()
