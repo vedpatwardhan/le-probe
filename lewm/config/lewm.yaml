@@ -18,6 +18,7 @@ rabc_kappa: 0.01
 use_multi_view: True
 fusion_type: mean
 use_dino: false
+use_subset: false
 
 trainer:
   max_epochs: 100

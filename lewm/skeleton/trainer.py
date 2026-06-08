@@ -220,6 +220,7 @@ def run(cfg):
         use_virtual_actions=cfg.data.get("use_virtual_actions", True),
         use_multi_view=True,
         img_size=cfg.img_size,
+        use_subset=cfg.get("use_subset", False),
     )
 
     # Apply Image Preprocessors & Standard Normalization (Z-Score)

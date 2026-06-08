@@ -39,6 +39,7 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
         use_virtual_actions=True,
         use_multi_view=True,
         img_size=224,
+        use_subset=False,
     ):
         self.repo_id = repo_id
         self.keys_to_load = keys_to_load
@@ -136,6 +137,63 @@ class LEWMDataPlugin(torch.utils.data.Dataset):
 
         # 4. LRU Decoder Cache (Worker-local)
         self._decoders = {}
+
+        if use_subset:
+            print(
+                "🎯 Subsetting dataset to 1/4th (500 episodes) preserving success/suboptimal/fail ratios..."
+            )
+            df_meta = pd.DataFrame(
+                {
+                    "episode_index": np.array(self.hf_dataset["episode_index"]),
+                    "task": np.array(self.hf_dataset["task"]),
+                }
+            )
+            df_episodes = df_meta.drop_duplicates(subset=["episode_index"])
+
+            def get_class(task_str):
+                task_lower = str(task_str).lower()
+                if "success" in task_lower:
+                    return "success"
+                elif "suboptimal" in task_lower:
+                    return "suboptimal"
+                else:
+                    return "fail"
+
+            df_episodes["class"] = df_episodes["task"].apply(get_class)
+
+            success_eps = np.sort(
+                df_episodes[df_episodes["class"] == "success"]["episode_index"].values
+            )
+            suboptimal_eps = np.sort(
+                df_episodes[df_episodes["class"] == "suboptimal"][
+                    "episode_index"
+                ].values
+            )
+            fail_eps = np.sort(
+                df_episodes[df_episodes["class"] == "fail"]["episode_index"].values
+            )
+
+            selected_success = success_eps[::4][:125]
+            selected_suboptimal = suboptimal_eps[::4][:250]
+            selected_fail = fail_eps[::4][:125]
+
+            selected_episodes = np.concatenate(
+                [selected_success, selected_suboptimal, selected_fail]
+            )
+            selected_episodes = np.sort(selected_episodes)
+
+            mask = np.isin(df_meta["episode_index"].values, selected_episodes)
+            valid_indices = np.where(mask)[0]
+
+            self.episode_indices = self.episode_indices[valid_indices]
+            self.frame_indices = self.frame_indices[valid_indices]
+
+            if self.cached_states is not None:
+                self.cached_states = self.cached_states[valid_indices]
+            if self.cached_actions is not None:
+                self.cached_actions = self.cached_actions[valid_indices]
+            if self.cached_progress is not None:
+                self.cached_progress = self.cached_progress[valid_indices]
 
     def _get_decoder(self, video_path):
         """Returns a cached VideoDecoder instance for the given path."""
