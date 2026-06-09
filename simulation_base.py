@@ -218,12 +218,11 @@ class GR1MuJoCoBase:
     def _post_render_hook(self, name, rgb, depth=None):
         """Saves camera views to the filesystem for diagnostic-verification (Mirrors original teleop logic)."""
         # Save in a subdirectory for this specific camera inside the session folder
-        # cam_dir = self.base_log_dir / name
-        # cam_dir.mkdir(parents=True, exist_ok=True)
+        cam_dir = self.base_log_dir / name
+        cam_dir.mkdir(parents=True, exist_ok=True)
 
-        # img_path = cam_dir / f"{self.frame_indices[name]:04d}.png"
-        # Image.fromarray(rgb).save(img_path)
-        pass
+        img_path = cam_dir / f"{self.frame_indices[name]:04d}.png"
+        Image.fromarray(rgb).save(img_path)
 
     def get_state_32(self):
         return self.qpos_to_action_32(self.data.qpos)
@@ -401,7 +400,7 @@ class GR1MuJoCoBase:
                 self.renderer.disable_depth_rendering()
             self._post_render_hook(name, rgb, depth=depth)
             views[name] = rgb
-            # rr.log(name, rr.Image(rgb))
+            rr.log(name, rr.Image(rgb))
             self.frame_indices[name] += 1
 
         self.render_step_idx += 1

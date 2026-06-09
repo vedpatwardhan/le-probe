@@ -21,6 +21,8 @@ from gr1_config import COMPACT_WIRE_JOINTS
 from inference_http import InferenceHTTPClient, pack_np, serve_http, TELEOP_PATH
 from dataset.polytope_utils import draw_polytope_on_rgb, log_polytope_rerun
 from lewm.task_workspace import get_task_workspace_draw_polytope
+from pycapacity.robot import velocity_polytope
+from scipy.spatial import ConvexHull
 
 
 class GR1TeleopServer(GR1MuJoCoBase):
@@ -39,6 +41,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
         query_lewm_reward=False,
         lewm_base_url="http://127.0.0.1:5555",
         lewm_multi_view=False,
+        show_pycapacity=False,
     ):
         super().__init__(scene_path or SCENE_PATH, restrict_ik=True)
         self.port = port
@@ -48,6 +51,7 @@ class GR1TeleopServer(GR1MuJoCoBase):
         self.task_workspace_fill_alpha = task_workspace_fill_alpha
         self.query_lewm_reward = query_lewm_reward
         self.lewm_multi_view = lewm_multi_view
+        self.show_pycapacity = show_pycapacity
         self._lewm_client = None
         if self.query_lewm_reward:
             self._lewm_client = InferenceHTTPClient(lewm_base_url)
@@ -64,8 +68,31 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 f"{self._tw_poly.face_indices.shape[0]} faces)"
             )
 
+        if self.show_pycapacity:
+            # Active joints for the right arm in the 32-dim protocol (7 DoF)
+            self.RIGHT_ARM_JOINTS = [
+                "right_shoulder_pitch_joint",
+                "right_shoulder_roll_joint",
+                "right_shoulder_yaw_joint",
+                "right_elbow_pitch_joint",
+                "right_wrist_yaw_joint",
+                "right_wrist_roll_joint",
+                "right_wrist_pitch_joint",
+            ]
+            self.ee_id = mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_BODY, "R_index_tip_link"
+            )
+            self.dof_indices = []
+            for name in self.RIGHT_ARM_JOINTS:
+                j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+                if j_id != -1:
+                    self.dof_indices.append(self.model.jnt_dofadr[j_id])
+            self.dq_max = np.ones(len(self.dof_indices)) * 0.5
+            self.dq_min = -np.ones(len(self.dof_indices)) * 0.5
+            print("🌐 PyCapacity reachability overlay ON")
+
     def _render_needs_depth(self) -> bool:
-        return self.show_task_workspace
+        return self.show_task_workspace or self.show_pycapacity
 
     def _log_task_workspace_rerun(self):
         if self._tw_poly is not None:
@@ -75,19 +102,84 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 wireframe_path="world/task_workspace_wireframe",
             )
 
+    def _draw_polytope_overlay(
+        self, name, rgb, vertices, face_indices, depth, color, fill_alpha
+    ):
+        """Helper to draw any 3D polytope (represented by vertices and face indices) on the 2D camera view."""
+
+        class TempPoly:
+            def __init__(self, v, f):
+                self.vertices = v
+                self.face_indices = f
+
+        poly_obj = TempPoly(vertices, face_indices)
+        drawn = draw_polytope_on_rgb(
+            rgb,
+            poly_obj,
+            name,
+            self.model,
+            self.data,
+            depth_buffer=depth,
+            wire_color=color,
+            fill_alpha=fill_alpha,
+        )
+        if drawn is not rgb:
+            rgb[:] = drawn
+
     def _post_render_hook(self, name, rgb, depth=None):
         if self._tw_poly is not None:
-            drawn = draw_polytope_on_rgb(
-                rgb,
-                self._tw_poly,
+            self._draw_polytope_overlay(
                 name,
-                self.model,
-                self.data,
-                depth_buffer=depth,
-                fill_alpha=self.task_workspace_fill_alpha,
+                rgb,
+                self._tw_poly.vertices,
+                self._tw_poly.face_indices,
+                depth,
+                (0, 0, 255),
+                self.task_workspace_fill_alpha,
             )
-            if drawn is not rgb:
-                rgb[:] = drawn
+
+        if self.show_pycapacity:
+            try:
+                # Get End-Effector position and compute the Jacobian
+                ee_pos = self.data.xpos[self.ee_id]
+                jacp = np.zeros((3, self.model.nv))
+                jacr = np.zeros((3, self.model.nv))
+                mujoco.mj_jac(self.model, self.data, jacp, jacr, ee_pos, self.ee_id)
+
+                # Extract active Jacobian columns
+                J_arm = jacp[:, self.dof_indices]
+
+                # Compute Velocity Polytope
+                poly = velocity_polytope(J_arm, self.dq_max, self.dq_min)
+
+                # Offset polytope vertices to EE pos
+                offset_verts = poly.vertices + ee_pos.reshape(3, 1)
+
+                try:
+                    poly.find_faces()
+                except Exception:
+                    pass
+
+                face_indices = getattr(poly, "face_indices", None)
+                if face_indices is None or len(face_indices) == 0:
+                    try:
+                        hull = ConvexHull(offset_verts.T)
+                        face_indices = hull.simplices
+                    except Exception:
+                        pass
+
+                self._draw_polytope_overlay(
+                    name,
+                    rgb,
+                    offset_verts,
+                    face_indices,
+                    depth,
+                    (255, 145, 0),
+                    0.15,
+                )
+            except Exception as e:
+                pass
+
         super()._post_render_hook(name, rgb, depth=depth)
 
     def _build_lewm_reward_payload(self) -> dict:
@@ -457,6 +549,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Send 5 camera views to LeWM (must match lewm_server --multi_view)",
     )
+    parser.add_argument(
+        "--pycapacity",
+        action="store_true",
+        help="Show pycapacity reachability map overlay on all cameras",
+    )
     args = parser.parse_args()
 
     GR1TeleopServer(
@@ -467,4 +564,5 @@ if __name__ == "__main__":
         query_lewm_reward=args.query_lewm_reward,
         lewm_base_url=args.lewm_base_url,
         lewm_multi_view=args.lewm_multi_view,
+        show_pycapacity=args.pycapacity,
     ).run(host=args.host)
