@@ -87,33 +87,48 @@ class SkeletonImportanceCallback(pl.Callback):
 
 def compute_subgoal_waypoint_loss(self, batch, cfg, emb):
     """
-    Decoupled utility to compute visual waypoint alignment loss using pre-cached DINO anchors.
-    Returns the alignment loss and the projected DINO subgoal tensor z_bar.
+    Decoupled utility to compute visual waypoint guidance (HWM) using pre-cached DINO anchors
+    with bidirectional visual alignment to ensure high-fidelity latent representations.
+    Returns:
+        subgoal_loss (combined pred + align loss)
+        align_loss (pure alignment loss for logging)
+        z_subgoal_target (the projected DINO subgoal representation)
     """
     phi_dino = batch["dino_anchor"]  # [B, T, V, 384]
     B, T = phi_dino.shape[:2]
     D = emb.shape[-1]
 
-    # Fuse DINO views to z_bar: [B, T, D]
-    z_bar = self.model.project_dino(phi_dino, aggregate_views=True)
-    if z_bar.dim() == 2:
-        z_bar = z_bar.view(B, T, D)
+    # Per-view DINO projection, fused with same fusion_type as multi-view emb
+    z_subgoal_target = self.model.project_dino(phi_dino, aggregate_views=True)
+    if z_subgoal_target.dim() == 2:
+        z_subgoal_target = z_subgoal_target.view(B, T, D)
+    z_subgoal_pred = self.model.predict_subgoal(emb, batch["phase_idx"])  # [B, T, D]
 
-    # Visual Alignment Loss: Align projected DINO subgoals with actual embeddings at checkpoint frames
-    is_checkpoint = batch.get("is_checkpoint")  # [B, T]
+    # 1. Subgoal Prediction Loss (for HWMPredictor)
+    pred_loss = F.mse_loss(z_subgoal_pred, z_subgoal_target.detach())
+
+    # 2. Visual Alignment Loss (for DINOProjector)
+    # Align projected DINO subgoals with actual J-EPA embeddings at checkpoint frames
+    is_checkpoint = batch.get("is_checkpoint")  # Shape: [B, T]
+
     if is_checkpoint is not None:
         is_checkpoint = is_checkpoint.to(emb.device)
         if is_checkpoint.any():
-            z_bar_masked = z_bar[is_checkpoint]
-            emb_masked = emb[is_checkpoint]
-            # DETACH actual JEPA embeddings to ensure gradient flows only to the Dino Projector
-            align_loss = F.mse_loss(z_bar_masked, emb_masked.detach())
-        else:
-            align_loss = torch.zeros(1, device=emb.device, dtype=emb.dtype).squeeze()
-    else:
-        align_loss = torch.zeros(1, device=emb.device, dtype=emb.dtype).squeeze()
+            # Mask only the steps that are checkpoint frames to extract correct alignments
+            z_subgoal_target_masked = z_subgoal_target[is_checkpoint]  # [N, D]
+            emb_masked = emb[is_checkpoint]  # [N, D]
 
-    return align_loss, z_bar
+            # Detach actual JEPA embeddings to ensure visual semantics flow INTO the projector
+            # rather than distorting task-grounded J-EPA latent embeddings
+            align_loss = F.mse_loss(z_subgoal_target_masked, emb_masked.detach())
+        else:
+            align_loss = torch.zeros_like(pred_loss)
+    else:
+        align_loss = torch.zeros_like(pred_loss)
+
+    # Combined visual waypoint loss
+    subgoal_loss = pred_loss + align_loss
+    return subgoal_loss, align_loss, z_subgoal_target
 
 
 def phase1_forward(self, batch, stage, cfg, log_metrics=True):
@@ -186,7 +201,10 @@ def phase1_forward(self, batch, stage, cfg, log_metrics=True):
 
     # C. DINO Subgoal Waypoint Projection and Visual Alignment
     if cfg.get("use_dino", False) and "dino_anchor" in batch:
-        align_loss, z_bar = compute_subgoal_waypoint_loss(self, batch, cfg, emb)
+        subgoal_loss, align_loss, z_bar = compute_subgoal_waypoint_loss(
+            self, batch, cfg, emb
+        )
+        output["subgoal_loss"] = subgoal_loss
         output["align_loss"] = align_loss
 
         # D. TD Learning for Goal-Conditioned Value Head V(z_t | z_bar)
@@ -194,16 +212,16 @@ def phase1_forward(self, batch, stage, cfg, log_metrics=True):
         gamma = cfg.loss.get("gamma", 0.95)
 
         # We extract matching states for TD transition
-        z_t = emb[:, :-1]  # [B, T-1, D]
-        z_next = emb[:, 1:]  # [B, T-1, D]
-        z_bar_truncated = z_bar[:, :-1]  # [B, T-1, D]
+        # DETACH state embeddings (z_t) and subgoals (z_bar) to prevent 1D value loss gradients from collapsing J-EPA representations
+        z_t = emb[:, :-1].detach()  # [B, T-1, D]
+        z_next = emb[:, 1:].detach()  # [B, T-1, D]
+        z_bar_truncated = z_bar[:, :-1].detach()  # [B, T-1, D]
+        z_bar_next = z_bar[:, 1:].detach()  # [B, T-1, D]
 
         # Predict values
         val_t = self.model.value_head(z_t, z_bar_truncated).squeeze(-1)  # [B, T-1]
         with torch.no_grad():
-            val_next = self.model.value_head(z_next, z_bar[:, 1:]).squeeze(
-                -1
-            )  # [B, T-1]
+            val_next = self.model.value_head(z_next, z_bar_next).squeeze(-1)  # [B, T-1]
 
         # Immediate reward (progress delta or sparse reward)
         if "progress" in batch:
@@ -215,6 +233,7 @@ def phase1_forward(self, batch, stage, cfg, log_metrics=True):
         td_target = rewards + gamma * val_next
         output["value_loss"] = F.mse_loss(val_t, td_target)
     else:
+        output["subgoal_loss"] = torch.zeros_like(output["pred_loss"])
         output["align_loss"] = torch.zeros_like(output["pred_loss"])
         output["value_loss"] = torch.zeros_like(output["pred_loss"])
 
@@ -223,14 +242,14 @@ def phase1_forward(self, batch, stage, cfg, log_metrics=True):
     # E. Combine losses
     reward_weight = cfg.loss.get("reward", {}).get("weight", 0.1)
     sigreg_weight = cfg.loss.sigreg.weight
-    align_weight = cfg.loss.get("align", {}).get("weight", 0.5)
+    subgoal_weight = cfg.loss.get("subgoal", {}).get("weight", 0.5)
     value_weight = cfg.loss.get("value", {}).get("weight", 0.5)
 
     output["loss"] = (
         output["pred_loss"]
         + sigreg_weight * output["sigreg_loss"].to(output["pred_loss"].dtype)
         + reward_weight * output["reward_loss"]
-        + align_weight * output["align_loss"]
+        + subgoal_weight * output["subgoal_loss"]
         + value_weight * output["value_loss"]
     )
 
