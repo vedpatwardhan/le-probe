@@ -87,8 +87,8 @@ class GR1TeleopServer(GR1MuJoCoBase):
                 j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
                 if j_id != -1:
                     self.dof_indices.append(self.model.jnt_dofadr[j_id])
-            self.dq_max = np.ones(len(self.dof_indices)) * 0.5
-            self.dq_min = -np.ones(len(self.dof_indices)) * 0.5
+            self.dq_max = np.ones(len(self.dof_indices)) * 0.2
+            self.dq_min = -np.ones(len(self.dof_indices)) * 0.2
             print("🌐 PyCapacity reachability overlay ON")
 
     def _render_needs_depth(self) -> bool:
