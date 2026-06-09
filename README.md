@@ -34,7 +34,7 @@ Le-Probe is the experiment and analysis stack to diagnose why latent MPC succeed
 ### V2 (In Progress)
 
 <div align="center">
-  <img src="assets/Le-Probe-WAIM.png" width="900" alt="LeWorldModel representation variants: single-view (a) and multi-view with skeletal priors and DINOv3 waypoints (b–d)">
+  <img src="assets/Le-Probe-V2.png" width="900" alt="LeWorldModel representation variants: single-view (a) and multi-view with skeletal priors and DINOv3 waypoints (b–d)">
 </div>
 
 ## Key Artifacts
