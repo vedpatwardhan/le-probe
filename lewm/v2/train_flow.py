@@ -2,8 +2,8 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-from lewm.v2.flow_matching.velocity_net import ActionVelocityNetwork
-from lewm.v2.flow_matching.flow_matcher import ConditionalFlowMatcher
+from lewm.v2.velocity_net import ActionVelocityNetwork
+from lewm.v2.flow_matcher import ConditionalFlowMatcher
 
 
 def add_smooth_trajectory_noise(a1, scale=0.05):
