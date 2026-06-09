@@ -31,7 +31,7 @@ Le-Probe is the experiment and analysis stack to diagnose why latent MPC succeed
 | Multi-View RGB + Skeletal Priors | 4th kinematic channel | Anchor task-relevant structure |
 | Multi-View RGB + Skeletal Priors + DINOv3 Waypoints | phase waypoints | Improve long-horizon subgoal alignment |
 
-## V2 (In Progress)
+### V2 (In Progress)
 
 <div align="center">
   <img src="assets/Le-Probe-WAIM.png" width="900" alt="LeWorldModel representation variants: single-view (a) and multi-view with skeletal priors and DINOv3 waypoints (b–d)">
