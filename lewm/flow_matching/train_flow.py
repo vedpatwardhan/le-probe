@@ -42,15 +42,14 @@ def train_flow_matching(
         print("👾 Generating synthetic trajectories and contexts for verification...")
         num_samples = 1000
 
-        # Inputs: current state, target waypoint, and proprioceptive features
+        # Inputs: current state and proprioceptive features (no z_bar)
         z_t = torch.randn(num_samples, embed_dim)
-        z_bar = torch.randn(num_samples, embed_dim)
         p_t = torch.randn(num_samples, proprio_dim)
 
         # Targets: Expert action sequences
         expert_actions = torch.randn(num_samples, horizon, action_dim)
 
-        ds = TensorDataset(z_t, z_bar, p_t, expert_actions)
+        ds = TensorDataset(z_t, p_t, expert_actions)
         loader = DataLoader(ds, batch_size=batch_size, shuffle=True)
     else:
         if dataset is None:
@@ -64,15 +63,15 @@ def train_flow_matching(
     model.train()
     for epoch in range(epochs):
         epoch_loss = 0.0
-        for z_t_b, z_bar_b, p_t_b, a1_b in loader:
-            z_t_b, z_bar_b = z_t_b.to(device), z_bar_b.to(device)
+        for z_t_b, p_t_b, a1_b in loader:
+            z_t_b = z_t_b.to(device)
             p_t_b, a1_b = p_t_b.to(device), a1_b.to(device)
 
             # Sample random initial noise a0
             a0_b = torch.randn_like(a1_b)
 
             optimizer.zero_grad()
-            loss = matcher.compute_loss(model, a0_b, a1_b, z_t_b, z_bar_b, p_t_b)
+            loss = matcher.compute_loss(model, a0_b, a1_b, z_t_b, p_t_b)
             loss.backward()
             optimizer.step()
 

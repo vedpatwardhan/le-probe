@@ -54,24 +54,23 @@ class ConditionalFlowMatcher:
 
         return tau, a_tau, target_velocity
 
-    def compute_loss(self, velocity_net, a0, a1, z_t, z_bar, p_t):
+    def compute_loss(self, velocity_net, a0, a1, z_t, p_t):
         """
         Computes the flow matching MSE loss for a batch of trajectories.
         """
         tau, a_tau, target_velocity = self.sample_path(a0, a1)
-        pred_velocity = velocity_net(a_tau, tau, z_t, z_bar, p_t)
+        pred_velocity = velocity_net(a_tau, tau, z_t, p_t)
         return F.mse_loss(pred_velocity, target_velocity)
 
     @torch.no_grad()
     def integrate(
-        self, velocity_net, z_t, z_bar, p_t, dampening=None, steps=8, method="euler"
+        self, velocity_net, z_t, p_t, dampening=None, steps=8, method="euler"
     ):
         """
-        Solves the ODE da/dtau = v(a, tau | z_t, z_bar, p_t) from tau = 0 to tau = 1
+        Solves the ODE da/dtau = v(a, tau | z_t, p_t) from tau = 0 to tau = 1
         to generate the planned action trajectory.
 
         z_t: (B, embed_dim) - current state embedding
-        z_bar: (B, embed_dim) - subgoal target visual waypoint
         p_t: (B, proprio_dim) - current proprioceptive and torque capacities
         dampening: (B, action_dim) - dimension-wise dampening coefficients D(p_t) in [0, 1]
         steps: number of ODE integration steps
@@ -101,7 +100,7 @@ class ConditionalFlowMatcher:
                 tau_tensor = torch.full((B, 1), tau, device=device, dtype=dtype)
 
                 # Get raw model velocity
-                v = velocity_net(a, tau_tensor, z_t, z_bar, p_t)
+                v = velocity_net(a, tau_tensor, z_t, p_t)
 
                 # Apply time dampening step
                 a = a + dtau * (dampening_expanded * v)
@@ -112,7 +111,7 @@ class ConditionalFlowMatcher:
                 tau_tensor = torch.full((B, 1), tau, device=device, dtype=dtype)
 
                 # k1
-                v1 = velocity_net(a, tau_tensor, z_t, z_bar, p_t)
+                v1 = velocity_net(a, tau_tensor, z_t, p_t)
 
                 # k2
                 tau_half = tau + 0.5 * dtau
@@ -120,11 +119,11 @@ class ConditionalFlowMatcher:
                     (B, 1), tau_half, device=device, dtype=dtype
                 )
                 a_half1 = a + 0.5 * dtau * (dampening_expanded * v1)
-                v2 = velocity_net(a_half1, tau_half_tensor, z_t, z_bar, p_t)
+                v2 = velocity_net(a_half1, tau_half_tensor, z_t, p_t)
 
                 # k3
                 a_half2 = a + 0.5 * dtau * (dampening_expanded * v2)
-                v3 = velocity_net(a_half2, tau_half_tensor, z_t, z_bar, p_t)
+                v3 = velocity_net(a_half2, tau_half_tensor, z_t, p_t)
 
                 # k4
                 tau_next = tau + dtau
@@ -132,7 +131,7 @@ class ConditionalFlowMatcher:
                     (B, 1), tau_next, device=device, dtype=dtype
                 )
                 a_next = a + dtau * (dampening_expanded * v3)
-                v4 = velocity_net(a_next, tau_next_tensor, z_t, z_bar, p_t)
+                v4 = velocity_net(a_next, tau_next_tensor, z_t, p_t)
 
                 # Update using weighted average of velocities
                 a = a + (dtau / 6.0) * dampening_expanded * (

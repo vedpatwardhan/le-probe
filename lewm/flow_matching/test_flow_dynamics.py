@@ -31,7 +31,6 @@ def test_dynamics_reconstruction():
 
     # Generate test context
     z_t_test = torch.randn(10, embed_dim, device=device)
-    z_bar_test = torch.randn(10, embed_dim, device=device)
     p_t_test = torch.randn(10, proprio_dim, device=device)
 
     # Generate mock dampening (some joints free, some partially dampened)
@@ -42,19 +41,18 @@ def test_dynamics_reconstruction():
     model.eval()
     print("🏃 Integrating flow using Euler method (no dampening)...")
     a_euler = matcher.integrate(
-        model, z_t_test, z_bar_test, p_t_test, dampening=None, steps=10, method="euler"
+        model, z_t_test, p_t_test, dampening=None, steps=10, method="euler"
     )
 
     print("🏃 Integrating flow using RK4 method (no dampening)...")
     a_rk4 = matcher.integrate(
-        model, z_t_test, z_bar_test, p_t_test, dampening=None, steps=10, method="rk4"
+        model, z_t_test, p_t_test, dampening=None, steps=10, method="rk4"
     )
 
     print("🏃 Integrating flow using Euler method (WITH dampening)...")
     a_euler_dampened = matcher.integrate(
         model,
         z_t_test,
-        z_bar_test,
         p_t_test,
         dampening=dampening,
         steps=10,

@@ -54,9 +54,9 @@ class ActionVelocityNetwork(nn.Module):
             nn.SiLU(),
         )
 
-        # Context encoder/projection (projects z_t, z_bar, p_t, and time embedding into a single context token)
+        # Context encoder/projection (projects z_t, p_t, and time embedding into a single context token)
         self.context_projection = nn.Sequential(
-            nn.Linear(embed_dim * 2 + proprio_dim + time_embed_dim, hidden_dim),
+            nn.Linear(embed_dim + proprio_dim + time_embed_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.SiLU(),
         )
@@ -90,12 +90,11 @@ class ActionVelocityNetwork(nn.Module):
             nn.Linear(hidden_dim, action_dim),
         )
 
-    def forward(self, a_tau, tau, z_t, z_bar, p_t):
+    def forward(self, a_tau, tau, z_t, p_t):
         """
         a_tau: (B, horizon, action_dim)
         tau: (B, 1) or (B,) - virtual temporal flow step in [0, 1]
         z_t: (B, embed_dim) - current latent visual state representation
-        z_bar: (B, embed_dim) - target subgoal waypoint representation
         p_t: (B, proprio_dim) - proprioception and physics constraints (torques, etc.)
         """
         B = a_tau.shape[0]
@@ -111,7 +110,7 @@ class ActionVelocityNetwork(nn.Module):
         t_emb = self.time_embed(tau)  # (B, time_embed_dim)
 
         # 2. Concat and project context conditions to a single context token
-        context = torch.cat([z_t, z_bar, p_t, t_emb], dim=-1)
+        context = torch.cat([z_t, p_t, t_emb], dim=-1)
         context_token = self.context_projection(context).unsqueeze(
             1
         )  # (B, 1, hidden_dim)
