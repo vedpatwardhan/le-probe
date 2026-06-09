@@ -14,11 +14,20 @@ from omegaconf import OmegaConf, open_dict
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-# Add repo root to import cleanly
+# Add repo root and subdirectory paths to import cleanly (matches v1 trainer setup)
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
+
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+
+LEWM_DIR = os.path.join(REPO_ROOT, "lewm")
+if LEWM_DIR not in sys.path:
+    sys.path.append(LEWM_DIR)
+
+LEWM_ROOT = os.path.join(LEWM_DIR, "le_wm")
+if LEWM_ROOT not in sys.path:
+    sys.path.append(LEWM_ROOT)
 
 # Imports from baseline/v1
 from lewm.v2.model import MultiViewJEPAv2
@@ -30,6 +39,9 @@ from lewm.skeleton.encoder import patch_vit_for_skeleton
 from metrics import MetricsCallback
 from utils import get_img_preprocessor, ModelObjectCallBack
 from stable_pretraining.optim.lr_scheduler import LinearWarmupCosineAnnealingLR
+
+# Submodule direct imports
+from module import ARPredictor, SIGReg
 
 
 class SkeletonImportanceCallback(pl.Callback):
@@ -64,8 +76,38 @@ def waim_phase1_forward(self, batch, stage, cfg, log_metrics=True):
     ctx_len = cfg.wm.history_size
     n_preds = cfg.wm.num_preds
 
-    # A. Standard Visual Embedding and Prediction Rollout
+    # 1. GPU-Side Skeleton Processing (Vectorized Fallback)
+    if "skeletons_raw" in batch:
+        skels_raw = batch["skeletons_raw"]  # [B, T, V, 3, H_orig, W_orig]
+        B, T, V, C, H_orig, W_orig = skels_raw.shape
+        img_size = cfg.img_size
+
+        # A. Mean to 1-ch and Normalize
+        skel = skels_raw.float().mean(dim=3, keepdim=True) / 255.0  # [B, T, V, 1, H, W]
+
+        # B. Efficient Vectorized Resize (GPU)
+        skel = rearrange(skel, "b t v c h w -> (b t v) c h w")
+        skel = torch.nn.functional.interpolate(
+            skel, size=(img_size, img_size), mode="bilinear", align_corners=False
+        )
+        skel = rearrange(skel, "(b t v) c h w -> b t v c h w", b=B, t=T, v=V)
+
+        # C. Fuse into 4th channel
+        batch["pixels"] = torch.cat([batch["pixels"], skel], dim=3)
+
     pixels = batch["pixels"]
+
+    # 2. BiPS Augmentations (Skeletal Dropout & Structural Reliance)
+    if stage == "train":
+        rand = torch.rand(1).item()
+        # Skeletal Dropout (10%): Force reliance on geometry
+        if rand < 0.10:
+            pixels[:, :, :, :3, :, :] = 0.0
+        # Structural Reliance (5%): Force hallucination of interactions
+        elif rand < 0.15:
+            skeleton_mask = (pixels[:, :, :, 3:, :, :] > 0.1).float()
+            pixels[:, :, :, :3, :, :] *= 1.0 - skeleton_mask
+
     actions = torch.nan_to_num(batch["action"], 0.0)
     info = {"pixels": pixels, "action": actions}
     output = self.model.encode(info)
