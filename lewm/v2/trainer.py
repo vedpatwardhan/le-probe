@@ -10,24 +10,29 @@ from functools import partial
 from pathlib import Path
 import torch.nn.functional as F
 from einops import rearrange
+from huggingface_hub import hf_hub_download
 from omegaconf import OmegaConf, open_dict
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-# Add repo root and subdirectory paths to import cleanly (matches v1 trainer setup)
+# --- Path Stabilization (Robust Repo Root Targeting) ---
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
 
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+# Add the 'lewm' directory itself to allow direct imports like train_lewm.py does
 LEWM_DIR = os.path.join(REPO_ROOT, "lewm")
 if LEWM_DIR not in sys.path:
     sys.path.append(LEWM_DIR)
 
+# Also add the le_wm submodule for its internal direct imports (utils, module)
 LEWM_ROOT = os.path.join(LEWM_DIR, "le_wm")
 if LEWM_ROOT not in sys.path:
     sys.path.append(LEWM_ROOT)
+# -------------------------------------------------------
+
 
 # Imports from baseline/v1
 from lewm.v2.model import MultiViewJEPAv2
@@ -45,15 +50,26 @@ from module import ARPredictor, SIGReg
 
 
 class SkeletonImportanceCallback(pl.Callback):
-    """Logs the relative importance of the 4th channel (Skeleton) during training."""
+    """
+    Logs the relative importance of the 4th channel (Skeleton)
+    compared to the RGB channels during training.
+    """
 
     def on_train_epoch_end(self, trainer, pl_module):
+        # Target the patched projection layer
+        # path: model.encoder.backbone.embeddings.patch_embeddings.projection.weight
         try:
+            # Navigate to the backbone (handles LateFusion wrapper nesting)
             backbone = pl_module.model.encoder.backbone
             weight = backbone.embeddings.patch_embeddings.projection.weight
+
+            # Calculate Mean Absolute Weights for comparison
             rgb_weight_norm = weight[:, :3, :, :].abs().mean()
             skel_weight_norm = weight[:, 3:, :, :].abs().mean()
+
             importance_ratio = skel_weight_norm / (rgb_weight_norm + 1e-8)
+
+            # Log to WandB/Logger for real-time manifold monitoring
             pl_module.log_dict(
                 {
                     "skeleton/weight_norm": skel_weight_norm,
@@ -61,11 +77,46 @@ class SkeletonImportanceCallback(pl.Callback):
                 },
                 sync_dist=True,
             )
+
+            print(f"\n📊 [SKELETON AUDIT] Epoch {trainer.current_epoch}:")
+            print(f"   - Skeleton Weight Norm: {skel_weight_norm:.6f}")
+            print(f"   - Relative Importance:   {importance_ratio*100:.2f}% of RGB")
         except Exception:
             pass
 
 
-def waim_phase1_forward(self, batch, stage, cfg, log_metrics=True):
+def compute_subgoal_waypoint_loss(self, batch, cfg, emb):
+    """
+    Decoupled utility to compute visual waypoint alignment loss using pre-cached DINO anchors.
+    Returns the alignment loss and the projected DINO subgoal tensor z_bar.
+    """
+    phi_dino = batch["dino_anchor"]  # [B, T, V, 384]
+    B, T = phi_dino.shape[:2]
+    D = emb.shape[-1]
+
+    # Fuse DINO views to z_bar: [B, T, D]
+    z_bar = self.model.project_dino(phi_dino, aggregate_views=True)
+    if z_bar.dim() == 2:
+        z_bar = z_bar.view(B, T, D)
+
+    # Visual Alignment Loss: Align projected DINO subgoals with actual embeddings at checkpoint frames
+    is_checkpoint = batch.get("is_checkpoint")  # [B, T]
+    if is_checkpoint is not None:
+        is_checkpoint = is_checkpoint.to(emb.device)
+        if is_checkpoint.any():
+            z_bar_masked = z_bar[is_checkpoint]
+            emb_masked = emb[is_checkpoint]
+            # DETACH actual JEPA embeddings to ensure gradient flows only to the Dino Projector
+            align_loss = F.mse_loss(z_bar_masked, emb_masked.detach())
+        else:
+            align_loss = torch.zeros(1, device=emb.device, dtype=emb.dtype).squeeze()
+    else:
+        align_loss = torch.zeros(1, device=emb.device, dtype=emb.dtype).squeeze()
+
+    return align_loss, z_bar
+
+
+def phase1_forward(self, batch, stage, cfg, log_metrics=True):
     """
     WAIM Phase 1 forward pass:
     1. Computes J-EPA state embeddings and AR predictor rollouts.
@@ -135,25 +186,8 @@ def waim_phase1_forward(self, batch, stage, cfg, log_metrics=True):
 
     # C. DINO Subgoal Waypoint Projection and Visual Alignment
     if cfg.get("use_dino", False) and "dino_anchor" in batch:
-        phi_dino = batch["dino_anchor"]  # [B, T, V, 384]
-        B, T = phi_dino.shape[:2]
-
-        # Fuse DINO views to z_bar: [B, T, D]
-        z_bar = self.model.project_dino(phi_dino, aggregate_views=True)
-
-        # Visual Alignment Loss: Align projected DINO subgoals with actual embeddings at checkpoint frames
-        is_checkpoint = batch.get("is_checkpoint")  # [B, T]
-        if is_checkpoint is not None:
-            is_checkpoint = is_checkpoint.to(emb.device)
-            if is_checkpoint.any():
-                z_bar_masked = z_bar[is_checkpoint]
-                emb_masked = emb[is_checkpoint]
-                # DETACH actual JEPA embeddings to ensure gradient flows only to the Dino Projector
-                output["align_loss"] = F.mse_loss(z_bar_masked, emb_masked.detach())
-            else:
-                output["align_loss"] = torch.zeros_like(output["pred_loss"])
-        else:
-            output["align_loss"] = torch.zeros_like(output["pred_loss"])
+        align_loss, z_bar = compute_subgoal_waypoint_loss(self, batch, cfg, emb)
+        output["align_loss"] = align_loss
 
         # D. TD Learning for Goal-Conditioned Value Head V(z_t | z_bar)
         # We can perform TD over sequence steps [0, T-2] to predict V(z_t | z_bar) -> r_t + gamma * V(z_{t+1} | z_bar)
@@ -212,8 +246,12 @@ def waim_phase1_forward(self, batch, stage, cfg, log_metrics=True):
 
 @hydra.main(version_base=None, config_path="../config", config_name="lewm")
 def run(cfg):
-    print("🦾 Starting Le-Probe v2 (WAIM) Phase 1 Training Loop...")
+    print(
+        "🦾 Starting Le-Probe v2 (WAIM) Phase 1 Training Loop... "
+        f"[DINO Guidance: {cfg.get('use_dino', False)}]"
+    )
 
+    # 1. Seed Everything
     pl.seed_everything(cfg.get("seed", 3072), workers=True)
 
     repo_id = cfg.data.dataset.get("repo_id", "gr1_pickup_grasp")
@@ -237,15 +275,17 @@ def run(cfg):
         use_subset=cfg.get("use_subset", False),
     )
 
-    # Transform setup
+    # Apply Image Preprocessors & Standard Normalization (Z-Score)
     transforms = []
     with open_dict(cfg):
         for col in keys_to_load:
+            # A. Image Preprocessing (Includes skeleton keys if present)
             if any(k in col for k in ["pixels", "images", "world_"]):
                 transforms.append(
                     get_img_preprocessor(source=col, target=col, img_size=cfg.img_size)
                 )
             else:
+                # B. State/Action Z-Score Normalization
                 col_data = dataset.get_col_data(col)
                 data_tensor = torch.from_numpy(np.array(col_data))
                 data_tensor = data_tensor[~torch.isnan(data_tensor).any(dim=1)]
@@ -260,15 +300,23 @@ def run(cfg):
                         norm_fn, source=col, target=col
                     )
                 )
+
+                # C. DYNAMIC DIMENSION DETECTION
                 col_dim = dataset.get_dim(col)
                 clean_name = col.split(".")[-1]
                 setattr(cfg.wm, f"{clean_name}_dim", col_dim)
+                print(f"📊 Auto-detected {col} dimension ({clean_name}_dim): {col_dim}")
 
+    # Wrap standard transforms back into the Skeleton wrapper
     dataset.orig_transform = spt.data.transforms.Compose(*transforms)
     dataset.transform = dataset.tiled_transform_wrapper
+
+    # 💾 MEMORY SAFETY: Clear cache before forking workers (Match train_lewm.py parity)
     dataset.clear_cache()
 
-    # Model Initialization
+    # 2. Architecture Initialization
+    # We initialize as 3-channel first to allow loading pre-trained LeWM weights
+    print("🧬 Initializing Base 3-Channel Architecture...")
     encoder = get_multi_view_encoder(cfg)
     hidden_dim = encoder.config.hidden_size
     embed_dim = cfg.wm.get("embed_dim", hidden_dim)
@@ -295,20 +343,34 @@ def run(cfg):
     )
     world_model.reward_head = RewardPredictor(input_dim=embed_dim, hidden_dim=512)
 
-    # Cold start / warm start weight logic
+    # 3. 💾 WEIGHT INITIALIZATION (Resume vs. Cold Start)
     ckpt_path = cfg.get("ckpt_path")
-    if not ckpt_path:
-        # Load cube baseline
+
+    if ckpt_path:
+        # --- BRANCH 1: RESUME MODE ---
+        # We are resuming an existing 4-channel skeletal run.
+        ckpt_path = str(ckpt_path).strip("\"'")
+        print(f"🔄 RESUME MODE: Restoring full state from {ckpt_path}")
+        print("🦾 Architecture confirmed for 4-channel Resume.")
+    else:
+        # --- BRANCH 2: DEFAULT MODE ---
+        # Starting a new experiment from Epoch 0. Warm-start from baseline.
+        print("📥 Downloading official lewm-cube baseline from HF...")
         weights_path = hf_hub_download(
             repo_id="quentinll/lewm-cube", filename="weights.pt"
         )
         state_dict = torch.load(weights_path, map_location="cpu")
+
+        print("🧠 DEFAULT MODE: Transferring 3-channel manipulation baseline...")
         model_dict = world_model.state_dict()
         new_state_dict = {}
+        is_multi_view = cfg.get("use_multi_view", True)
+
         for k, v in state_dict.items():
             new_key = k.replace("model.", "") if k.startswith("model.") else k
+            # Map encoder.* -> encoder.backbone.* for Late Fusion parity
             if (
-                cfg.get("use_multi_view", True)
+                is_multi_view
                 and new_key.startswith("encoder.")
                 and not new_key.startswith("encoder.backbone.")
             ):
@@ -321,8 +383,16 @@ def run(cfg):
             if k in model_dict and v.shape == model_dict[k].shape
         }
         world_model.load_state_dict(filtered_dict, strict=False)
-        patch_vit_for_skeleton(encoder.backbone)
+        print(
+            f"✅ Baseline Loaded: Transferred {len(filtered_dict)} layers from lewm-cube."
+        )
 
+        # Patching is ONLY required for cold starts to move from 3ch to 4ch
+        print("🦴 PATCHING: Expanding backbone to 4 channels (BiPS)...")
+        patch_vit_for_skeleton(encoder.backbone)
+        print("🦾 Skeleton-Prior Encoder architecture ready (Warm-started).")
+
+    # 4. Training Module setup with BiPS Forward
     optimizers = {
         "model_opt": {
             "modules": "model",
@@ -346,7 +416,7 @@ def run(cfg):
     world_model_module = spt.Module(
         model=world_model,
         sigreg=SIGReg(**cfg.loss.sigreg.kwargs),
-        forward=partial(waim_phase1_forward, cfg=cfg),
+        forward=partial(phase1_forward, cfg=cfg),
         optim=optimizers,
     )
 
@@ -354,7 +424,7 @@ def run(cfg):
     if cfg.wandb.enabled:
         logger = WandbLogger(**cfg.wandb.config)
 
-    # Loader Split
+    # 5. Data Loading (90/10 Split Parity)
     rnd_gen = torch.Generator().manual_seed(cfg.seed)
     train_set, val_set = spt.data.random_split(
         dataset, lengths=[cfg.train_split, 1 - cfg.train_split], generator=rnd_gen
@@ -381,10 +451,11 @@ def run(cfg):
         persistent_workers=cfg.loader.num_workers > 0,
     )
 
-    run_id = cfg.get("subdir") or "gr1_skeleton_v2_official"
+    run_id = cfg.get("subdir") or "gr1_skeleton_official"
     run_dir = Path("./outputs", run_id).absolute()
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # 6. Lightning Launch
     trainer = pl.Trainer(
         **cfg.trainer,
         default_root_dir=run_dir,
@@ -396,7 +467,7 @@ def run(cfg):
             SkeletonImportanceCallback(),
             ModelObjectCallBack(
                 dirpath=run_dir,
-                filename="skeleton_lewm_v2",
+                filename="skeleton_lewm",
                 epoch_interval=cfg.get("save_interval", 1),
             ),
             MetricsCallback(log_every_n_steps=1),
@@ -407,6 +478,7 @@ def run(cfg):
         ],
     )
 
+    print(f"🚀 Launching BiPS Training Loop (Batch Size: {cfg.loader.batch_size})...")
     trainer.fit(
         model=world_model_module,
         train_dataloaders=train_loader,
