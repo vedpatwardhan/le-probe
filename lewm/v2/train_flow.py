@@ -151,6 +151,12 @@ class FlowMatchingTrainerV2(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         if self.synthetic:
             z_t_b, p_t_b, a1_raw = batch
+            J_v = torch.zeros(
+                p_t_b.shape[0], 3, 7, device=self.device, dtype=p_t_b.dtype
+            )
+            q_t_full = torch.zeros(
+                p_t_b.shape[0], 32, device=self.device, dtype=p_t_b.dtype
+            )
         else:
             # Extract real visual and proprioceptive context on-the-fly
             pixels = batch["pixels"]  # [B, T, V, 4, 224, 224]
@@ -178,8 +184,21 @@ class FlowMatchingTrainerV2(pl.LightningModule):
 
             p_t_b = torch.cat([q_t, dq_t, c, r, q_e, V, kp, kd], dim=-1)
 
+            # Extract Jacobian of the right arm end-effector
+            if "ellipsoid_jacobian" in batch:
+                J_v = batch["ellipsoid_jacobian"][:, 0]  # (B, 3, 7)
+            else:
+                J_v = torch.zeros(
+                    batch["observation.state"].shape[0],
+                    3,
+                    7,
+                    device=self.device,
+                    dtype=p_t_b.dtype,
+                )
+
             # Target Actions sequence over the horizon
             a1_raw = batch["action"][:, : self.hparams.horizon]  # [B, H, 32]
+            q_t_full = batch["observation.state"][:, 0]  # (B, 32)
 
         N_scales = (
             10  # Number of random reachability map scales to sample per data point
@@ -187,6 +206,8 @@ class FlowMatchingTrainerV2(pl.LightningModule):
         z_t_b = z_t_b.repeat_interleave(N_scales, dim=0)
         p_t_b = p_t_b.repeat_interleave(N_scales, dim=0)
         a1_raw = a1_raw.repeat_interleave(N_scales, dim=0)
+        J_v = J_v.repeat_interleave(N_scales, dim=0)
+        q_t_full_repeated = q_t_full.repeat_interleave(N_scales, dim=0)
 
         # Sample random scale factors S ~ Uniform(0.2, 1.0)
         S = (
@@ -204,23 +225,19 @@ class FlowMatchingTrainerV2(pl.LightningModule):
         p_t_b[:, 17:20] = r_scaled
 
         # 2. Transform targets to Relative Delta Actions (a_k - q_t)
-        q_t_b = p_t_b[:, 0:7]  # (B, 7)
-        q_t_padded = torch.zeros(
-            q_t_b.shape[0],
-            self.hparams.action_dim,
-            device=self.device,
-            dtype=q_t_b.dtype,
-        )
-        q_t_padded[:, :7] = q_t_b
-        a1_b = a1_raw - q_t_padded.unsqueeze(1)
+        a1_b = a1_raw - q_t_full_repeated.unsqueeze(1)
 
         # 3. Project target action velocities to stay inside the scaled ellipsoid
         R = quaternion_to_matrix(q_e)  # (B, 3, 3)
-        r_scaled_safe = torch.clamp(r_scaled, min=1e-5)
+        dt = 0.1
+        r_scaled_safe = torch.clamp(r_scaled * dt, min=1e-5)
 
         for k in range(self.hparams.horizon):
-            v_k = a1_b[:, k, :3]
-            delta_v = v_k - c
+            dq_arm = a1_b[:, k, 16:23]  # (B, 7)
+            # Map right-arm joint space deltas to end-effector workspace: v_ee = J_v * dq_arm
+            v_ee = torch.bmm(J_v, dq_arm.unsqueeze(-1)).squeeze(-1)  # (B, 3)
+
+            delta_v = v_ee - c
             delta_v_local = torch.bmm(
                 R.transpose(-1, -2), delta_v.unsqueeze(-1)
             ).squeeze(-1)
@@ -237,7 +254,17 @@ class FlowMatchingTrainerV2(pl.LightningModule):
                 ).unsqueeze(-1)
                 delta_v_local = delta_v_local * proj_factor
                 delta_v_proj = torch.bmm(R, delta_v_local.unsqueeze(-1)).squeeze(-1)
-                a1_b[:, k, :3] = c + delta_v_proj
+                v_ee_proj = c + delta_v_proj
+
+                # Map back to joint space delta via pseudo-inverse: dq_proj = J_v_pinv * v_ee_proj
+                J_v_pinv = torch.linalg.pinv(J_v)  # (B, 7, 3)
+                dq_arm_proj = torch.bmm(J_v_pinv, v_ee_proj.unsqueeze(-1)).squeeze(
+                    -1
+                )  # (B, 7)
+
+                a1_b[:, k, 16:23] = torch.where(
+                    scale_mask.unsqueeze(-1), dq_arm_proj, dq_arm
+                )
 
         # 4. Stochastic target perturbation (Smooth GP Action Augmentation)
         a1_b = add_smooth_trajectory_noise(a1_b, scale=0.02)
@@ -252,6 +279,7 @@ class FlowMatchingTrainerV2(pl.LightningModule):
             a1=a1_b,
             z_t=z_t_b,
             p_t=p_t_b,
+            J_v=J_v,
             lambda_c=self.hparams.lambda_c,
         )
 

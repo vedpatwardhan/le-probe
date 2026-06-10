@@ -123,6 +123,7 @@ class SkeletonDataPluginV2(SkeletonDataPlugin):
             torch.from_numpy(r),
             torch.from_numpy(q_e),
             torch.from_numpy(V_vol),
+            torch.from_numpy(J_arm.astype(np.float32)),
         )
 
     def __getitem__(self, idx):
@@ -164,21 +165,30 @@ class SkeletonDataPluginV2(SkeletonDataPlugin):
             batch["ellipsoid_volume"] = self._last_loaded_data["ellipsoid_volume"][
                 clamped_steps
             ]
+            if "ellipsoid_jacobian" in self._last_loaded_data:
+                batch["ellipsoid_jacobian"] = self._last_loaded_data[
+                    "ellipsoid_jacobian"
+                ][clamped_steps]
+            else:
+                # Fallback to computing J_v on the fly or identity
+                batch["ellipsoid_jacobian"] = torch.zeros(self.num_steps, 3, 7)
         elif "observation.state" in batch:
             # Fallback to lazy on-the-fly SVD calculations if cache is missing these keys
             states = batch["observation.state"]  # [T, 64] or [T, 32]
-            c_list, r_list, qe_list, v_list = [], [], [], []
+            c_list, r_list, qe_list, v_list, J_list = [], [], [], [], []
             for t in range(B_steps):
-                c, r, q_e, V_vol = self.compute_ellipsoid(states[t])
+                c, r, q_e, V_vol, J_arm = self.compute_ellipsoid(states[t])
                 c_list.append(c)
                 r_list.append(r)
                 qe_list.append(q_e)
                 v_list.append(V_vol)
+                J_list.append(J_arm)
 
             batch["ellipsoid_center"] = torch.stack(c_list, dim=0)  # [T, 3]
             batch["ellipsoid_radii"] = torch.stack(r_list, dim=0)  # [T, 3]
             batch["ellipsoid_quat"] = torch.stack(qe_list, dim=0)  # [T, 4]
             batch["ellipsoid_volume"] = torch.stack(v_list, dim=0)  # [T, 1]
+            batch["ellipsoid_jacobian"] = torch.stack(J_list, dim=0)  # [T, 3, 7]
 
         return batch
 

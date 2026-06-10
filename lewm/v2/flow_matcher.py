@@ -83,15 +83,18 @@ class ConditionalFlowMatcher:
         r = p_t[:, 17:20]  # Semi-axes radii (B, 3)
         q_e = p_t[:, 20:24]  # Unit quaternion (B, 4)
 
-        # Avoid division by zero
-        r = torch.clamp(r, min=1e-5)
+        # Scale velocity limits to position displacement limits over 1 control step (dt = 0.1s)
+        dt = 0.1
+        r = torch.clamp(r * dt, min=1e-5)
 
         # We look at the first prediction step (k=0) for boundary compliance
         v_pred_first = pred_velocity[:, 0, :]  # (B, action_dim)
 
         # Project joint space velocities to end-effector workspace: v_ee = J_v * v_pred
         if J_v is not None:
-            v_ee = torch.bmm(J_v, v_pred_first.unsqueeze(-1)).squeeze(-1)  # (B, 3)
+            # J_v is (B, 3, 7). Extract right arm joints: 16 to 22 (7 DoF)
+            v_pred_right = v_pred_first[:, 16:23]  # (B, 7)
+            v_ee = torch.bmm(J_v, v_pred_right.unsqueeze(-1)).squeeze(-1)  # (B, 3)
         else:
             # Placeholder/Identity projection mapping for action dims to 3D translational
             v_ee = v_pred_first[:, :3]

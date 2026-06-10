@@ -85,6 +85,7 @@ def compute_ellipsoid_analytically(model, data, dof_indices, ee_id, q_state):
         torch.from_numpy(r),
         torch.from_numpy(q_e),
         torch.from_numpy(V_vol),
+        torch.from_numpy(J_arm.astype(np.float32)),
     )
 
 
@@ -160,20 +161,22 @@ def main(repo_id="gr1_pickup_grasp"):
             action_tensor = torch.from_numpy(df[action_cols].values).float()
 
         # Compute reachability ellipsoids for all 32 steps in the episode
-        c_list, r_list, qe_list, v_list = [], [], [], []
+        c_list, r_list, qe_list, v_list, J_list = [], [], [], [], []
         for t in range(32):
-            c, r, q_e, V_vol = compute_ellipsoid_analytically(
+            c, r, q_e, V_vol, J_arm = compute_ellipsoid_analytically(
                 model, data, dof_indices, ee_id, state_tensor[t]
             )
             c_list.append(c)
             r_list.append(r)
             qe_list.append(q_e)
             v_list.append(V_vol)
+            J_list.append(J_arm)
 
         ellipsoid_center = torch.stack(c_list, dim=0)
         ellipsoid_radii = torch.stack(r_list, dim=0)
         ellipsoid_quat = torch.stack(qe_list, dim=0)
         ellipsoid_volume = torch.stack(v_list, dim=0)
+        ellipsoid_jacobian = torch.stack(J_list, dim=0)
 
         # Load video frames
         episode_pixels = []
@@ -252,6 +255,7 @@ def main(repo_id="gr1_pickup_grasp"):
             "ellipsoid_radii": ellipsoid_radii,
             "ellipsoid_quat": ellipsoid_quat,
             "ellipsoid_volume": ellipsoid_volume,
+            "ellipsoid_jacobian": ellipsoid_jacobian,
         }
 
         out_path = cache_dir / f"episode_{ep:03d}_fused.pt"
