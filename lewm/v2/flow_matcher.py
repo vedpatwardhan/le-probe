@@ -124,7 +124,7 @@ class ConditionalFlowMatcher:
         boundary_loss = self.compute_boundary_loss(pred_velocity, p_t, J_v)
 
         total_loss = cfm_loss + lambda_c * boundary_loss
-        return total_loss
+        return total_loss, cfm_loss, boundary_loss
 
     @torch.no_grad()
     def integrate(
