@@ -78,10 +78,14 @@ class FlowMatchingTrainerV2(pl.LightningModule):
                 f"🧬 Loading Phase 1 visual encoder from checkpoint: {self.ckpt_path}"
             )
 
-            # Mocks to allow instantiation without complex hydra configs
             class MockConfig:
                 def __init__(self):
                     self.img_size = 224
+                    self.encoder_scale = "tiny"
+                    self.patch_size = 16
+                    self.use_multi_view = True
+                    self.num_views = 5
+                    self.fusion_type = "linear"
                     self.predictor = {
                         "hidden_dim": 256,
                         "num_layers": 3,
@@ -96,6 +100,9 @@ class FlowMatchingTrainerV2(pl.LightningModule):
                         "action_dim": 32,
                         "embed_dim": 192,
                     }
+
+                def get(self, key, default=None):
+                    return getattr(self, key, default)
 
             # Load standard pre-trained encoder skeleton model and restore weights
             checkpoint = torch.load(self.ckpt_path, map_location="cpu")
