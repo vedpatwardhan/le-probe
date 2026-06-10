@@ -291,6 +291,7 @@ def train_flow_matching_v2(
     lambda_c=0.1,  # Weight on safe ellipsoid boundary constraint
     wandb_project=None,
     wandb_entity=None,
+    subdir=None,
 ):
     """
     Trains ActionVelocityNetwork using v2 Conditional Flow Matching (CFM) wrapped in PyTorch Lightning.
@@ -353,11 +354,15 @@ def train_flow_matching_v2(
         logger = WandbLogger(
             project=wandb_project,
             entity=wandb_entity,
-            name=f"flow_matching_{dataset_name}_lambda_{lambda_c}",
+            name=(
+                subdir if subdir else f"flow_matching_{dataset_name}_lambda_{lambda_c}"
+            ),
         )
 
     # Configure checkpoint callback
-    run_dir = f"./outputs/flow_matching_{dataset_name}"
+    run_dir = (
+        f"./outputs/{subdir}" if subdir else f"./outputs/flow_matching_{dataset_name}"
+    )
     checkpoint_callback = ModelCheckpoint(
         dirpath=run_dir + "/checkpoints",
         filename="flow_matching-{epoch:02d}-{train/loss:.4f}",
@@ -410,6 +415,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--wandb_entity", type=str, default=None, help="Wandb Entity name"
     )
+    parser.add_argument(
+        "--subdir", type=str, default=None, help="Output subdirectory name"
+    )
     args = parser.parse_args()
 
     train_flow_matching_v2(
@@ -424,4 +432,5 @@ if __name__ == "__main__":
         lambda_c=args.lambda_c,
         wandb_project=args.wandb_project,
         wandb_entity=args.wandb_entity,
+        subdir=args.subdir,
     )
