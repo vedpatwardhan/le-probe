@@ -256,7 +256,7 @@ class FlowMatchingTrainerV2(pl.LightningModule):
         )
 
         self.log(
-            "train/loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+            "train/loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True
         )
         self.log(
             "train/cfm_loss",
