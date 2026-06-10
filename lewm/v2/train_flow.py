@@ -1,9 +1,10 @@
 import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from lewm.v2.velocity_net import ActionVelocityNetwork
-from lewm.v2.flow_matcher import ConditionalFlowMatcher
+from lewm.v2.flow_matcher import ConditionalFlowMatcher, quaternion_to_matrix
 
 
 def add_smooth_trajectory_noise(a1, scale=0.05):
@@ -91,10 +92,7 @@ def train_flow_matching_v2(
         f"🚀 Training Flow Matching | Epochs: {epochs} | Device: {device} | Boundary Lambda: {lambda_c}"
     )
 
-    from lewm.v2.flow_matcher import quaternion_to_matrix
-
     model.train()
-    import torch.nn.functional as F
 
     N_scales = 10  # Number of random reachability map scales to sample per data point
 

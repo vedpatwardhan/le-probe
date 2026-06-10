@@ -1,5 +1,8 @@
 import torch
 import numpy as np
+import mujoco
+from gr1_config import SCENE_PATH
+from gr1_protocol import StandardScaler
 from lewm.skeleton.data import SkeletonDataPlugin
 
 
@@ -17,33 +20,10 @@ class SkeletonDataPluginV2(SkeletonDataPlugin):
         self.default_kp = torch.ones(7) * 100.0  # Stiffness
         self.default_kd = torch.ones(7) * 10.0  # Damping
 
-    def __getitem__(self, idx):
-        batch = super().__getitem__(idx)
-
-        # 1. Inject controller gains telemetry into the batch
-        # Extract or default Kp, Kd
-        B_steps = self.num_steps
-        kp = self.default_kp.unsqueeze(0).repeat(B_steps, 1)  # [T, 7]
-        kd = self.default_kd.unsqueeze(0).repeat(B_steps, 1)  # [T, 7]
-
-        # In a real setup, we would try to retrieve observation.controller_gains from H5/Parquet:
-        if "observation.controller_gains" in batch:
-            gains = batch["observation.controller_gains"]
-            # Split into Kp and Kd
-            kp = gains[..., :7]
-            kd = gains[..., 7:]
-
-        batch["kp"] = kp
-        batch["kd"] = kd
-
-        return batch
-
     def _init_mujoco(self):
         """Lazy initialization of MuJoCo engine to keep dataloader thread-safe and process-safe."""
         if hasattr(self, "model"):
             return
-        import mujoco
-        from gr1_config import SCENE_PATH
 
         # Load model and initialize data
         self.model = mujoco.MjModel.from_xml_path(SCENE_PATH)
@@ -76,8 +56,6 @@ class SkeletonDataPluginV2(SkeletonDataPlugin):
         Uses fast analytical SVD of the translational Jacobian.
         """
         self._init_mujoco()
-        import mujoco
-        from gr1_protocol import StandardScaler
 
         # 1. Unscale normalized state [-1, 1] back to raw physical radians
         scaler = StandardScaler()
@@ -163,9 +141,31 @@ class SkeletonDataPluginV2(SkeletonDataPlugin):
         batch["kp"] = kp
         batch["kd"] = kd
 
-        # 2. Lazy ellipsoid calculation for the sequence (if queried/needed)
-        # We only compute it on-the-fly to maintain 100% Phase 1 compatibility
-        if "observation.state" in batch:
+        # 2. Check if ellipsoid parameters are already pre-cached to bypass on-the-fly SVD
+        if (
+            self.use_tensor_cache
+            and self._last_loaded_data is not None
+            and "ellipsoid_center" in self._last_loaded_data
+        ):
+            frame_idx = int(self.frame_indices[idx])
+            seq_steps = torch.arange(frame_idx, frame_idx + self.num_steps)
+            max_frame_idx = self._last_loaded_data["pixels"].shape[0] - 1
+            clamped_steps = torch.clamp(seq_steps, 0, max_frame_idx)
+
+            batch["ellipsoid_center"] = self._last_loaded_data["ellipsoid_center"][
+                clamped_steps
+            ]
+            batch["ellipsoid_radii"] = self._last_loaded_data["ellipsoid_radii"][
+                clamped_steps
+            ]
+            batch["ellipsoid_quat"] = self._last_loaded_data["ellipsoid_quat"][
+                clamped_steps
+            ]
+            batch["ellipsoid_volume"] = self._last_loaded_data["ellipsoid_volume"][
+                clamped_steps
+            ]
+        elif "observation.state" in batch:
+            # Fallback to lazy on-the-fly SVD calculations if cache is missing these keys
             states = batch["observation.state"]  # [T, 64] or [T, 32]
             c_list, r_list, qe_list, v_list = [], [], [], []
             for t in range(B_steps):
