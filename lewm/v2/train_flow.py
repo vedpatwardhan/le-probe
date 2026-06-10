@@ -124,7 +124,14 @@ class FlowMatchingTrainerV2(pl.LightningModule):
             self.model_phase1 = MultiViewJEPAv2(
                 encoder=encoder,
                 predictor=ARPredictor(
-                    num_frames=3, input_dim=192, hidden_dim=256, output_dim=256
+                    num_frames=3,
+                    input_dim=192,
+                    hidden_dim=256,
+                    output_dim=256,
+                    depth=3,
+                    heads=4,
+                    mlp_dim=512,
+                    dropout=0.1
                 ),
                 action_encoder=GR1Embedder(input_dim=32, emb_dim=192),
                 projector=GR1MLP(input_dim=256, output_dim=192),
