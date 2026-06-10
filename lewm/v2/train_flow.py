@@ -15,7 +15,8 @@ from lewm.v2.flow_matcher import ConditionalFlowMatcher, quaternion_to_matrix
 from lewm.v2.data import SkeletonDataPluginV2
 from lewm.v2.trainer import MultiViewJEPAv2
 from lewm.multi_view_encoder import get_multi_view_encoder
-from lewm.gr1_modules import ARPredictor, GR1Embedder, GR1MLP
+from lewm.gr1_modules import GR1Embedder, GR1MLP
+from lewm.le_wm.module import ARPredictor
 from lewm.skeleton.encoder import patch_vit_for_skeleton
 from gr1_config import SCENE_PATH
 
