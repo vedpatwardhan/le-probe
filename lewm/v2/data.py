@@ -38,6 +38,150 @@ class SkeletonDataPluginV2(SkeletonDataPlugin):
 
         return batch
 
+    def _init_mujoco(self):
+        """Lazy initialization of MuJoCo engine to keep dataloader thread-safe and process-safe."""
+        if hasattr(self, "model"):
+            return
+        import mujoco
+        from gr1_config import SCENE_PATH
+
+        # Load model and initialize data
+        self.model = mujoco.MjModel.from_xml_path(SCENE_PATH)
+        self.data = mujoco.MjData(self.model)
+
+        # Right Arm Joints
+        self.RIGHT_ARM_JOINTS = [
+            "right_shoulder_pitch_joint",
+            "right_shoulder_roll_joint",
+            "right_shoulder_yaw_joint",
+            "right_elbow_pitch_joint",
+            "right_wrist_yaw_joint",
+            "right_wrist_roll_joint",
+            "right_wrist_pitch_joint",
+        ]
+        self.ee_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_BODY, "R_index_tip_link"
+        )
+
+        # Gather DOF indices in MuJoCo qpos/qvel layout
+        self.dof_indices = []
+        for name in self.RIGHT_ARM_JOINTS:
+            j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if j_id != -1:
+                self.dof_indices.append(self.model.jnt_dofadr[j_id])
+
+    def compute_ellipsoid(self, q_state):
+        """
+        Computes the Chebyshev/Manipulability ellipsoid parameters from normalized joint states.
+        Uses fast analytical SVD of the translational Jacobian.
+        """
+        self._init_mujoco()
+        import mujoco
+        from gr1_protocol import StandardScaler
+
+        # 1. Unscale normalized state [-1, 1] back to raw physical radians
+        scaler = StandardScaler()
+        raw_state = scaler.unscale_action(
+            q_state.numpy() if torch.is_tensor(q_state) else q_state
+        )
+
+        # 2. Extract right arm joint positions (indices 16 to 22 in wire protocol)
+        q_arm = raw_state[16:23]
+
+        # 3. Set robot joint angles and run forward kinematics
+        self.data.qpos[self.dof_indices] = q_arm
+        mujoco.mj_forward(self.model, self.data)
+
+        # 4. Extract end-effector translational Jacobian (3 x 7)
+        ee_pos = self.data.xpos[self.ee_id]
+        jacp = np.zeros((3, self.model.nv))
+        jacr = np.zeros((3, self.model.nv))
+        mujoco.mj_jac(self.model, self.data, jacp, jacr, ee_pos, self.ee_id)
+        J_arm = jacp[:, self.dof_indices]
+
+        # 5. Eigendecomposition/SVD of J_arm to extract principal axes
+        U, S, Vt = np.linalg.svd(J_arm)
+
+        # Center c: (0, 0, 0) in velocity space
+        c = np.zeros(3, dtype=np.float32)
+
+        # Radii r: scaled by max motor velocity limit (0.2 rad/s)
+        r = (0.2 * S).astype(np.float32)
+
+        # Rotation R = U. Convert U matrix to unit quaternion q_e
+        R = U
+        # Quaternion conversion
+        tr = R[0, 0] + R[1, 1] + R[2, 2]
+        if tr > 0:
+            S_val = np.sqrt(tr + 1.0) * 2.0
+            qw = 0.25 * S_val
+            qx = (R[2, 1] - R[1, 2]) / S_val
+            qy = (R[0, 2] - R[2, 0]) / S_val
+            qz = (R[1, 0] - R[0, 1]) / S_val
+        elif (R[0, 0] > R[1, 1]) and (R[0, 0] > R[2, 2]):
+            S_val = np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2.0
+            qw = (R[2, 1] - R[1, 2]) / S_val
+            qx = 0.25 * S_val
+            qy = (R[0, 1] + R[1, 0]) / S_val
+            qz = (R[0, 2] + R[2, 0]) / S_val
+        elif R[1, 1] > R[2, 2]:
+            S_val = np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2.0
+            qw = (R[0, 2] - R[2, 0]) / S_val
+            qx = (R[0, 1] + R[1, 0]) / S_val
+            qy = 0.25 * S_val
+            qz = (R[1, 2] + R[2, 1]) / S_val
+        else:
+            S_val = np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2.0
+            qw = (R[1, 0] - R[0, 1]) / S_val
+            qx = (R[0, 2] + R[2, 0]) / S_val
+            qy = (R[1, 2] + R[2, 1]) / S_val
+            qz = 0.25 * S_val
+
+        q_e = np.array([qw, qx, qy, qz], dtype=np.float32)
+        V_vol = np.array([4.0 / 3.0 * np.pi * r[0] * r[1] * r[2]], dtype=np.float32)
+
+        return (
+            torch.from_numpy(c),
+            torch.from_numpy(r),
+            torch.from_numpy(q_e),
+            torch.from_numpy(V_vol),
+        )
+
+    def __getitem__(self, idx):
+        batch = super().__getitem__(idx)
+
+        # 1. Inject controller gains telemetry into the batch
+        B_steps = self.num_steps
+        kp = self.default_kp.unsqueeze(0).repeat(B_steps, 1)  # [T, 7]
+        kd = self.default_kd.unsqueeze(0).repeat(B_steps, 1)  # [T, 7]
+
+        if "observation.controller_gains" in batch:
+            gains = batch["observation.controller_gains"]
+            kp = gains[..., :7]
+            kd = gains[..., 7:]
+
+        batch["kp"] = kp
+        batch["kd"] = kd
+
+        # 2. Lazy ellipsoid calculation for the sequence (if queried/needed)
+        # We only compute it on-the-fly to maintain 100% Phase 1 compatibility
+        if "observation.state" in batch:
+            states = batch["observation.state"]  # [T, 64] or [T, 32]
+            c_list, r_list, qe_list, v_list = [], [], [], []
+            for t in range(B_steps):
+                c, r, q_e, V_vol = self.compute_ellipsoid(states[t])
+                c_list.append(c)
+                r_list.append(r)
+                qe_list.append(q_e)
+                v_list.append(V_vol)
+
+            batch["ellipsoid_center"] = torch.stack(c_list, dim=0)  # [T, 3]
+            batch["ellipsoid_radii"] = torch.stack(r_list, dim=0)  # [T, 3]
+            batch["ellipsoid_quat"] = torch.stack(qe_list, dim=0)  # [T, 4]
+            batch["ellipsoid_volume"] = torch.stack(v_list, dim=0)  # [T, 1]
+
+        return batch
+
     def retrieve_hindsight_target(
         self, z_t, q_t, dq_t, successful_database, weights=(1.0, 1.0, 1.0)
     ):
@@ -59,16 +203,11 @@ class SkeletonDataPluginV2(SkeletonDataPlugin):
         q_t = torch.as_tensor(q_t)
         dq_t = torch.as_tensor(dq_t)
 
-        # successful_database contains keys: 'z', 'q', 'dq', 'actions'
-        # z: [N_success, D]
-        # q: [N_success, 7]
-        # dq: [N_success, 7]
         db_z = torch.as_tensor(successful_database["z"], device=z_t.device)
         db_q = torch.as_tensor(successful_database["q"], device=q_t.device)
         db_dq = torch.as_tensor(successful_database["dq"], device=dq_t.device)
 
         # Compute batched composite distance
-        # Dist = w_z * ||z_t - z^*||^2 + w_q * ||q_t - q^*||^2 + w_dq * ||dq_t - dq^*||^2
         dist_z = torch.sum((db_z - z_t.unsqueeze(0)) ** 2, dim=-1)
         dist_q = torch.sum((db_q - q_t.unsqueeze(0)) ** 2, dim=-1)
         dist_dq = torch.sum((db_dq - dq_t.unsqueeze(0)) ** 2, dim=-1)
