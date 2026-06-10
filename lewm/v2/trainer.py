@@ -370,7 +370,9 @@ def run(cfg):
         # We are resuming an existing 4-channel skeletal run.
         ckpt_path = str(ckpt_path).strip("\"'")
         print(f"🔄 RESUME MODE: Restoring full state from {ckpt_path}")
-        print("🦾 Architecture confirmed for 4-channel Resume.")
+        print("🦴 PATCHING: Expanding backbone to 4 channels (BiPS)...")
+        patch_vit_for_skeleton(encoder.backbone)
+        print("🦾 Architecture confirmed and patched for 4-channel Resume.")
     else:
         # --- BRANCH 2: DEFAULT MODE ---
         # Starting a new experiment from Epoch 0. Warm-start from baseline.
