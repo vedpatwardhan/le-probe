@@ -82,15 +82,15 @@ class FlowMatchingTrainerV2(pl.LightningModule):
                 def __init__(self):
                     self.img_size = 224
                     self.encoder_scale = "tiny"
-                    self.patch_size = 16
+                    self.patch_size = 14
                     self.use_multi_view = True
                     self.num_views = 5
                     self.fusion_type = "linear"
                     self.predictor = {
-                        "hidden_dim": 256,
+                        "hidden_dim": 192,
                         "num_layers": 3,
-                        "nhead": 4,
-                        "dim_feedforward": 512,
+                        "nhead": 16,
+                        "dim_feedforward": 2048,
                         "dropout": 0.1,
                     }
                     self.optimizer = {"lr": 1e-4, "weight_decay": 1e-4}
@@ -126,16 +126,16 @@ class FlowMatchingTrainerV2(pl.LightningModule):
                 predictor=ARPredictor(
                     num_frames=3,
                     input_dim=192,
-                    hidden_dim=256,
-                    output_dim=256,
+                    hidden_dim=192,
+                    output_dim=192,
                     depth=3,
-                    heads=4,
-                    mlp_dim=512,
-                    dropout=0.1
+                    heads=16,
+                    mlp_dim=2048,
+                    dropout=0.1,
                 ),
                 action_encoder=GR1Embedder(input_dim=32, emb_dim=192),
-                projector=GR1MLP(input_dim=256, output_dim=192),
-                pred_proj=GR1MLP(input_dim=256, output_dim=192),
+                projector=GR1MLP(input_dim=192, output_dim=192),
+                pred_proj=GR1MLP(input_dim=192, output_dim=192),
                 use_dino=True,
                 fusion_type="linear",
                 num_views=5,
