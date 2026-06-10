@@ -306,6 +306,7 @@ def train_flow_matching_v2(
     wandb_project=None,
     wandb_entity=None,
     subdir=None,
+    num_workers=4,
 ):
     """
     Trains ActionVelocityNetwork using v2 Conditional Flow Matching (CFM) wrapped in PyTorch Lightning.
@@ -346,7 +347,11 @@ def train_flow_matching_v2(
             use_subset=True,
         )
         loader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True
+            dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            drop_last=True,
         )
 
     # Initialize PyTorch Lightning module
@@ -432,6 +437,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--subdir", type=str, default=None, help="Output subdirectory name"
     )
+    parser.add_argument(
+        "--num_workers", type=int, default=4, help="DataLoader worker processes"
+    )
     args = parser.parse_args()
 
     train_flow_matching_v2(
@@ -447,4 +455,5 @@ if __name__ == "__main__":
         wandb_project=args.wandb_project,
         wandb_entity=args.wandb_entity,
         subdir=args.subdir,
+        num_workers=args.num_workers,
     )
