@@ -3,8 +3,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
+import stable_pretraining as spt
+import argparse
+
 from lewm.v2.velocity_net import ActionVelocityNetwork
 from lewm.v2.flow_matcher import ConditionalFlowMatcher, quaternion_to_matrix
+from lewm.v2.data import SkeletonDataPluginV2
+from lewm.v2.trainer import MultiViewJEPAv2
+from lewm.multi_view_encoder import get_multi_view_encoder
+from lewm.gr1_modules import ARPredictor, GR1Embedder, GR1MLP
+from gr1_config import SCENE_PATH
 
 
 def add_smooth_trajectory_noise(a1, scale=0.05):
@@ -38,7 +46,8 @@ def train_flow_matching_v2(
     proprio_dim=39,  # Size matches Kp/Kd and ellipsoid vectors
     device="cpu",
     synthetic=True,
-    dataset=None,
+    dataset_name="gr1_pickup_grasp_2k",
+    ckpt_path=None,
     lambda_c=0.1,  # Weight on safe ellipsoid boundary constraint
 ):
     """
@@ -58,6 +67,8 @@ def train_flow_matching_v2(
     matcher = ConditionalFlowMatcher(sigma=0.0)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
 
+    model_phase1 = None
+
     if synthetic:
         print(
             "👾 Generating synthetic trajectories and context with v2 dims (39 proprio)..."
@@ -68,8 +79,6 @@ def train_flow_matching_v2(
         z_t = torch.randn(num_samples, embed_dim)
 
         # Proprioception p_t: (B, proprio_dim)
-        # We structure p_t specifically:
-        # [q(7), dq(7), c_ell(3), r_ell(3), q_e(4), V_ell(1), Kp(7), Kd(7)] -> total 39
         p_t = torch.randn(num_samples, proprio_dim)
         # Ensure radii are strictly positive
         p_t[:, 17:20] = torch.clamp(p_t[:, 17:20].abs(), min=0.1)
@@ -82,11 +91,95 @@ def train_flow_matching_v2(
         ds = TensorDataset(z_t, p_t, expert_actions)
         loader = DataLoader(ds, batch_size=batch_size, shuffle=True)
     else:
-        if dataset is None:
+        print(f"📦 Loading real dataset: {dataset_name}...")
+
+        keys_to_load = [
+            "observation.state",
+            "action",
+            "world_center",
+            "world_left",
+            "world_right",
+            "world_top",
+            "world_wrist",
+        ]
+
+        # Instantiate dataset (will load the cached data including pre-computed ellipsoids)
+        dataset = SkeletonDataPluginV2(
+            repo_id=dataset_name,
+            keys_to_load=keys_to_load,
+            num_steps=horizon + 1,  # Need enough steps for planning horizon
+            use_virtual_actions=False,
+            use_multi_view=True,
+            img_size=224,
+            use_subset=True,
+        )
+
+        loader = DataLoader(
+            dataset, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True
+        )
+
+        # Load Phase 1 J-EPA model for visual embedding extraction
+        if ckpt_path is None:
             raise ValueError(
-                "Non-synthetic training requested, but no dataset was provided."
+                "Real dataset training requested, but no Phase 1 checkpoint path (--ckpt_path) was provided."
             )
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+        print(f"🧬 Loading Phase 1 visual encoder from checkpoint: {ckpt_path}")
+
+        # Mocks to allow instantiation without complex hydra configs
+        class MockConfig:
+            def __init__(self):
+                self.img_size = 224
+                self.predictor = {
+                    "hidden_dim": 256,
+                    "num_layers": 3,
+                    "nhead": 4,
+                    "dim_feedforward": 512,
+                    "dropout": 0.1,
+                }
+                self.optimizer = {"lr": 1e-4, "weight_decay": 1e-4}
+                self.wm = {
+                    "history_size": 3,
+                    "num_preds": 3,
+                    "action_dim": 32,
+                    "embed_dim": 192,
+                }
+
+        # Load standard pre-trained encoder skeleton model and restore weights
+        checkpoint = torch.load(ckpt_path, map_location="cpu")
+        state_dict = checkpoint.get("state_dict", checkpoint)
+
+        # Strip PyTorch Lightning prefixes if present
+        clean_state_dict = {}
+        for k, v in state_dict.items():
+            new_key = k.replace("model.", "") if k.startswith("model.") else k
+            clean_state_dict[new_key] = v
+
+        # We temporarily initialize the base multi-view J-EPA and load weights
+        cfg = MockConfig()
+        encoder = get_multi_view_encoder(cfg)
+
+        # Patch the backbone to 4 channels (RGB + Skeleton) to match the Phase 1 checkpoint
+        from lewm.skeleton.encoder import patch_vit_for_skeleton
+
+        patch_vit_for_skeleton(encoder.backbone)
+
+        model_phase1 = MultiViewJEPAv2(
+            encoder=encoder,
+            predictor=ARPredictor(
+                num_frames=3, input_dim=192, hidden_dim=256, output_dim=256
+            ),
+            action_encoder=GR1Embedder(input_dim=32, emb_dim=192),
+            projector=GR1MLP(input_dim=256, output_dim=192),
+            pred_proj=GR1MLP(input_dim=256, output_dim=192),
+            use_dino=True,
+            fusion_type="linear",
+            num_views=5,
+        )
+
+        model_phase1.load_state_dict(clean_state_dict, strict=False)
+        model_phase1 = model_phase1.to(device)
+        model_phase1.eval()
 
     print(
         f"🚀 Training Flow Matching | Epochs: {epochs} | Device: {device} | Boundary Lambda: {lambda_c}"
@@ -98,10 +191,44 @@ def train_flow_matching_v2(
 
     for epoch in range(epochs):
         epoch_loss = 0.0
-        for z_t_b, p_t_b, a1_raw in loader:
-            z_t_b = z_t_b.to(device)
-            p_t_b = p_t_b.to(device)
-            a1_raw = a1_raw.to(device)
+        for batch in loader:
+            if synthetic:
+                z_t_b, p_t_b, a1_raw = batch
+                z_t_b = z_t_b.to(device)
+                p_t_b = p_t_b.to(device)
+                a1_raw = a1_raw.to(device)
+            else:
+                # Extract real visual and proprioceptive context on-the-fly
+                pixels = batch["pixels"].to(device)  # [B, T, V, 4, 224, 224]
+
+                # Forward pass through frozen visual encoder to get visual state latent z_t
+                with torch.no_grad():
+                    # We extract z_t at the start of the planning trajectory (t=0)
+                    pixels_t = pixels[:, 0].unsqueeze(1)  # [B, 1, V, 4, 224, 224]
+                    info = {"pixels": pixels_t}
+                    output = model_phase1.encode(info)
+                    z_t_b = output["emb"].squeeze(1)  # [B, 192]
+
+                # Assemble context vector p_t from the batch:
+                # [q_t(7), dq_t(7), c(3), r(3), q_e(4), V(1), kp(7), kd(7)] -> total 39
+                q_t = batch["observation.state"][:, 0, 16:23].to(
+                    device
+                )  # Right arm joints
+                # Extract actions as an approximation of velocity/next targets
+                dq_t = batch["action"][:, 0, 16:23].to(device)
+
+                c = batch["ellipsoid_center"][:, 0].to(device)
+                r = batch["ellipsoid_radii"][:, 0].to(device)
+                q_e = batch["ellipsoid_quat"][:, 0].to(device)
+                V = batch["ellipsoid_volume"][:, 0].to(device)
+
+                kp = batch["kp"][:, 0].to(device)
+                kd = batch["kd"][:, 0].to(device)
+
+                p_t_b = torch.cat([q_t, dq_t, c, r, q_e, V, kp, kd], dim=-1)
+
+                # Target Actions sequence over the horizon
+                a1_raw = batch["action"][:, :horizon].to(device)  # [B, H, 32]
 
             # 1. Multi-scale replication (N=10) to teach the model how to scale actions
             B_orig = z_t_b.shape[0]
@@ -195,5 +322,36 @@ def train_flow_matching_v2(
 
 
 if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    train_flow_matching_v2(epochs=10, device=device)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Le-Probe v2 Flow Matching Training")
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--horizon", type=int, default=4)  # Match MPC horizon (H=4)
+    parser.add_argument(
+        "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
+    )
+    parser.add_argument(
+        "--synthetic", action="store_true", help="Use synthetic dataset for verify run"
+    )
+    parser.add_argument("--dataset_name", type=str, default="gr1_pickup_grasp_2k")
+    parser.add_argument(
+        "--ckpt_path", type=str, default=None, help="Phase 1 J-EPA checkpoint path"
+    )
+    parser.add_argument(
+        "--lambda_c", type=float, default=0.1, help="Boundary loss scale"
+    )
+    args = parser.parse_args()
+
+    train_flow_matching_v2(
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        horizon=args.horizon,
+        device=args.device,
+        synthetic=args.synthetic,
+        dataset_name=args.dataset_name,
+        ckpt_path=args.ckpt_path,
+        lambda_c=args.lambda_c,
+    )
