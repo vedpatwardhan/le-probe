@@ -417,9 +417,9 @@ def train_flow_matching_v2(
     )
     checkpoint_callback = ModelCheckpoint(
         dirpath=run_dir + "/checkpoints",
-        filename="flow_matching-{epoch:02d}-{train/loss:.4f}",
+        filename="flow_matching-{epoch:02d}",
         save_top_k=3,
-        monitor="train/loss",
+        monitor="train/loss_epoch",
         mode="min",
     )
 
