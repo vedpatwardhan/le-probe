@@ -34,6 +34,7 @@ def harvest_manifold(
     fusion_type="linear",
     use_skeleton=False,
     use_dino=False,
+    use_subset=False,
 ):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     output_path = Path(output_file).resolve()
@@ -91,6 +92,7 @@ def harvest_manifold(
             keys_to_load=keys_to_load,
             num_steps=1,
             use_multi_view=use_multi_view,
+            use_subset=use_subset,
         )
     else:
         data_plugin = LEWMDataPlugin(
@@ -98,6 +100,7 @@ def harvest_manifold(
             keys_to_load=keys_to_load,
             num_steps=1,
             use_multi_view=use_multi_view,
+            use_subset=use_subset,
         )
     data_plugin.clear_cache()
 
@@ -253,6 +256,7 @@ if __name__ == "__main__":
     parser.add_argument("--fusion", type=str, default="linear")
     parser.add_argument("--use_skeleton", action="store_true", default=False)
     parser.add_argument("--use_dino", action="store_true", default=False)
+    parser.add_argument("--use_subset", action="store_true", default=False)
     args = parser.parse_args()
 
     harvest_manifold(
@@ -264,4 +268,5 @@ if __name__ == "__main__":
         fusion_type=args.fusion,
         use_skeleton=args.use_skeleton,
         use_dino=args.use_dino,
+        use_subset=args.use_subset,
     )
