@@ -279,8 +279,12 @@ if __name__ == "__main__":
 
     mpc_verbose = args.verbose or MPC_VERBOSE
 
+    local_path = CORTEX_GR1 / f"datasets/{args.dataset}"
     try:
-        ds = LeRobotDataset(args.dataset)
+        if local_path.exists():
+            ds = LeRobotDataset(args.dataset, root=str(local_path))
+        else:
+            ds = LeRobotDataset(args.dataset)
         resolved_root = ds.root
         print(f"📦 Local Dataset detected: {resolved_root}")
     except Exception as exc:
