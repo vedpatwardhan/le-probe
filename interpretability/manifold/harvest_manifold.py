@@ -198,7 +198,7 @@ def harvest_manifold(
                 if i == 0:
                     print(f"  - pixels_final:  {pixels.shape}")
                     print(f"  - actions:       {actions.shape}\n")
-                # -----------------------------------------------
+                B = pixels.shape[0]
 
                 if torch.isnan(actions).any():
                     actions = torch.nan_to_num(actions, 0.0)
