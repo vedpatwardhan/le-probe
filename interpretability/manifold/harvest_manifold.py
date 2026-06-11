@@ -1,4 +1,5 @@
 import sys
+import os
 import torch
 import json
 import argparse
@@ -42,7 +43,15 @@ def harvest_manifold(
 
     # 1. Resolve Dataset Root
     try:
-        ds = LeRobotDataset(dataset_repo)
+        lerobot_home = os.environ.get("LEROBO_HOME")
+        if lerobot_home:
+            local_path = Path(lerobot_home) / dataset_repo
+            if local_path.exists():
+                ds = LeRobotDataset(dataset_repo, root=str(local_path))
+            else:
+                ds = LeRobotDataset(dataset_repo)
+        else:
+            ds = LeRobotDataset(dataset_repo)
         resolved_root = ds.root
         print(f"📦 Local Dataset detected: {resolved_root}")
     except Exception as exc:
