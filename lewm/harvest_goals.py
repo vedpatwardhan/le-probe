@@ -19,6 +19,7 @@ from tqdm import tqdm
 import argparse
 import numpy as np
 from pathlib import Path
+import pandas as pd
 
 # Resolve project paths dynamically
 RESEARCH_DIR = Path(__file__).parent.absolute()
@@ -80,10 +81,36 @@ def harvest(
     dataset = plugin.lerobot_dataset
     num_episodes = plugin.lerobot_dataset.num_episodes
 
+    # Filter for success episodes only if metadata parquet exists and contains task categories
+    success_episodes = list(range(num_episodes))
+    try:
+        parquet_path = Path(dataset.root) / "meta/episodes/chunk-000/file-000.parquet"
+        if parquet_path.exists():
+            df_episodes = pd.read_parquet(parquet_path)
+            if "tasks" in df_episodes.columns:
+
+                def get_class(tasks):
+                    if len(tasks) == 0:
+                        return "fail"
+                    task_str = str(tasks[0]).lower()
+                    if "success" in task_str:
+                        return "success"
+                    return "fail"
+
+                df_episodes["class"] = df_episodes["tasks"].apply(get_class)
+                success_episodes = df_episodes[df_episodes["class"] == "success"][
+                    "episode_index"
+                ].values.tolist()
+                print(
+                    f"🎯 Filtered for {len(success_episodes)} success episodes out of {num_episodes} total."
+                )
+    except Exception as e:
+        print(f"⚠️ Could not filter episodes by success (defaulting to all): {e}")
+
     gallery = {"goals": {}, "diagnostics": {}}
 
     # 3. Sweep Episodes
-    for i in tqdm(range(num_episodes), desc="Harvesting Episodes"):
+    for i in tqdm(success_episodes, desc="Harvesting Episodes"):
         try:
             # A. Identify Success Frame (Manual boundary calculation for robustness)
             indices = (plugin.episode_indices == i).nonzero(as_tuple=True)[0]
