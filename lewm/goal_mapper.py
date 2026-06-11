@@ -46,7 +46,7 @@ import numpy as np
 # (subgoal/HWM loss is training-only). Set False to restore predict_subgoal compass.
 DINO_MPC_USE_GALLERY_COMPASS = True
 
-_SKIP_CKPT_PREFIXES = ("sigreg.",)
+_SKIP_CKPT_PREFIXES = ("sigreg.", "value_head.")
 _SKIP_CKPT_SUBSTRINGS = ("mask_token",)
 
 
