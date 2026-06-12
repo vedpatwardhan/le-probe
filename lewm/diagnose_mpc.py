@@ -29,7 +29,7 @@ sys.path.append(str(CORTEX_GR1 / "lewm/le_wm"))
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lewm.goal_mapper import GoalMapper
 from lewm.feasible_cem_solver import CEMNoFeasibleSamplesError, FeasibleEliteCEMSolver
-from lewm.mpc_logging import mpc_shape_log, set_mpc_verbose
+from lewm.mpc_logging import mpc_shape_log, set_mpc_verbose, MPC_VERBOSE
 
 
 class MockConfig:
@@ -275,11 +275,10 @@ if __name__ == "__main__":
     parser.add_argument("--horizon", type=int, default=15)
     parser.add_argument("--dataset", type=str, default="gr1_pickup_grasp")
     args = parser.parse_args()
-    from lewm.mpc_logging import MPC_VERBOSE
 
     mpc_verbose = args.verbose or MPC_VERBOSE
 
-    local_path = CORTEX_GR1 / f"datasets/{args.dataset}"
+    local_path = Path(__file__).resolve().parents[1] / f"datasets/{args.dataset}"
     try:
         if local_path.exists():
             ds = LeRobotDataset(args.dataset, root=str(local_path))

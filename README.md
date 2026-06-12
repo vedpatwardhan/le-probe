@@ -16,13 +16,15 @@ Le-Probe is the experiment and analysis stack to diagnose why latent MPC succeed
 - [`interpretability/`](./interpretability): manifold audits, static probe audits, CLT training, and Neuronpedia-backed inspection.
 - [`scripts/`](./scripts): maintenance and reproducibility utilities.
 
-## Representation Variants
+## Architecture
 
 ### V1
 
 <div align="center">
   <img src="assets/architecture_diagram.png" width="720" alt="LeWorldModel representation variants: single-view (a) and multi-view with skeletal priors and DINOv3 waypoints (b–d)">
 </div>
+
+#### Representation Variants
 
 | Variant | Added Signal | Goal |
 | :--- | :--- | :--- |
