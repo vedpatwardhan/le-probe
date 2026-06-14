@@ -23,7 +23,7 @@ if str(LEWM_DIR) not in sys.path:
 from visualize_manifold import interpolate_color
 
 
-def visualize_splits(input_file, dataset_path, output_dir):
+def visualize_splits(input_file, dataset_path, output_dir, suffix=""):
     # Ensure output directory exists
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -126,7 +126,7 @@ def visualize_splits(input_file, dataset_path, output_dir):
                 margin=dict(l=0, r=0, b=0, t=40),
             )
 
-            output_filename = out_path / f"manifold_3d_{method}_{name}.html"
+            output_filename = out_path / f"manifold_3d_{method}_{name}{suffix}.html"
             fig.write_html(str(output_filename))
             print(f"✨ Saved {method.upper()} {name} plot to {output_filename}")
 
@@ -142,5 +142,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir", type=str, default="le-probe/manifold_visualization/v2"
     )
+    parser.add_argument("--suffix", type=str, default="")
     args = parser.parse_args()
-    visualize_splits(args.input, args.dataset_path, args.output_dir)
+    visualize_splits(args.input, args.dataset_path, args.output_dir, args.suffix)
