@@ -23,7 +23,7 @@ if str(LEWM_DIR) not in sys.path:
 from visualize_manifold import interpolate_color
 
 
-def visualize_splits(input_file, dataset_path, output_dir, suffix=""):
+def visualize_splits(input_file, dataset_path, output_dir, suffix="", use_gpu=False):
     # Ensure output directory exists
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -32,6 +32,11 @@ def visualize_splits(input_file, dataset_path, output_dir, suffix=""):
     print(f"📂 Loading manifold data from {input_file}...")
     data = torch.load(input_file, weights_only=False)
     latents = data["latents"]
+    # Convert latents to float32 NumPy array for scikit-learn / cuML compatibility
+    if isinstance(latents, torch.Tensor):
+        latents = latents.cpu().numpy()
+    latents = latents.astype(np.float32)
+
     indices = data["frame_indices"]
     ep_indices = data.get("episode_indices", None)
 
@@ -69,20 +74,50 @@ def visualize_splits(input_file, dataset_path, output_dir, suffix=""):
     # Loop over all three dimensionality reduction methods
     methods = ["pca", "tsne", "umap"]
 
+    # Setup GPU libraries if requested
+    cuml_pca, cuml_tsne, cuml_umap = None, None, None
+    if use_gpu:
+        try:
+            from cuml.decomposition import PCA as cumlPCA
+            from cuml.manifold import TSNE as cumlTSNE
+            from cuml.manifold import UMAP as cumlUMAP
+
+            cuml_pca, cuml_tsne, cuml_umap = cumlPCA, cumlTSNE, cumlUMAP
+            print("⚡ Using GPU-accelerated cuML algorithms!")
+        except ImportError:
+            print("⚠️ cuML could not be imported. Falling back to CPU algorithms.")
+            use_gpu = False
+
     for method in methods:
         print(
             f"\n📉 Computing {method.upper()} dimensionality reduction (shared coordinate space)..."
         )
-        if method == "pca":
-            reducer = PCA(n_components=3)
-        elif method == "tsne":
-            reducer = TSNE(n_components=3, perplexity=30, max_iter=1000)
-        elif method == "umap":
-            reducer = umap.UMAP(n_components=3, n_neighbors=15, min_dist=0.1)
+        if use_gpu:
+            if method == "pca":
+                reducer = cuml_pca(n_components=3)
+            elif method == "tsne":
+                reducer = cuml_tsne(n_components=3, perplexity=30, n_iter=1000)
+            elif method == "umap":
+                reducer = cuml_umap(n_components=3, n_neighbors=15, min_dist=0.1)
         else:
-            raise ValueError(f"Unsupported method: {method}")
+            if method == "pca":
+                reducer = PCA(n_components=3)
+            elif method == "tsne":
+                reducer = TSNE(n_components=3, perplexity=30, max_iter=1000)
+            elif method == "umap":
+                reducer = umap.UMAP(n_components=3, n_neighbors=15, min_dist=0.1)
+            else:
+                raise ValueError(f"Unsupported method: {method}")
 
         reduced_latents = reducer.fit_transform(latents)
+
+        # Convert GPU arrays (CuPy/cuML) to NumPy if necessary
+        if hasattr(reduced_latents, "get"):
+            reduced_latents = reduced_latents.get()
+        elif hasattr(reduced_latents, "to_numpy"):
+            reduced_latents = reduced_latents.to_numpy()
+        elif not isinstance(reduced_latents, np.ndarray):
+            reduced_latents = np.asarray(reduced_latents)
 
         colors = np.array([interpolate_color(idx) for idx in indices])
         hover_text = np.array(
@@ -143,5 +178,12 @@ if __name__ == "__main__":
         "--output_dir", type=str, default="le-probe/manifold_visualization/v2"
     )
     parser.add_argument("--suffix", type=str, default="")
+    parser.add_argument(
+        "--gpu",
+        action="store_true",
+        help="Use GPU-accelerated cuML algorithms if available",
+    )
     args = parser.parse_args()
-    visualize_splits(args.input, args.dataset_path, args.output_dir, args.suffix)
+    visualize_splits(
+        args.input, args.dataset_path, args.output_dir, args.suffix, args.gpu
+    )
