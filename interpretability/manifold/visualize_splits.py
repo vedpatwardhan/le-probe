@@ -96,7 +96,7 @@ def visualize_splits(input_file, dataset_path, output_dir, suffix="", use_gpu=Fa
             if method == "pca":
                 reducer = cuml_pca(n_components=3)
             elif method == "tsne":
-                reducer = cuml_tsne(n_components=3, perplexity=30, n_iter=1000)
+                reducer = cuml_tsne(n_components=3, perplexity=30, max_iter=1000)
             elif method == "umap":
                 reducer = cuml_umap(n_components=3, n_neighbors=15, min_dist=0.1)
         else:
