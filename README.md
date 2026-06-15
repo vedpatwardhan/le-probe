@@ -1,47 +1,46 @@
-# Le-Probe: Representation Audits for LeWM
+# Le-Probe: Latent Topology Audits of LeWorldModel Representations for Humanoid Manipulation
 
-Le-Probe is the experiment and analysis stack to diagnose why latent MPC succeeds or fails across LeWorldModel variants on a GR-1 cube-pickup task.
+[![Paper Status](https://img.shields.io/badge/Status-Under%20Review%20at%20CoRL%202026-blue)](https://drive.google.com/file/d/1-LUV945XR-FT33T3r6ZK4z1ag9cPRhd_/view?usp=drive_link)
+[![Code Status](https://img.shields.io/badge/Code-Anonymous-lightgrey)](https://anonymous.4open.science/r/le-probe-9134)
 
-## Paper-Aligned Scope
+This repository contains the code and diagnostic suite for **Le-Probe**, a diagnostic workflow that audits encoder latent topology (using PCA/UMAP on training rollouts and static task-hull probes) and relates geometry to planning failures in Joint-Embedding Predictive Architectures (specifically [LeWorldModel](https://arxiv.org/abs/2603.19312)) on a 32-DoF humanoid robot manipulation task.
 
-- **Core question:** how representation quality changes planning behavior as structured priors are added.
-- **Variant ladder:** `Single-View RGB -> Multi-View RGB -> Multi-View RGB + Skeletal Priors -> Multi-View RGB + Skeletal Priors + DINOv3 Waypoints`.
-- **Protocol:** rollout behavior, training-manifold audits, static workspace probes, and mechanistic CLT analysis.
+Our diagnostics inspect why latent Model-Predictive Control (MPC) search succeeds or fails, tracing the effects of cumulative representation upgrades on both global geometry and local attribution circuits.
 
-## Repository Map
+---
 
-- [`dataset/`](./dataset): teleoperation, dataset curation, priors, and workspace probe generation.
-- [`vla/`](./vla): GR00T-N1 baseline training and simulation inference.
-- [`lewm/`](./lewm): LeWM training, reward tuning, goal-gallery harvest, and latent MPC serving.
-- [`interpretability/`](./interpretability): manifold audits, static probe audits, CLT training, and Neuronpedia-backed inspection.
-- [`scripts/`](./scripts): maintenance and reproducibility utilities.
+## 1. What Le-Probe Does
 
-## Architecture
+Le-Probe is a **diagnostic workflow** over encoder latents. It audits representation topology and relates it to planning failures using two primary paradigms:
 
-### V1
+1. **Training Manifold Audits:** Visualizing and analyzing the global topology of representations harvested from training trajectories (using UMAP, t-SNE, and PCA).
+2. **Static Workspace Probes:** Evaluating 500 encode-only, out-of-distribution physical states generated inside the workspace polytope to test semantic partitioning (lateral location, distance to cube, and pose clusters).
 
 <div align="center">
-  <img src="assets/architecture_diagram.png" width="720" alt="LeWorldModel representation variants: single-view (a) and multi-view with skeletal priors and DINOv3 waypoints (b–d)">
+  <img src="assets/architecture_diagram.png" width="800" alt="Le-Probe Architecture Variants">
+  <p><em>Unified architecture mapping the four evaluated representation variants.</em></p>
 </div>
 
-#### Representation Variants
+---
 
-| Variant | Added Signal | Goal |
-| :--- | :--- | :--- |
-| Single-View RGB | `world_center` only | Baseline JEPA + MPC |
-| Multi-View RGB | 5 camera views | Improve state coverage |
-| Multi-View RGB + Skeletal Priors | 4th kinematic channel | Anchor task-relevant structure |
-| Multi-View RGB + Skeletal Priors + DINOv3 Waypoints | phase waypoints | Improve long-horizon subgoal alignment |
+## 2. The Representation Ladder
 
-### V2 (In Progress)
+We evaluate four checkpoints trained on the same tabletop red-cube pickup task (200 teleoperated GR-1 episodes in MuJoCo, 5 camera views, ~6.4k frames) under a shared latent planner (CEM, horizon $H=4$) to isolate the impact of representation design:
 
-<div align="center">
-  <img src="assets/Le-Probe-V2.png" width="900" alt="LeWorldModel representation variants: single-view (a) and multi-view with skeletal priors and DINOv3 waypoints (b–d)">
-</div>
+* **(a) Single-View RGB (Baseline):** The standard LeWorldModel mapping center-camera RGB to a 192-d embedding.
+* **(b) Multi-View RGB:** Shared encoder across 5 camera views (center, left, right, top, wrist) with late linear fusion.
+* **(c) Multi-View RGB + Skeletal Priors:** 4-channel input patch embeddings (RGB + skeletal lines) with perceptual shaping masking (10% skeleton-only, 5% counterpart-view masking).
+* **(d) Multi-View + Skeletal + DINOv3 Waypoints:** The same backbone supplemented with a parallel, training-only frozen DINOv3 pathway and subgoal head to anchor phase goals.
 
-## Key Artifacts
+---
 
-### Behavior Progression
+## 3. Key Findings & Achievements
+
+Our evaluation reveals a nuanced picture of representation learning in joint-embedding world models:
+
+### Finding A: Trajectory Geometry vs. Control Quality
+* **Global Alignment:** As stronger inductive biases are added, the training-time manifold transitions from disconnected, episode-isolated "worms" to a unified, directional "early-to-late highway" (with the strongest global phase organization visible in the DINOv3-supervised variant).
+* **MPC Bottleneck:** Despite cleaner UMAP trajectory geometry, closed-loop latent MPC remains brittle during contact-rich phases (pinch and lift), indicating that improved global training topology does not automatically guarantee robust control.
 
 <div align="center">
   <table>
@@ -54,70 +53,41 @@ Le-Probe is the experiment and analysis stack to diagnose why latent MPC succeed
     <tr>
       <td><img src="assets/lewm_grasp.gif" width="180" alt="Single-View RGB rollout"></td>
       <td><img src="assets/lewm_grasp_multiview.gif" width="180" alt="Multi-View RGB rollout"></td>
-      <td><img src="assets/lewm_grasp_multiview_skeleton.gif" width="180" alt="Multi-View RGB plus Skeletal Priors rollout"></td>
-      <td><img src="assets/lewm_grasp_multiview_skeleton_dino.gif" width="180" alt="Multi-View RGB plus Skeletal Priors plus DINOv3 Waypoints rollout"></td>
+      <td><img src="assets/lewm_grasp_multiview_skeleton.gif" width="180" alt="Skeletal Priors rollout"></td>
+      <td><img src="assets/lewm_grasp_multiview_skeleton_dino.gif" width="180" alt="DINOv3 Waypoints rollout"></td>
     </tr>
   </table>
 </div>
 
-### Training-Manifold Audit (PCA / t-SNE / UMAP)
+### Finding B: Categorical Partitioning Fails Globally
+When encoding 500 static poses inside the workspace hull, global embeddings fail to cluster cleanly by physical categories (e.g., table regions or distance bins). Silhouette scores in low-dimensional space remain near zero or negative across all models:
 
-| Variant | 3D PCA | 3D t-SNE | 3D UMAP |
+| Checkpoint Variant | Lateral Region Score | Distance Bin Score | Pose Cluster Score |
 | :--- | :---: | :---: | :---: |
-| **Single-View RGB** | ![PCA](assets/manifold/manifold_3d_pca.png) | ![t-SNE](assets/manifold/manifold_3d_tsne.png) | ![UMAP](assets/manifold/manifold_3d_umap.png) |
-| **Multi-View RGB** | ![PCA](assets/manifold/manifold_3d_multiview_pca.png) | ![t-SNE](assets/manifold/manifold_3d_multiview_tsne.png) | ![UMAP](assets/manifold/manifold_3d_multiview_umap.png) |
-| **Multi-View RGB + Skeletal Priors** | ![PCA](assets/manifold/manifold_3d_multiview_skeleton_pca.png) | ![t-SNE](assets/manifold/manifold_3d_multiview_skeleton_tsne.png) | ![UMAP](assets/manifold/manifold_3d_multiview_skeleton_umap.png) |
-| **Multi-View RGB + Skeletal Priors + DINOv3 Waypoints** | ![PCA](assets/manifold/manifold_3d_multiview_skeleton_dino_2_pca.png) | ![t-SNE](assets/manifold/manifold_3d_multiview_skeleton_dino_2_tsne.png) | ![UMAP](assets/manifold/manifold_3d_multiview_skeleton_dino_2_umap.png) |
+| **Single-View RGB** | -0.089 | -0.058 | -0.095 |
+| **Multi-View RGB** | -0.058 | -0.084 | -0.036 |
+| **Multi-View RGB + Skeletal Priors** | -0.033 | -0.068 | -0.039 |
+| **Multi-View RGB + Skeletal + DINOv3** | -0.013 | -0.061 | -0.044 |
 
-### Static Workspace Probes
+### Finding C: Local Sparse Features Retain Structure
+While global clustering is poor, applying **Cross-Layer Transcoders (CLTs)** and **Integrated Gradients (IG)** to the static probes reveals checkpoint-dependent local circuits:
+* Positive local feature Jaccard separation margins (0.12–0.34) exist across all checkpoints.
+* Naive multi-view displays the sharpest lateral and distance circuit splits (only 3/15 and 5/15 node overlap between contrasting conditions), whereas DINOv3-waypoint models form more homogeneous local attribution circuits.
 
-<div align="center">
-  <table>
-    <tr>
-      <th>Task Workspace</th>
-      <th>Lateral Table Region</th>
-      <th>Distance to Cube</th>
-      <th>Pose Clusters</th>
-    </tr>
-    <tr>
-      <td><img src="assets/task_workspace.png" width="180" alt="Task workspace"></td>
-      <td><img src="assets/lateral_table_region.png" width="180" alt="Lateral regions"></td>
-      <td><img src="assets/distance_to_cube.png" width="180" alt="Distance bins"></td>
-      <td><img src="assets/pose_clusters.png" width="180" alt="Pose clusters"></td>
-    </tr>
-  </table>
-</div>
+---
 
-- **Observed trend:** separability and cluster continuity improve across variants, with strongest structure in `Multi-View RGB + Skeletal Priors` and `Multi-View RGB + Skeletal Priors + DINOv3 Waypoints`.
+## 4. Repository Layout
 
-## Mechanistic Interpretability Snapshot
+* [`dataset/`](./dataset): MuJoCo teleoperation logging, dataset curation, skeletal/DINOv3 prior generation, and static probe generation.
+* [`lewm/`](./lewm): Joint-embedding predictive architecture training, reward-head calibration, goal gallery harvesting, and the CEM latent planner server.
+* [`interpretability/`](./interpretability): Manifold projection generation, static-probe separation metrics, CLT transcoder dictionary training, and Integrated Gradient path tracing.
+* [`vla/`](./vla): GR00T-N1 baseline comparison suite.
 
-The granular interpretability pipeline leverages Sparse Autoencoders (SAEs) and Transcoders connected residually onto the layers of the base model to reconstruct outputs and map features:
+---
 
-<div align="center">
-  <img src="assets/interpretability_architecture.png" width="40%" alt="interpretability architecture">
-</div>
+## 5. Getting Started & Reproduction
 
-Precomputed **Neuronpedia-style IG attribution circuits** (≤15 pinned nodes per canonical static probe).
-
-<div align="center">
-  <table>
-    <tr>
-      <td align="center"><b>MV — lateral left</b><br><img src="assets/circuits/lateral_table_region/multiview_left.png" width="240" alt="Multi-view lateral left circuit"></td>
-      <td align="center"><b>Skel — lateral left</b><br><img src="assets/circuits/lateral_table_region/skeleton_left.png" width="240" alt="Skeletal lateral left circuit"></td>
-      <td align="center"><b>DINO — lateral left</b><br><img src="assets/circuits/lateral_table_region/dino_left.png" width="240" alt="DINO lateral left circuit"></td>
-    </tr>
-    <tr>
-      <td align="center"><b>MV — approach</b><br><img src="assets/circuits/distance_to_cube/multiview_approach.png" width="240" alt="Multi-view distance approach circuit"></td>
-      <td align="center"><b>MV — near table</b><br><img src="assets/circuits/distance_to_cube/multiview_near_table.png" width="240" alt="Multi-view distance near table circuit"></td>
-      <td align="center"><b>Skel — pose 2</b><br><img src="assets/circuits/pose_clusters/skeleton_pose_2.png" width="240" alt="Skeletal pose cluster 2 circuit"></td>
-    </tr>
-  </table>
-  <p><em>Top row: lateral-left across checkpoints (sharpest split under multi-view, 3/15 overlap). Bottom row: multi-view distance bins (5/15); skeletal pose cluster (pose_2↔pose_4 is 10/15 in the full playbook).</em></p>
-</div>
-
-## Setup
-
+### Installation
 ```bash
 git clone --recursive https://github.com/vedpatwardhan/le-probe.git
 cd le-probe
@@ -126,52 +96,30 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Reproduction
+### Reference Notebooks
+For step-by-step reproduction of the workflow:
+* [`lewm/LeWM_Training.ipynb`](./lewm/LeWM_Training.ipynb): Handles joint-embedding training and checkpoint execution.
+* [`lewm/LeWM_E2E.ipynb`](./lewm/LeWM_E2E.ipynb): Launches end-to-end simulation rollouts using the CEM latent planner.
 
-The canonical reference workflow for reproducing LeWM experiments is:
+Detailed CLI reproduction flags (including prior caches and server configurations) are documented in [`lewm/README.md`](./lewm/README.md).
 
-- [`lewm/LeWM_Training.ipynb`](./lewm/LeWM_Training.ipynb) for training and checkpoint generation.
-- [`lewm/LeWM_E2E.ipynb`](./lewm/LeWM_E2E.ipynb) for end-to-end planning/inference evaluation.
+---
 
-Notebook-aligned CLI equivalents (including priors, fused cache, trainer/tuner flow) are documented in [`lewm/README.md`](./lewm/README.md).
+## 6. Accessing Precomputed Models & Datasets
 
-```bash
-# 1) Start planner server (full variant example)
-.venv/bin/python lewm/lewm_server.py \
-  --model <ckpt> \
-  --gallery goal_gallery.pth \
-  --multi_view --use_skeleton --use_dino
-```
+To support reuse and verification, we host the trained checkpoints and compiled harvests:
 
-### Storage Links
+### Datasets & Galleries
+* **Demonstration Dataset (`gr1_pickup_grasp`):** [Google Drive](https://drive.google.com/drive/folders/1yYMT7J_eRkQmXDq3tcisNd4kRSWeTI40)
+* **Reward Predictions & Calibrations:** [Reward v1](https://drive.google.com/drive/folders/1QWra9dRJ9aceUqOpmj56OG8SaVUCVr-g) | [Reward v2](https://drive.google.com/drive/folders/1iwz_1LeEi4vbMWDeIXU_Pb6tVxDqcbNE)
 
-#### Datasets
+### Checkpoints & Harvesters
 
-- `gr1_pickup_grasp`: [Google Drive folder](https://drive.google.com/drive/folders/1yYMT7J_eRkQmXDq3tcisNd4kRSWeTI40?usp=sharing)
-- `gr1_reward_pred`: [Google Drive folder](https://drive.google.com/drive/folders/1QWra9dRJ9aceUqOpmj56OG8SaVUCVr-g?usp=sharing)
-- `gr1_reward_pred_v2`: [Google Drive folder](https://drive.google.com/drive/folders/1iwz_1LeEi4vbMWDeIXU_Pb6tVxDqcbNE?usp=sharing)
+| Model Variant | Checkpoint | Goal Gallery | Manifold Harvest |
+| :--- | :--- | :--- | :--- |
+| **Single-View RGB** | [gr1_reward_tuned_v2.ckpt](https://drive.google.com/file/d/1L0RE9V647-JduSCJ40y1TEI-N8MIO62D/view) | [goal_gallery.pth](https://drive.google.com/file/d/1CA9KxgnvHeJjslUOKoaxvmPV4TnhzWeS/view) | [manifold_data.pt](https://drive.google.com/file/d/18us_mOIVa2QgIP2VoISC-wpVzI7moCyV/view) |
+| **Multi-View RGB** | [gr1_reward_tuned_v2.ckpt](https://drive.google.com/file/d/1VEEAa4vWcnqQN1PMK5422FK_1QJ0Hu74/view) | [goal_gallery.pth](https://drive.google.com/file/d/1ntMBODRRDP-bZDFUrbxli-3WxT4zveAv/view) | [manifold_data.pt](https://drive.google.com/file/d/1lqcmNQGiiECSPG4CM1h2c1S3JxwUQ_mP/view) |
+| **MV + Skeletal** | [gr1_reward_tuned_v6.ckpt](https://drive.google.com/file/d/1W2UUco30AJE1ygjeGjRK1jFWB7PvGXEx/view) | [goal_gallery.pth](https://drive.google.com/file/d/1YEsGDwT1AvWetxS7vbLGL94xTOEDJtyP/view) | [manifold_data.pt](https://drive.google.com/file/d/19lxR0rJ-Oo7drudU_NyXQL3_cvlOGIcO/view) |
+| **MV + Skel + DINOv3** | [gr1_reward_tuned_v1.ckpt](https://drive.google.com/file/d/1Yt1Q60yvvDPPFE3JjICq48ocOycUALGT/view) | [goal_gallery.pth](https://drive.google.com/file/d/1jpApbuPUHIAb3Ae87VzFAvFBVhVZr3X6/view) | [manifold_data.pt](https://drive.google.com/file/d/1Xhc9kMDilG3TpBA8GdDFLF4l7oe4j3Wz/view) |
 
-#### LeWM Checkpoints and Goal Galleries
-
-| Variant | Model Checkpoint | Goal Gallery |
-| :--- | :--- | :--- |
-| Single-View RGB | [gr1_reward_tuned_v2.ckpt](https://drive.google.com/file/d/1L0RE9V647-JduSCJ40y1TEI-N8MIO62D/view?usp=sharing) | [goal_gallery.pth](https://drive.google.com/file/d/1CA9KxgnvHeJjslUOKoaxvmPV4TnhzWeS/view?usp=sharing) |
-| Multi-View RGB | [gr1_reward_tuned_v2.ckpt](https://drive.google.com/file/d/1VEEAa4vWcnqQN1PMK5422FK_1QJ0Hu74/view?usp=sharing) | [goal_gallery.pth](https://drive.google.com/file/d/1ntMBODRRDP-bZDFUrbxli-3WxT4zveAv/view?usp=sharing) |
-| Multi-View RGB + Skeletal Priors | [gr1_reward_tuned_v6.ckpt](https://drive.google.com/file/d/1W2UUco30AJE1ygjeGjRK1jFWB7PvGXEx/view?usp=sharing) | [goal_gallery.pth](https://drive.google.com/file/d/1YEsGDwT1AvWetxS7vbLGL94xTOEDJtyP/view?usp=sharing) |
-| Multi-View RGB + Skeletal Priors + DINOv3 Waypoints | [gr1_reward_tuned_v1.ckpt](https://drive.google.com/file/d/1Yt1Q60yvvDPPFE3JjICq48ocOycUALGT/view?usp=sharing) | [goal_gallery.pth](https://drive.google.com/file/d/1jpApbuPUHIAb3Ae87VzFAvFBVhVZr3X6/view?usp=sharing) |
-
-#### Interpretability Artifacts
-
-- Manifold harvest (Single-View RGB): [manifold_data.pt](https://drive.google.com/file/d/18us_mOIVa2QgIP2VoISC-wpVzI7moCyV/view?usp=sharing)
-- Manifold harvest (Multi-View RGB): [manifold_data.pt](https://drive.google.com/file/d/1lqcmNQGiiECSPG4CM1h2c1S3JxwUQ_mP/view?usp=sharing)
-- Manifold harvest (Multi-View RGB + Skeletal Priors): [manifold_data.pt](https://drive.google.com/file/d/19lxR0rJ-Oo7drudU_NyXQL3_cvlOGIcO/view?usp=sharing)
-- Manifold harvest (Multi-View RGB + Skeletal Priors + DINOv3 Waypoints): [manifold_data.pt](https://drive.google.com/file/d/1Xhc9kMDilG3TpBA8GdDFLF4l7oe4j3Wz/view?usp=sharing)
-- Transcoder weights (Single-View RGB): [Google Drive folder](https://drive.google.com/drive/folders/13Aw6iF1PfWqBR2CRh3A-wjqub6DP_Ty2?usp=sharing)
-- Transcoder weights (Multi-View RGB): [Google Drive folder](https://drive.google.com/drive/folders/12vq8hnySCqt6Z6rYGioz-ghjoFIdvcCv?usp=sharing)
-- Transcoder weights (Multi-View RGB + Skeletal Priors): [Google Drive folder](https://drive.google.com/drive/folders/1TXS4sObpbvBxI-GUrdoicY1hNXPh_c1Q?usp=sharing)
-- Transcoder weights (Multi-View RGB + Skeletal Priors + DINOv3 Waypoints): [Google Drive folder](https://drive.google.com/drive/folders/1Kak0qNzLPJr_jmDWCJMLu5ss4eg1Dsvb?usp=sharing)
-
-## Limitations
-
-- Analyses are intentionally scoped to one task family.
-- Static probes diagnose geometry and separability but are not equivalent to full in-distribution policy evaluation.
+Transcoder weights for dictionary evaluation across all variants are available in the [Transcoders Folder](https://drive.google.com/drive/folders/13Aw6iF1PfWqBR2CRh3A-wjqub6DP_Ty2).
