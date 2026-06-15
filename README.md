@@ -1,6 +1,6 @@
 # Le-Probe: Latent Topology Audits of LeWorldModel Representations for Humanoid Manipulation
 
-[![Paper Status](https://img.shields.io/badge/Status-Under%20Review%20at%20CoRL%202026-blue)](https://drive.google.com/file/d/1-LUV945XR-FT33T3r6ZK4z1ag9cPRhd_/view?usp=drive_link)
+📄 **CoRL 2026 Submission Preprint:** [Drive Link](https://drive.google.com/file/d/1-LUV945XR-FT33T3r6ZK4z1ag9cPRhd_/view?usp=drive_link)
 
 This repository contains the code and diagnostic suite for **Le-Probe**, a diagnostic workflow that audits encoder latent topology (using PCA/UMAP on training rollouts and static task-hull probes) and relates geometry to planning failures in Joint-Embedding Predictive Architectures (specifically [LeWorldModel](https://arxiv.org/abs/2603.19312)) on a 32-DoF humanoid robot manipulation task.
 
