@@ -1,6 +1,6 @@
 # Le-Probe: Latent Topology Audits of LeWorldModel Representations
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org)
 [![Simulation](https://img.shields.io/badge/Simulation-MuJoCo-orange)](https://mujoco.org)
 [![Visualization](https://img.shields.io/badge/Visualization-Rerun-blueviolet)](https://rerun.io)
