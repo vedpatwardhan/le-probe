@@ -22,7 +22,13 @@ We evaluate four model variants under a shared latent planner (CEM, horizon $H=4
 * **(d) Multi-View + Skeletal + DINOv3:** Added training-only frozen DINOv3 target path and subgoal head.
 
 <div align="center">
-  <img src="assets/architecture_diagram.png" width="750" alt="Le-Probe Architecture Variants">
+  <h4>V1 Architecture</h4>
+  <img src="assets/architecture_diagram.png" width="750" alt="Le-Probe V1 Architecture Variants">
+</div>
+
+### V2 Architecture (WIP 🚧)
+<div align="center">
+  <img src="assets/Le-Probe-V2.png" width="800" alt="Le-Probe V2 Architecture">
 </div>
 
 ---
@@ -164,16 +170,3 @@ See [`lewm/README.md`](./lewm/README.md) for CLI options.
 | **MV + Skel + DINOv3** | [gr1_reward_tuned_v1.ckpt](https://drive.google.com/file/d/1Yt1Q60yvvDPPFE3JjICq48ocOycUALGT/view) | [goal_gallery.pth](https://drive.google.com/file/d/1jpApbuPUHIAb3Ae87VzFAvFBVhVZr3X6/view) | [manifold_data.pt](https://drive.google.com/file/d/1Xhc9kMDilG3TpBA8GdDFLF4l7oe4j3Wz/view) |
 
 *Transcoder weights are available in the [Transcoders Folder](https://drive.google.com/drive/folders/13Aw6iF1PfWqBR2CRh3A-wjqub6DP_Ty2).*
-
----
-
-## 📝 Citation
-
-```bibtex
-@article{patwardhan2026leprobe,
-  title={Le-Probe: Latent Topology Audits of LeWorldModel Representations for Humanoid Manipulation},
-  author={Patwardhan, Ved},
-  journal={arXiv preprint arXiv:2606.12345},
-  year={2026}
-}
-```
