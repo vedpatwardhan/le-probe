@@ -1,13 +1,18 @@
 # Le-Probe: Latent Topology Audits of LeWorldModel Representations
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org)
+[![Simulation](https://img.shields.io/badge/Simulation-MuJoCo-orange)](https://mujoco.org)
+[![Visualization](https://img.shields.io/badge/Visualization-Rerun-blueviolet)](https://rerun.io)
+
 📄 **CoRL 2026 Submission Preprint:** [Read the Paper (Google Drive)](https://drive.google.com/file/d/1-LUV945XR-FT33T3r6ZK4z1ag9cPRhd_/view?usp=drive_link)
-*(Currently under review)*
+*(Currently under review.)*
 
 **Le-Probe** is a diagnostic workflow that audits encoder latent topology to analyze why latent Model-Predictive Control (MPC) succeeds or fails on a 32-DoF humanoid cube-pickup task. We evaluate how visual, kinematic, and subgoal inductive biases reshape Joint-Embedding Predictive Architectures (specifically [LeWorldModel](https://arxiv.org/abs/2603.19312)).
 
 ---
 
-## 1. System Architecture & Representation Ladder
+## 🛠️ System Architecture & Representation Ladder
 
 We evaluate four model variants under a shared latent planner (CEM, horizon $H=4$) to isolate the impact of representation design:
 
@@ -22,7 +27,7 @@ We evaluate four model variants under a shared latent planner (CEM, horizon $H=4
 
 ---
 
-## 2. The Le-Probe Auditing Workflow
+## 🔬 The Le-Probe Auditing Workflow
 
 Le-Probe audits representation topology post-training without modifying checkpoints or planners:
 1. **Training Manifold Audits:** PCA, t-SNE, and UMAP mapping of training trajectory rollouts.
@@ -30,12 +35,13 @@ Le-Probe audits representation topology post-training without modifying checkpoi
 
 ---
 
-## 3. Key Findings
+## 📊 Key Findings
 
 ### Finding A: Trajectory Manifold Progression
 Adding stronger priors aligns trajectory rollouts, transitioning the latent space from disconnected episode "worms" to a unified, early-to-late phase highway.
 
 <div align="center">
+  <h4>Training-Trajectory Manifold Projections (t-SNE & UMAP)</h4>
   <table>
     <tr>
       <th>Projection</th>
@@ -64,7 +70,11 @@ Adding stronger priors aligns trajectory rollouts, transitioning the latent spac
 ### Finding B: Latent MPC and Task Execution
 Cleaner global trajectory manifolds do not automatically guarantee control success. MPC remains highly sensitive and prone to off-manifold drift during contact-rich pinch and lift phases.
 
+> [!IMPORTANT]
+> **Key Insight:** Reshaping latent geometry (worms → highway) does not automatically resolve closed-loop contact sensitivity, showing that representation audits must be paired with planning-level metrics.
+
 <div align="center">
+  <h4>Latent MPC Rollouts in MuJoCo</h4>
   <table>
     <tr>
       <th>Single-View RGB</th>
@@ -96,6 +106,7 @@ Global latent spaces do not cluster cleanly by coarse semantic workspace categor
 * **Circuit Splitting:** Integrated Gradient (IG) pathways show distinct circuit splits for naive multi-view (3/15 node overlap) but highly homogeneous circuits under DINOv3 supervision.
 
 <div align="center">
+  <h4>Precomputed Integrated Gradient (IG) Attribution Circuits (≤15 pinned nodes)</h4>
   <table>
     <tr>
       <td align="center"><b>Multi-View (Lateral Left)</b><br><img src="assets/circuits/lateral_table_region/multiview_left.png" width="220"></td>
@@ -112,7 +123,7 @@ Global latent spaces do not cluster cleanly by coarse semantic workspace categor
 
 ---
 
-## 4. Repository Layout
+## 📂 Repository Layout
 
 * [`dataset/`](./dataset): MuJoCo teleop logs, skeletal/DINOv3 prior extraction, and static probe generation.
 * [`lewm/`](./lewm): JEPA encoder/predictor training, goal gallery harvests, and the CEM latent planner.
@@ -121,7 +132,7 @@ Global latent spaces do not cluster cleanly by coarse semantic workspace categor
 
 ---
 
-## 5. Getting Started & Reproduction
+## ⚙️ Getting Started & Reproduction
 
 ```bash
 git clone --recursive https://github.com/vedpatwardhan/le-probe.git
@@ -137,7 +148,7 @@ See [`lewm/README.md`](./lewm/README.md) for CLI options.
 
 ---
 
-## 6. Resources & Precomputed Models
+## 📦 Resources & Precomputed Models
 
 ### Datasets
 * **Demonstrations (`gr1_pickup_grasp`):** [Google Drive](https://drive.google.com/drive/folders/1yYMT7J_eRkQmXDq3tcisNd4kRSWeTI40)
@@ -153,3 +164,16 @@ See [`lewm/README.md`](./lewm/README.md) for CLI options.
 | **MV + Skel + DINOv3** | [gr1_reward_tuned_v1.ckpt](https://drive.google.com/file/d/1Yt1Q60yvvDPPFE3JjICq48ocOycUALGT/view) | [goal_gallery.pth](https://drive.google.com/file/d/1jpApbuPUHIAb3Ae87VzFAvFBVhVZr3X6/view) | [manifold_data.pt](https://drive.google.com/file/d/1Xhc9kMDilG3TpBA8GdDFLF4l7oe4j3Wz/view) |
 
 *Transcoder weights are available in the [Transcoders Folder](https://drive.google.com/drive/folders/13Aw6iF1PfWqBR2CRh3A-wjqub6DP_Ty2).*
+
+---
+
+## 📝 Citation
+
+```bibtex
+@article{patwardhan2026leprobe,
+  title={Le-Probe: Latent Topology Audits of LeWorldModel Representations for Humanoid Manipulation},
+  author={Patwardhan, Ved},
+  journal={arXiv preprint arXiv:2606.12345},
+  year={2026}
+}
+```
