@@ -8,12 +8,14 @@ Our diagnostics inspect why latent Model-Predictive Control (MPC) search succeed
 
 ---
 
-## 1. What Le-Probe Does
+## 1. System Architecture & Representation Ladder
 
-Le-Probe is a **diagnostic workflow** over encoder latents. It audits representation topology and relates it to planning failures using two primary paradigms:
+To isolate how different inductive biases shape representations and affect planning, we evaluate four model variants (trained on a tabletop red-cube pickup task using 200 teleoperated GR-1 episodes, 5 camera views, ~6.4k frames) under a shared latent planner (CEM, horizon $H=4$):
 
-1. **Training Manifold Audits:** Visualizing and analyzing the global topology of representations harvested from training trajectories (using UMAP, t-SNE, and PCA).
-2. **Static Workspace Probes:** Evaluating 500 encode-only, out-of-distribution physical states generated inside the workspace polytope to test semantic partitioning (lateral location, distance to cube, and pose clusters).
+* **(a) Single-View RGB (Baseline):** The standard LeWorldModel mapping center-camera RGB to a 192-d embedding.
+* **(b) Multi-View RGB:** Shared encoder across 5 camera views (center, left, right, top, wrist) with late linear fusion.
+* **(c) Multi-View RGB + Skeletal Priors:** 4-channel input patch embeddings (RGB + skeletal lines) with perceptual shaping masking (10% skeleton-only, 5% counterpart-view masking).
+* **(d) Multi-View + Skeletal + DINOv3 Waypoints:** The same backbone supplemented with a parallel, training-only frozen DINOv3 pathway and subgoal head to anchor phase goals.
 
 <div align="center">
   <img src="assets/architecture_diagram.png" width="800" alt="Le-Probe Architecture Variants">
@@ -22,26 +24,56 @@ Le-Probe is a **diagnostic workflow** over encoder latents. It audits representa
 
 ---
 
-## 2. The Representation Ladder
+## 2. The Le-Probe Auditing Workflow
 
-We evaluate four checkpoints trained on the same tabletop red-cube pickup task (200 teleoperated GR-1 episodes in MuJoCo, 5 camera views, ~6.4k frames) under a shared latent planner (CEM, horizon $H=4$) to isolate the impact of representation design:
+Le-Probe is a **diagnostic workflow** over encoder latents. It does not modify encoder checkpoints, reward heads, or MPC planners. It audits representation topology and relates it to planning failures using two primary paradigms:
 
-* **(a) Single-View RGB (Baseline):** The standard LeWorldModel mapping center-camera RGB to a 192-d embedding.
-* **(b) Multi-View RGB:** Shared encoder across 5 camera views (center, left, right, top, wrist) with late linear fusion.
-* **(c) Multi-View RGB + Skeletal Priors:** 4-channel input patch embeddings (RGB + skeletal lines) with perceptual shaping masking (10% skeleton-only, 5% counterpart-view masking).
-* **(d) Multi-View + Skeletal + DINOv3 Waypoints:** The same backbone supplemented with a parallel, training-only frozen DINOv3 pathway and subgoal head to anchor phase goals.
+1. **Training Manifold Audits:** Visualizing and analyzing the global topology of representations harvested from training trajectories (using UMAP, t-SNE, and PCA).
+2. **Static Workspace Probes:** Evaluating 500 encode-only, out-of-distribution physical states generated inside the workspace polytope to test semantic partitioning (lateral location, distance to cube, and pose clusters).
 
 ---
 
 ## 3. Key Findings & Achievements
 
-Our evaluation reveals a nuanced picture of representation learning in joint-embedding world models:
+Our evaluation reveals a nuanced picture of representation learning in joint-embedding world models across four distinct findings:
 
-### Finding A: Trajectory Geometry vs. Control Quality
-* **Global Alignment:** As stronger inductive biases are added, the training-time manifold transitions from disconnected, episode-isolated "worms" to a unified, directional "early-to-late highway" (with the strongest global phase organization visible in the DINOv3-supervised variant).
-* **MPC Bottleneck:** Despite cleaner UMAP trajectory geometry, closed-loop latent MPC remains brittle during contact-rich phases (pinch and lift), indicating that improved global training topology does not automatically guarantee robust control.
+### Finding A: Trajectory Manifold Progression (t-SNE & UMAP)
+* **Global Alignment:** As stronger inductive biases are added, the training-time manifold transitions from disconnected, episode-isolated "worms" to a unified, directional "early-to-late highway". The DINOv3-supervised variant exhibits the clearest cross-episode phase organization.
 
 <div align="center">
+  <h4>Training-Trajectory Manifold Projections (t-SNE & UMAP)</h4>
+  <table>
+    <tr>
+      <th>Projection</th>
+      <th>Single-View RGB</th>
+      <th>Multi-View RGB</th>
+      <th>Skeletal Priors</th>
+      <th>DINOv3 Waypoints</th>
+    </tr>
+    <tr>
+      <td><b>t-SNE</b></td>
+      <td><img src="assets/manifold/manifold_3d_tsne.png" width="180" alt="Single-View RGB t-SNE"></td>
+      <td><img src="assets/manifold/manifold_3d_multiview_tsne.png" width="180" alt="Multi-View RGB t-SNE"></td>
+      <td><img src="assets/manifold/manifold_3d_multiview_skeleton_tsne.png" width="180" alt="Skeletal Priors t-SNE"></td>
+      <td><img src="assets/manifold/manifold_3d_multiview_skeleton_dino_2_tsne.png" width="180" alt="DINOv3 Waypoints t-SNE"></td>
+    </tr>
+    <tr>
+      <td><b>UMAP</b></td>
+      <td><img src="assets/manifold/manifold_3d_umap.png" width="180" alt="Single-View RGB UMAP"></td>
+      <td><img src="assets/manifold/manifold_3d_multiview_umap.png" width="180" alt="Multi-View RGB UMAP"></td>
+      <td><img src="assets/manifold/manifold_3d_multiview_skeleton_umap.png" width="180" alt="Skeletal Priors UMAP"></td>
+      <td><img src="assets/manifold/manifold_3d_multiview_skeleton_dino_2_umap.png" width="180" alt="DINOv3 Waypoints UMAP"></td>
+    </tr>
+  </table>
+  <p><em>The progression of training-rollout encoder latents from isolated episode "worms" to a unified, early-to-late phase highway under stronger inductive biases, analyzed across t-SNE and UMAP.</em></p>
+</div>
+
+### Finding B: Latent MPC and Closed-Loop Control
+* **MPC Bottleneck:** Despite cleaner UMAP trajectory geometry, closed-loop latent MPC remains brittle during contact-rich phases (pinch and lift), demonstrating that improved global training topology does not automatically guarantee robust control or success in simulation.
+* **Control Divergence:** Qualitatively, naive multi-view often exhibits the strongest early end-to-end behavior among non-DINOv3 runs, while DINOv3-waypoint variants show better manifold structure without consistently dominating simulation outcomes.
+
+<div align="center">
+  <h4>Latent MPC Rollouts in MuJoCo</h4>
   <table>
     <tr>
       <th>Single-View RGB</th>
@@ -58,8 +90,8 @@ Our evaluation reveals a nuanced picture of representation learning in joint-emb
   </table>
 </div>
 
-### Finding B: Categorical Partitioning Fails Globally
-When encoding 500 static poses inside the workspace hull, global embeddings fail to cluster cleanly by physical categories (e.g., table regions or distance bins). Silhouette scores in low-dimensional space remain near zero or negative across all models:
+### Finding C: Global Workspace Probes (Categorical Partitioning Fails)
+* **Separation Failure:** When encoding 500 static poses inside the workspace hull, global embeddings fail to cluster cleanly by physical categories (e.g., table regions or distance bins). Silhouette scores in low-dimensional space remain near zero or negative across all models, indicating that coarse workspace semantics do not map directly to linearly or locally separable regions in the learned latent space.
 
 | Checkpoint Variant | Lateral Region Score | Distance Bin Score | Pose Cluster Score |
 | :--- | :---: | :---: | :---: |
@@ -68,10 +100,26 @@ When encoding 500 static poses inside the workspace hull, global embeddings fail
 | **Multi-View RGB + Skeletal Priors** | -0.033 | -0.068 | -0.039 |
 | **Multi-View RGB + Skeletal + DINOv3** | -0.013 | -0.061 | -0.044 |
 
-### Finding C: Local Sparse Features Retain Structure
-While global clustering is poor, applying **Cross-Layer Transcoders (CLTs)** and **Integrated Gradients (IG)** to the static probes reveals checkpoint-dependent local circuits:
-* Positive local feature Jaccard separation margins (0.12–0.34) exist across all checkpoints.
-* Naive multi-view displays the sharpest lateral and distance circuit splits (only 3/15 and 5/15 node overlap between contrasting conditions), whereas DINOv3-waypoint models form more homogeneous local attribution circuits.
+### Finding D: Mechanistic Interpretability & Local Attribution Circuits
+* **Local Sparse Features:** Applying **Cross-Layer Transcoders (CLTs)** to the static probes reveals positive local feature Jaccard separation margins (0.12–0.34) across all checkpoints, indicating that coarse workspace labels weakly organize sparse local features even when global silhouettes are near zero.
+* **Integrated Gradient (IG) Overlap:** Backward IG tracing shows label-dependent local circuit splits. Naive multi-view exhibits the sharpest lateral and distance splits (only 3/15 and 5/15 node overlap between contrasting conditions), whereas DINOv3-waypoint models form more homogeneous and similar local attribution circuits (11-14/15 overlap).
+
+<div align="center">
+  <h4>Precomputed Integrated Gradient (IG) Attribution Circuits (≤15 pinned nodes)</h4>
+  <table>
+    <tr>
+      <td align="center"><b>Multi-View (Lateral Left)</b><br><img src="assets/circuits/lateral_table_region/multiview_left.png" width="240" alt="Multi-view lateral left circuit"></td>
+      <td align="center"><b>Skeletal (Lateral Left)</b><br><img src="assets/circuits/lateral_table_region/skeleton_left.png" width="240" alt="Skeletal lateral left circuit"></td>
+      <td align="center"><b>DINOv3 (Lateral Left)</b><br><img src="assets/circuits/lateral_table_region/dino_left.png" width="240" alt="DINO lateral left circuit"></td>
+    </tr>
+    <tr>
+      <td align="center"><b>Multi-View (Approach)</b><br><img src="assets/circuits/distance_to_cube/multiview_approach.png" width="240" alt="Multi-view distance approach circuit"></td>
+      <td align="center"><b>Multi-View (Near Table)</b><br><img src="assets/circuits/distance_to_cube/multiview_near_table.png" width="240" alt="Multi-view distance near table circuit"></td>
+      <td align="center"><b>Skeletal (Pose Cluster 2)</b><br><img src="assets/circuits/pose_clusters/skeleton_pose_2.png" width="240" alt="Skeletal pose cluster 2 circuit"></td>
+    </tr>
+  </table>
+  <p><em>Top row: lateral-left circuits across checkpoints (sharpest split under multi-view). Bottom row: Multi-View distance bin circuits and Skeletal pose cluster circuit.</em></p>
+</div>
 
 ---
 
