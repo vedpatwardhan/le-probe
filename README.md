@@ -26,6 +26,11 @@ We evaluate four model variants under a shared latent planner (CEM, horizon $H=4
   <img src="assets/architecture_diagram.png" width="750" alt="Le-Probe V1 Architecture Variants">
 </div>
 
+<div align="center">
+  <h4>V2 Architecture (WIP 🚧)</h4>
+  <img src="assets/Le-Probe-V2.png" width="800" alt="Le-Probe V2 Architecture">
+</div>
+
 ---
 
 ## 🔬 The Le-Probe Auditing Workflow
