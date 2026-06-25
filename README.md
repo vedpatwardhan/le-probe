@@ -10,6 +10,24 @@
 
 **Le-Probe** is a diagnostic workflow that audits encoder latent topology to analyze why latent Model-Predictive Control (MPC) succeeds or fails on a 32-DoF humanoid cube-pickup task. We evaluate how visual, kinematic, and subgoal inductive biases reshape Joint-Embedding Predictive Architectures (specifically [LeWorldModel](https://arxiv.org/abs/2603.19312)).
 
+<div align="center">
+  <h4>Latent MPC Rollouts in MuJoCo</h4>
+  <table>
+    <tr>
+      <th>Single-View RGB</th>
+      <th>Multi-View RGB</th>
+      <th>Skeletal Priors</th>
+      <th>DINOv3 Waypoints</th>
+    </tr>
+    <tr>
+      <td><img src="assets/lewm_grasp.gif" width="160"></td>
+      <td><img src="assets/lewm_grasp_multiview.gif" width="160"></td>
+      <td><img src="assets/lewm_grasp_multiview_skeleton.gif" width="160"></td>
+      <td><img src="assets/lewm_grasp_multiview_skeleton_dino.gif" width="160"></td>
+    </tr>
+  </table>
+</div>
+
 ---
 
 ## 🛠️ System Architecture & Representation Ladder
@@ -78,24 +96,6 @@ Cleaner global trajectory manifolds do not automatically guarantee control succe
 
 > [!IMPORTANT]
 > **Key Insight:** Reshaping latent geometry (worms → highway) does not automatically resolve closed-loop contact sensitivity, showing that representation audits must be paired with planning-level metrics.
-
-<div align="center">
-  <h4>Latent MPC Rollouts in MuJoCo</h4>
-  <table>
-    <tr>
-      <th>Single-View RGB</th>
-      <th>Multi-View RGB</th>
-      <th>Skeletal Priors</th>
-      <th>DINOv3 Waypoints</th>
-    </tr>
-    <tr>
-      <td><img src="assets/lewm_grasp.gif" width="160"></td>
-      <td><img src="assets/lewm_grasp_multiview.gif" width="160"></td>
-      <td><img src="assets/lewm_grasp_multiview_skeleton.gif" width="160"></td>
-      <td><img src="assets/lewm_grasp_multiview_skeleton_dino.gif" width="160"></td>
-    </tr>
-  </table>
-</div>
 
 ### Finding C: Global Workspace Probes (Separation Fails)
 Global latent spaces do not cluster cleanly by coarse semantic workspace categories (Silhouette scores remain near zero or negative).
