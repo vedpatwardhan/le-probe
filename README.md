@@ -5,8 +5,7 @@
 [![Simulation](https://img.shields.io/badge/Simulation-MuJoCo-orange)](https://mujoco.org)
 [![Visualization](https://img.shields.io/badge/Visualization-Rerun-blueviolet)](https://rerun.io)
 
-📄 **CoRL 2026 Submission Preprint:** [Read the Paper (Google Drive)](https://drive.google.com/file/d/1-LUV945XR-FT33T3r6ZK4z1ag9cPRhd_/view?usp=drive_link)
-*(Currently under review.)*
+📄 [Paper (Google Drive)](https://drive.google.com/file/d/1-LUV945XR-FT33T3r6ZK4z1ag9cPRhd_/view?usp=drive_link)
 
 **Le-Probe** is a diagnostic workflow that audits encoder latent topology to analyze why latent Model-Predictive Control (MPC) succeeds or fails on a 32-DoF humanoid cube-pickup task. We evaluate how visual, kinematic, and subgoal inductive biases reshape Joint-Embedding Predictive Architectures (specifically [LeWorldModel](https://arxiv.org/abs/2603.19312)).
 
